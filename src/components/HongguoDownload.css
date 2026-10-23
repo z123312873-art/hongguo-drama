@@ -34,7 +34,7 @@
 .episode-title { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .search-loading { display: flex; gap: 10px; align-items: center; padding: 36px 0; color: var(--text-secondary); }
 .search-count { margin: 26px 0 14px; font-size: 12px; color: var(--text-secondary); }
-.search-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.search-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ui-scale, 1)), 1fr)); gap: 12px; }
 .search-card { display: flex; text-align: left; align-items: center; gap: 14px; padding: 12px; border: 0; border-radius: 10px; background: var(--bg-canvas); }
 .search-card:hover { background: var(--bg-inset); }
 .search-card.picking { background: var(--accent-soft); }

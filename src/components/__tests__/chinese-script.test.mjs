@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import { matchesText, toTraditional } from '../../chineseScript.mjs';
 import { convertConfig } from '../../script-jsx/convert.mjs';
@@ -77,4 +78,10 @@ test('wide windows scale continuously and the default window does not', () => {
   assert.equal(uiScale(undefined), 1);
   const samples = [1400, 1600, 2200, 3000];
   for (let i = 1; i < samples.length; i++) assert.ok(uiScale(samples[i]) > uiScale(samples[i - 1]));
+  const layout = fs.readFileSync(new URL('../../index.css', import.meta.url), 'utf8').match(/\.app-layout\s*\{[^}]+\}/)[0];
+  assert.match(layout, /height:\s*100vh/);
+  assert.doesNotMatch(layout, /zoom\s*:/);
+  assert.doesNotMatch(layout, /100%\s*\/\s*var\(--ui-scale\)/);
+  const posters = fs.readFileSync(new URL('../Browse.css', import.meta.url), 'utf8');
+  assert.match(posters, /minmax\(calc\(150px \* var\(--ui-scale, 1\)\), 1fr\)/);
 });
