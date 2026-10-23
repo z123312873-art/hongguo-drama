@@ -97,7 +97,7 @@ function SettingsPage({ active = true, preview = false }) {
     try {
       // Playback options may change while this retained settings page is hidden.
       const current = await window.electronAPI.getSettings();
-      const editable = ['root', 'name_format', 'download_quality', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'app_updates_enabled'];
+      const editable = ['root', 'name_format', 'download_quality', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled'];
       const submitted = { ...current };
       for (const key of editable) if (Object.hasOwn(next, key)) submitted[key] = next[key];
       if (isProxy) submitted.clear_proxy_password = next.clear_proxy_password === true && !String(next.proxy_password || '');
@@ -293,19 +293,10 @@ function SettingsPage({ active = true, preview = false }) {
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_notifications_enabled === true} onChange={event => update('watch_notifications_enabled', event.target.checked)} /><span className="proxy-switch-text">发送系统通知<em>默认关闭。开启后还需允许 macOS 通知；关闭不影响观看记录红点</em></span></label>
         </div>
 
-        {preview ? <>
-        <div className="settings-group">
+        {preview && <div className="settings-group">
           <span className="settings-label">独立预览</span>
           <p className="settings-hint">预览数据独立保存，不接收正式版更新，不会覆盖已安装的红果短剧。</p>
-        </div>
-        </> : <>
-        <div className="settings-group">
-          <span className="settings-label">检测更新</span>
-          <label className="proxy-switch-row"><input type="checkbox" aria-label="自动检测更新" checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">自动检测更新<em>启动时及运行期间每 6 小时检查正式新版。保存后生效；下载和重启安装都由你点击确认。</em></span></label>
-          <button type="button" className="btn btn-outline" disabled={settings.app_updates_enabled === false} onClick={() => window.dispatchEvent(new CustomEvent('hongguo-check-app-update'))}><RefreshCw size={15} />检查更新</button>
-          <p className="settings-hint">可重新打开已关闭的更新提醒、查看下载进度或安装已下载的新版。关闭检测后需重新开启并保存。</p>
-        </div>
-        </>}
+        </div>}
 
         <div className="settings-footer">
           {dirty && <span className="settings-hint" role="status">有未保存的修改</span>}

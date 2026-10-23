@@ -22,6 +22,8 @@ vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
 require('./fixtures/trusted-ipc.cjs')(context,handlers);
 const run = code => vm.runInContext(code,context);
 (async()=>{
+  run('appUpdateChecksEnabled = true');
+  settings.app_updates_enabled = true;
   run("latestAppRelease = {version:'2.0'}");
   const result = await handlers['download-app-update']({});
   assert.equal(result.success,true, 'in-app download must initialize the updater network session');

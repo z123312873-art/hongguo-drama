@@ -11,7 +11,6 @@ import { initializeTheme } from './theme';
 import { getScriptPreference, setScriptPreference, subscribeScript } from './scriptPreference.js';
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
-import AppUpdateNotice from './components/AppUpdateNotice';
 import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
 
@@ -154,7 +153,7 @@ export default function App() {
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
             <Settings size={19} /><span>设置</span>
           </button>
-          <div className="footer-note"><span>{appInfo?.preview ? '功能预览' : '红果短剧'}</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
+          <div className="footer-note"><span>{appInfo?.preview ? '功能预览' : '红果短剧(Tanney)'}</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
         </div>
       </aside>
       <div className="main-wrapper">
@@ -203,7 +202,6 @@ export default function App() {
               onClick={() => navigate(item.id)} title={item.label}><Icon size={18} /><span>{item.label}</span></button>;
           })}
         </nav>
-        {!appInfo?.preview && <AppUpdateNotice />}
         {stealthMode && <div className="stealth-toolbar"><span>移开暂停隐藏 · 移回继续</span><button className="btn btn-outline btn-sm" onClick={() => toggleStealth(false)}>退出小窗</button></div>}
         {stealthError && <div className="app-storage-error" role="alert">{stealthError}</div>}
         {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>关闭提示</button></div>}

@@ -200,7 +200,7 @@ function getDefaultSettings() {
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
     cache_next_episode: true,
-    app_updates_enabled: !IS_PREVIEW,
+    app_updates_enabled: false,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
     watch_notifications_enabled: false,
@@ -3109,6 +3109,15 @@ async function refreshWatchHistory(force = false) {
 
 ipcMain.handle('get-watch-history', async () => ({ success: true, results: historyRows() }));
 ipcMain.handle('refresh-watch-history', async () => refreshWatchHistory(true));
+ipcMain.handle('delete-watch-history', async (_event, seriesId) => {
+  try {
+    const map = store.getPlayback();
+    if (!watchHistory.forgetPlayback(map, seriesId)) return { success: false, error: '这部剧不在观看记录中' };
+    store.savePlayback(map);
+    sendToRenderer('watch-history-updated', {});
+    return { success: true };
+  } catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
+});
 ipcMain.handle('acknowledge-watch-updates', async (_event, seriesId, snapshot) => {
   try {
     const map = store.getPlayback();
@@ -3688,6 +3697,12 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   return { success: false, error: '文件夹不存在' };
 });
 
+// Fork builds never contact upstream for app updates. The checker below stays for tests.
+let appUpdateChecksEnabled = false;
+function appUpdatesAllowed() {
+  return appUpdateChecksEnabled === true && !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false;
+}
+
 // ===== 应用内更新：固定官方源，下载和重启均由用户确认 =====
 let updateRequest = null;
 let latestAppRelease = null;
@@ -3712,7 +3727,7 @@ function getAppUpdateInstaller() {
     appUpdateInstaller = require('./src/native/app-update-installer').createUpdateInstaller({
       updater: appUpdater,
       currentVersion: APP_VERSION,
-      isEnabled: () => !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false,
+      isEnabled: () => appUpdatesAllowed(),
       installBlocker: () => {
         if (pendingUpdateOperations) return '正在处理任务或保存设置，请稍后再安装更新。';
         if (downloadRuns.size || downloadQueue.length || sourceRetryTimers.size) return '还有下载或等待重试的任务，请先在下载管理中暂停全部任务，再安装更新。';
@@ -3729,7 +3744,7 @@ ipcMain.handle('get-app-update-state', () => appUpdateState());
 ipcMain.handle('download-app-update', async () => {
   const support = appUpdateSupport();
   if (!support.supported) return { success: false, error: support.reason };
-  if (!latestAppRelease || getCurrentSettings().app_updates_enabled === false) return { success: false, error: '更新信息已失效，请重新检查更新。' };
+  if (!latestAppRelease || !appUpdatesAllowed()) return { success: false, error: '更新信息已失效，请重新检查更新。' };
   try {
     const request = updateDownloadGeneration;
     const installer = getAppUpdateInstaller();
@@ -3753,7 +3768,7 @@ ipcMain.handle('install-app-update', () => {
 });
 ipcMain.handle('check-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
-  if (getCurrentSettings().app_updates_enabled === false) {
+  if (!appUpdatesAllowed()) {
     latestAppRelease = null;
     return { enabled: false, release: null };
   }
@@ -3776,12 +3791,12 @@ ipcMain.handle('check-app-update', async event => {
       .finally(() => { updateRequest = null; });
   }
   const result = await updateRequest;
-  const enabled = getCurrentSettings().app_updates_enabled !== false;
+  const enabled = appUpdatesAllowed();
   latestAppRelease = enabled ? result.release : null;
   return { enabled, release: latestAppRelease, error: enabled ? result.error : '' };
 });
 ipcMain.handle('open-app-update', async event => {
-  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || getCurrentSettings().app_updates_enabled === false) {
+  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || !appUpdatesAllowed()) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
   try { await shell.openExternal(latestAppRelease?.url || 'https://github.com/jackotom/hongguo-drama/releases/latest'); return { success: true }; }
