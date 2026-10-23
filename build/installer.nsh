@@ -35,9 +35,6 @@
       StrCpy $INSTDIR "C:\hongguo"
       Return
     ${EndIf}
-    ${StrContains} $0 "${APP_FILENAME}" $INSTDIR
-    ${If} $0 == ""
-      StrCpy $INSTDIR "$INSTDIR\${APP_FILENAME}"
-    ${EndIf}
+    Call instFilesPre
   FunctionEnd
 !macroend
