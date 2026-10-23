@@ -106,6 +106,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const selectionVersion = useRef(0);
   const onlineRequestRef = useRef(null);
   const prefetchRef = useRef(null);
+  const queueNextPrefetchRef = useRef(() => {});
   const mediaVersion = useRef(0);
   const compatRequestRef = useRef(null);
   const decodeTimer = useRef(null);
@@ -674,6 +675,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
       const prefetched = !force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId && prefetchRef.current?.quality === quality ? prefetchRef.current : null;
       if (prefetched) prefetchRef.current = null;
+      const ready = prefetched?.result?.success ? prefetched.result : null;
       resetPlayback(autoplay);
       setCompatMap(prev => { const next = { ...prev }; delete next[vidIndex]; return next; });
       const request = prefetched || { requestId: crypto.randomUUID(), vid: ep.vid };
@@ -681,8 +683,19 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       pendingSeekRef.current = seekTo;
       setCurrentIndex(vidIndex);
       setWaitingFor(null);
-      setOnlineProgress({ vid: ep.vid, percent: 0, phase: 'preparing' });
       setOnlineVid(ep.vid);
+      const usePrepared = (res) => {
+        request.streamId = res.streamId;
+        request.prepared = true;
+        setMediaBuffering(true);
+        setOnlineUrl(res.url);
+        setOnlineProgress(null);
+        refreshOnlineCacheInfo();
+        queueNextPrefetchRef.current(vidIndex);
+      };
+      // A finished prefetch swaps the source in this same update, so the next episode does not drop to the preparing screen.
+      if (ready) { usePrepared(ready); return; }
+      setOnlineProgress({ vid: ep.vid, percent: 0, phase: 'preparing' });
       setOnlineUrl('');
       try {
         let res = prefetched ? await prefetched.promise : null;
@@ -704,13 +717,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           await recoverOnlineFailure(ep, (res && res.error) || '在线播放准备失败');
           return;
         }
-        request.streamId = res.streamId;
-        request.prepared = true;
-        setMediaBuffering(true);
-        setOnlineUrl(res.url);
-        setOnlineProgress(null);
-        // Playback cache changes do not need a synchronous scan of all download directories.
-        refreshOnlineCacheInfo();
+        usePrepared(res);
       } catch (e) {
         if (onlineRequestRef.current !== request) return;
         await recoverOnlineFailure(ep, '在线播放失败: ' + e.message);
@@ -795,23 +802,30 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     [episodes]
   );
 
-  const prepareNextEpisode = (event) => {
-    const video = event.currentTarget;
-    const media = loadedMediaRef.current;
-    if (!cacheNext || !canPlay || video.paused || !media?.played || media.version !== mediaVersion.current
-      || media.element !== video || (video.currentSrc && video.currentSrc !== videoSrc)) return;
-    const next = findNext(currentIndex);
+  queueNextPrefetchRef.current = (fromIndex) => {
+    if (!cacheNext) return;
+    const next = findNext(fromIndex);
     if (!next?.vid || usableLocal(next, String(activeSeriesId)) || prefetchRef.current) return;
-    const request = { requestId: crypto.randomUUID(), vid: next.vid, seriesId: activeSeriesId, vidIndex: next.vid_index, quality: onlineQuality };
+    const quality = stateRef.current.onlineQuality;
+    const request = { requestId: crypto.randomUUID(), vid: next.vid, seriesId: activeSeriesId, vidIndex: next.vid_index, quality };
     prefetchRef.current = request;
     request.promise = window.electronAPI.prepareOnlinePlay({ ...request, prefetch: true })
       .catch(error => ({ success: false, error: error.message }))
       .then(result => {
+        request.result = result;
         if (prefetchRef.current !== request && onlineRequestRef.current !== request) {
           window.electronAPI.releaseOnlinePlay({ requestId: request.requestId, streamId: result?.streamId }).catch(() => {});
         } else if (prefetchRef.current === request) refreshOnlineCacheInfo();
         return result;
       });
+  };
+
+  const prepareNextEpisode = (event) => {
+    const video = event.currentTarget;
+    const media = loadedMediaRef.current;
+    if (!cacheNext || !canPlay || video.paused || !media?.played || media.version !== mediaVersion.current
+      || media.element !== video || (video.currentSrc && video.currentSrc !== videoSrc)) return;
+    queueNextPrefetchRef.current(currentIndex);
   };
 
   // 播放结束 -> 连播（未下载的集自动转在线播放，做到「不下载也能连着看」）

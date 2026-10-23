@@ -105,6 +105,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "selectPerMachineByDefault": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "红果短剧下载器",
