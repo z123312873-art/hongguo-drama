@@ -6,28 +6,31 @@ import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search } from './icons';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
-import { pagesToFill, posterSlots, sourcePageWindow } from '../catalogFill.mjs';
+import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
 import { uiScale } from '../uiScale.mjs';
 
 const pageCache = new Map();
 const PAGE_CACHE_TTL_MS = 60_000;
 const LIST_TIMEOUT_MS = 25_000;
 
-function readPosterSlots() {
+// Window size only. The live grid's top moves when genre chips, skeletons, or
+// scrolling appear, and that was flipping a full window between one and two source pages.
+function readPosterCapacity() {
   try {
     const width = window.innerWidth;
-    if (!Number.isFinite(width) || width <= 0) return 0;
+    if (!Number.isFinite(width) || width <= 0) return { slots: 0, columns: 0 };
     const scale = uiScale(width);
-    const grid = document.querySelector?.('.browse-grid, .poster-skeletons');
-    if (grid && grid.clientWidth >= 150) {
-      const height = window.innerHeight - grid.getBoundingClientRect().top - 28;
-      if (height > 120) return posterSlots({ width: grid.clientWidth, height, minCard: 150 * scale });
-    }
+    const minCard = 150 * scale;
     const sidebar = document.querySelector?.('.sidebar');
     const sidebarWidth = sidebar && getComputedStyle(sidebar).display !== 'none' ? sidebar.getBoundingClientRect().width : 0;
-    return posterSlots({ width: width - sidebarWidth - 72, height: window.innerHeight - 300, minCard: 150 * scale });
+    const boxWidth = Math.max(0, width - sidebarWidth - 72);
+    const boxHeight = Math.max(0, window.innerHeight - 300);
+    return {
+      slots: posterSlots({ width: boxWidth, height: boxHeight, minCard }),
+      columns: posterColumns({ width: boxWidth, minCard }),
+    };
   } catch {
-    return 0;
+    return { slots: 0, columns: 0 };
   }
 }
 
@@ -68,6 +71,7 @@ function Browse({ onNavigate, active = true }) {
   const listTimer = useRef(null);
   const toastTimer = useRef(null);
   const pageSpan = useRef(1);
+  const spanWidth = useRef(0);
 
   const invalidateList = useCallback(() => {
     listRequest.current++;
@@ -132,7 +136,8 @@ function Browse({ onNavigate, active = true }) {
     async (cat, gen, pg, forceRefresh = false) => {
       invalidateList();
       const request = listRequest.current;
-      const slots = readPosterSlots();
+      const capacity = readPosterCapacity();
+      const slots = cushionedSlots(capacity.slots, capacity.columns);
       const key = JSON.stringify([sourceRevision, source, cat, gen, pg, slots, pageSpan.current]);
       const cached = pageCache.get(key);
       const fallbackUrl = source === 'hongguo'
@@ -161,7 +166,15 @@ function Browse({ onNavigate, active = true }) {
         if (!res?.success) throw new Error(res?.error || '来源暂时不可用');
         const firstResults = Array.isArray(res.results) ? res.results : [];
         const reportedPages = Number(res.totalPages) || 0;
-        if (pg === 1) pageSpan.current = reportedPages >= 2 ? pagesToFill(slots, firstResults.length, reportedPages) : 1;
+        if (pg === 1 && reportedPages >= 2 && slots > 0) {
+          const nextSpan = pagesToFill(slots, firstResults.length, reportedPages);
+          const width = window.innerWidth || 0;
+          // Refresh uses the same window and must not drop back to a short page.
+          pageSpan.current = sameCatalogWindow(spanWidth.current, width) ? Math.max(pageSpan.current, nextSpan) : nextSpan;
+          spanWidth.current = width;
+        } else if (pg === 1 && reportedPages < 2) {
+          pageSpan.current = 1;
+        }
         const windowed = reportedPages >= 2 ? sourcePageWindow(pg, pageSpan.current, reportedPages) : { start: pg, count: 1, uiPages: reportedPages };
         let combined = firstResults.slice();
         const seen = new Set(combined.map(item => item?.series_id).filter(Boolean));
@@ -215,6 +228,7 @@ function Browse({ onNavigate, active = true }) {
 
   useEffect(() => {
     invalidateList(); closeDetail(); pageCache.clear();
+    pageSpan.current = 1; spanWidth.current = 0;
     setGenre(''); setPage(1); setResults([]); setMeta({ total: 0, totalPages: 0, genres: [] });
     if (!mediaSources.some(item => item.id === source)) { setSource('hongguo'); setCategory('real-drama'); }
   }, [sourceRevision, mediaSources, invalidateList, closeDetail]);
@@ -232,10 +246,12 @@ function Browse({ onNavigate, active = true }) {
       timer = setTimeout(() => {
         const perPage = Math.max(1, Math.round(results.length / pageSpan.current));
         const sourcePages = Math.max(1, (meta.totalPages || 1) * pageSpan.current);
-        const next = pagesToFill(readPosterSlots(), perPage, sourcePages);
+        const capacity = readPosterCapacity();
+        const next = pagesToFill(cushionedSlots(capacity.slots, capacity.columns), perPage, sourcePages);
         if (next > pageSpan.current) loadList(category, genre, 1, false);
       }, 300);
     };
+    onResize();
     window.addEventListener?.('resize', onResize);
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
   }, [active, page, results.length, category, genre, loadList, meta.totalPages]);
@@ -252,6 +268,8 @@ function Browse({ onNavigate, active = true }) {
     setMeta({ total: 0, totalPages: 0, genres: [] });
     setSourceUrl('');
     setError('');
+    pageSpan.current = 1;
+    spanWidth.current = 0;
   };
 
   const switchCategory = (slug) => {
@@ -314,8 +332,7 @@ function Browse({ onNavigate, active = true }) {
         fileUrl: statusMap[ep.vid_index] ? statusMap[ep.vid_index].fileUrl : null,
       }));
       setDetail({ ...data, episodes, completedCount: episodes.filter((e) => e.status === 'completed').length });
-      // 默认全选未下载的
-      setSelectedIdx(new Set(episodes.filter((e) => !e.locked && e.status !== 'completed').map((e) => e.vid_index)));
+      // 打开详情只准备在线播放。下载必须由用户勾选集数后另行确认。
     } catch (e) {
       if (request === detailRequest.current) showToast('打开失败: ' + e.message, 'error');
     } finally {
@@ -592,7 +609,7 @@ function Browse({ onNavigate, active = true }) {
                         <div className="browse-drawer-sub">网页源提供前 {detail.web_accessible_episodes} 集，后续集数自动尝试 App 片源。</div>
                       )}
                       {detail.episodes.some((ep) => ep.locked) && <div className="browse-drawer-sub">标记“锁定”的集数需在来源平台解锁，本应用不提供解锁。</div>}
-                      <div className="browse-drawer-sub">选中 {selectedIdx.size} 集待下载</div>
+                      <div className="browse-drawer-sub">{selectedIdx.size === 0 ? '立即播放会在线观看，不会下载。要保存到电脑，请先勾选集数。' : `已勾选 ${selectedIdx.size} 集。只有点「下载选中」才会下载。`}</div>
                       <div className="browse-range-row">
                         <input
                           type="text"
@@ -635,15 +652,16 @@ function Browse({ onNavigate, active = true }) {
                 </div>
 
                 <div className="browse-drawer-foot">
-                  <button className="btn btn-outline" disabled={!detail.episodes.some((ep) => !ep.locked)} onClick={playNow}>
+                  <button className="btn btn-primary" disabled={!detail.episodes.some((ep) => !ep.locked)} onClick={playNow} title="在线播放，不会下载到电脑">
                     <Play size={15} />
                     立即播放
                   </button>
                   <div className="browse-foot-right">
                     <button
-                      className="btn btn-primary"
+                      className="btn btn-outline"
                       disabled={submitting || selectedIdx.size === 0}
                       onClick={downloadSelected}
+                      title={selectedIdx.size === 0 ? '请先勾选要下载的集数' : '下载勾选的集数到电脑'}
                     >
                       <Download size={15} />
                       下载选中 ({selectedIdx.size})

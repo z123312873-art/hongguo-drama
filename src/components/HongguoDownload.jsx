@@ -64,8 +64,8 @@ function HongguoDownload({ onNavigate, active = true }) {
     setErrorMsg('');
     setTab('input');
     setSeriesData(data);
-    setSelectedVids(new Set(data.episodes.filter((ep) => !ep.locked).map((ep) => ep.vid)));
-    setSuccessMsg(`已选中《${data.series_title}》共 ${data.total} 集，可直接播放或提交下载`);
+    setSelectedVids(new Set());
+    setSuccessMsg(`已打开《${data.series_title}》共 ${data.total} 集。立即播放为在线观看；要下载请先勾选集数`);
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -91,10 +91,8 @@ function HongguoDownload({ onNavigate, active = true }) {
       if (request !== resolveRequest.current) return;
       if (res?.success && res.data) {
         setSeriesData(res.data);
-        // 默认全选，网页未提供的集数自动尝试 App 片源。
-        const allVids = new Set(res.data.episodes.filter((ep) => !ep.locked).map((ep) => ep.vid));
-        setSelectedVids(allVids);
-        setSuccessMsg(`解析成功！找到《${res.data.series_title}》共 ${res.data.total} 集`);
+        setSelectedVids(new Set());
+        setSuccessMsg(`解析成功！找到《${res.data.series_title}》共 ${res.data.total} 集。立即播放为在线观看；要下载请先勾选集数`);
       } else {
         setErrorMsg(res?.error || '解析失败，请检查链接或网络');
       }
@@ -331,9 +329,9 @@ function HongguoDownload({ onNavigate, active = true }) {
             </div>
 
             <div className="batch-action-bar">
-              <button className="btn btn-outline" onClick={handlePlay}
+              <button className="btn btn-primary" onClick={handlePlay}
                 disabled={openingPlayer || !firstPlayable}
-                title={firstPlayable ? '在我的剧库播放，未下载的分集会在线播放' : '当前剧集没有可播放的分集'}>
+                title={firstPlayable ? '在线播放，不会下载到电脑' : '当前剧集没有可播放的分集'}>
                 {openingPlayer ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
                 <span>{openingPlayer ? '正在打开…' : '立即播放'}</span>
               </button>
@@ -348,9 +346,10 @@ function HongguoDownload({ onNavigate, active = true }) {
                 </select>
               </label>
               <button
-                className="btn btn-primary"
+                className="btn btn-outline"
                 onClick={handleBatchDownload}
                 disabled={qualityLoading || submitting || selectedVids.size === 0}
+                title={selectedVids.size === 0 ? '请先勾选要下载的集数' : '下载勾选的集数到电脑'}
               >
                 <Download size={16} />
                 <span>下载选中集数 ({selectedVids.size}/{seriesData.total})</span>
@@ -365,6 +364,7 @@ function HongguoDownload({ onNavigate, active = true }) {
           </div>
 
           <p className="settings-hint batch-quality-hint" id="batch-quality-hint">新建下载任务生效；所选清晰度不可用时提示，不自动降级。已有文件不自动删除或覆盖。</p>
+          <p className="settings-hint">{selectedVids.size === 0 ? '立即播放会在线观看，不会下载。要保存到电脑，请先勾选集数。' : `已勾选 ${selectedVids.size} 集。只有点「下载选中集数」才会下载。`}</p>
 
           {seriesData.web_accessible_episodes != null && seriesData.web_accessible_episodes < seriesData.total && (
             <p className="settings-hint">网页源提供前 {seriesData.web_accessible_episodes} 集，后续集数自动尝试 App 片源。</p>

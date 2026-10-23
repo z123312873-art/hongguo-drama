@@ -117,9 +117,10 @@ if (require.main === module) (async () => {
   await test('online unsupported-source error reconnects once without decoder certainty or automatic transcode', async () => {
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } }); await ui.flush();
     ui.error(4); await ui.flush();
-    assert.equal(ui.prepares.length, 2); assert.equal(ui.prepares[1].force, true);
+    assert.equal(ui.prepares.filter(p => p.force).length, 1, 'unavailable source reconnects once');
+    assert.ok(ui.prepares.some(p => p.prefetch), 'the following episode is prepared while this one plays');
     ui.error(4); await ui.flush();
-    assert.equal(ui.prepares.length, 2, 'reconnect must remain bounded');
+    assert.equal(ui.prepares.filter(p => p.force).length, 1, 'reconnect must remain bounded');
     assert.equal(ui.transcodes.length, 0, 'unavailable source is not proof of codec failure');
     assert.ok(!ui.find(n => n.type === 'p' && n.children.includes('当前片源无法正常解码')));
     assert.ok(ui.button('重新连接片源')); assert.ok(ui.button('转码后播放'), 'manual fallback remains available');

@@ -139,7 +139,8 @@ test('oversized prepare and protocol errors remain visible while automatic downl
   } });
   try {
     await streaming.flush();
-    progress({ ...tooLarge, requestId: streaming.prepares.at(-1).requestId }); await streaming.flush();
+    const playing = streaming.prepares.find(p => !p.prefetch);
+    progress({ ...tooLarge, requestId: playing.requestId }); await streaming.flush();
     assert.match(text(streaming.find(n => n.props.className?.includes('dm-toast'))), /本集过大，请下载后播放/);
   } finally { streaming.unmount(); }
 });

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { matchesText, toTraditional } from '../../chineseScript.mjs';
 import { convertConfig } from '../../script-jsx/convert.mjs';
 import { uiScale } from '../../uiScale.mjs';
-import { pagesToFill, posterSlots, sourcePageWindow } from '../../catalogFill.mjs';
+import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../../catalogFill.mjs';
 import { fontChoice, getFontChoice, setFontChoice } from '../../fontScale.mjs';
 
 test('traditional display keeps ambiguous senses and stays stable', () => {
@@ -90,11 +90,23 @@ test('wide windows scale continuously and the default window does not', () => {
 
 test('catalog pages grow only when the window can show more than one source page', () => {
   const narrow = posterSlots({ width: 814, height: 450, minCard: 150 });
+  const narrowColumns = posterColumns({ width: 814, minCard: 150 });
   assert.ok(narrow > 0 && narrow < 20);
   assert.equal(pagesToFill(narrow, 20, 5), 1);
+  assert.equal(pagesToFill(cushionedSlots(narrow, narrowColumns), 20, 5), 1, 'default window keeps a single source page');
   const wide = posterSlots({ width: 2274, height: 1140, minCard: 165 });
+  const wideColumns = posterColumns({ width: 2274, minCard: 165 });
   assert.ok(wide > 20);
   assert.equal(pagesToFill(wide, 20, 5), 2);
+  const filled = pagesToFill(cushionedSlots(wide, wideColumns), 20, 8);
+  assert.ok(filled >= 2 && filled <= 4);
+  assert.equal(cushionedSlots(0, wideColumns), 0);
+  assert.equal(cushionedSlots(18, 9) > 20, true, 'one extra row pulls the next source page when a window is almost full');
+  assert.equal(sameCatalogWindow(2560, 2550), true);
+  assert.equal(sameCatalogWindow(1100, 2560), false);
+  assert.equal(sameCatalogWindow(0, 2560), false);
+  const browse = fs.readFileSync(new URL('../Browse.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(browse, /browse-grid, \.poster-skeletons/);
   assert.equal(pagesToFill(wide, 20, 1), 1);
   assert.equal(pagesToFill(0, 20, 5), 1);
   assert.equal(pagesToFill(wide, 0, 5), 1);
