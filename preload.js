@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 观看记录
   getWatchHistory: () => ipcRenderer.invoke('get-watch-history'),
+  deleteWatchHistory: (seriesId) => ipcRenderer.invoke('delete-watch-history', seriesId),
   refreshWatchHistory: () => ipcRenderer.invoke('refresh-watch-history'),
   acknowledgeWatchUpdates: (seriesId, snapshot) => ipcRenderer.invoke('acknowledge-watch-updates', seriesId, snapshot),
   onWatchHistoryUpdated: (cb) => {

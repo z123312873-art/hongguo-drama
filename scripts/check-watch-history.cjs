@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const modulePath = require('node:path').join(__dirname, '../src/native/watch-history.js');
 assert.ok(fs.existsSync(modulePath), '观看记录模块尚未实现');
-const { listHistory, recordPlayback, applyEpisodeUpdate, findSequels, acknowledge } = require(modulePath);
+const { listHistory, recordPlayback, applyEpisodeUpdate, findSequels, acknowledge, forgetPlayback } = require(modulePath);
 const series = [
  { series_id:'1000001', series_title:'春日来信', total:12, episodes:Array.from({length:12},(_,i)=>({vid_index:i+1})) },
  { series_id:'1000002', series_title:'春日来信第二季', total:8, episodes:[] },
@@ -35,4 +35,13 @@ assert.deepEqual(read.seenSequelIds,['1000002','1000004']);
 assert.equal(listHistory(series,{'1000001':read})[0].hasUpdates,false);
 assert.equal(applyEpisodeUpdate(read,series[0],{total:14,episodes:Array(14).fill({})},600).unreadEpisodes,0);
 assert.equal(applyEpisodeUpdate(read,series[0],{total:15,episodes:Array(15).fill({})},700).unreadEpisodes,1);
-console.log('PASS watch history: watched-only, resume metadata, ordering, update baseline, sequel matching, acknowledgement');
+const kept = { ...map, '1000001': read };
+assert.equal(forgetPlayback(kept, '1000002'), true);
+assert.equal(Object.hasOwn(kept, '1000002'), false);
+assert.equal(Object.hasOwn(kept, '1000001'), true);
+assert.deepEqual(listHistory(series, kept).map(item => item.series_id), ['1000001']);
+assert.equal(forgetPlayback(kept, '1000002'), false);
+assert.equal(forgetPlayback(kept, ''), false);
+assert.equal(forgetPlayback(kept, '__proto__'), false);
+assert.equal(forgetPlayback(null, '1000001'), false);
+console.log('PASS watch history: watched-only, resume metadata, ordering, update baseline, sequel matching, acknowledgement, single removal');

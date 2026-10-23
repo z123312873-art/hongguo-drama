@@ -82,6 +82,15 @@ function findSequels(series, candidates) {
 
 function sequelKeyword(series) { return seasonTitle(series.series_title).base; }
 
+function forgetPlayback(playback, seriesId) {
+  if (!playback || typeof playback !== 'object' || Array.isArray(playback)) return false;
+  const id = typeof seriesId === 'string' ? seriesId : '';
+  if (!id || id.length > 200 || id === '__proto__' || id === 'constructor' || id === 'prototype') return false;
+  if (!Object.prototype.hasOwnProperty.call(playback, id)) return false;
+  delete playback[id];
+  return true;
+}
+
 function acknowledge(record, snapshot) {
   const knownTotal = record.knownTotal || 0;
   const visibleTotal = snapshot ? Number(snapshot.total) || 0 : knownTotal;
@@ -92,4 +101,4 @@ function acknowledge(record, snapshot) {
     seenSequelIds: [...new Set([...(record.seenSequelIds || []), ...visibleIds.filter(id => knownIds.has(id))])] };
 }
 
-module.exports = { listHistory, recordPlayback, applyEpisodeUpdate, findSequels, sequelKeyword, acknowledge };
+module.exports = { listHistory, recordPlayback, applyEpisodeUpdate, findSequels, sequelKeyword, acknowledge, forgetPlayback };

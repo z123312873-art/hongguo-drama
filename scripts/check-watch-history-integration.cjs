@@ -221,6 +221,24 @@ async function check(name, fn) {
     assert.equal(notifications.length, 2);
     assert.equal((await rows())[0].sequels.length, 0);
   });
+  await check('removing one history entry leaves other records and skips that show on refresh', async () => {
+    await ipc('save-playback-position', sid, 2, 12);
+    await ipc('save-playback-position', '1000003', 1, 4);
+    assert.deepEqual((await rows()).map(item => item.series_id).sort(), ['1000001', '1000003']);
+    let fetched = [];
+    fetchDetail = async id => { fetched.push(id); return series(); };
+    assert.equal((await ipc('delete-watch-history', sid)).success, true);
+    assert.equal((await ipc('delete-watch-history', sid)).success, false);
+    assert.equal((await ipc('delete-watch-history', '')).success, false);
+    assert.deepEqual((await rows()).map(item => item.series_id), ['1000003']);
+    assert.equal(store.getSeries().some(item => item.series_id === sid), true, 'removal must keep the series and its downloads');
+    const result = await ipc('refresh-watch-history');
+    assert.deepEqual(fetched, ['1000003']);
+    assert.equal(result.checked, 1);
+    assert.equal((await ipc('get-playback-position', sid)), null);
+    assert.equal((await ipc('save-playback-position', sid, 2, 8)).success, true);
+    assert.equal((await rows()).some(item => item.series_id === sid), true, 'playing again records a new history entry');
+  });
   await check('play-series IPC forwards an explicit resume payload', async () => {
     assert.equal((await ipc('play-series', { seriesId: sid, vidIndex: 2, resume: true })).success, true);
     assert.deepEqual(events.at(-1), { name: 'navigate', payload: {
