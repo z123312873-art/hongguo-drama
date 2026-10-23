@@ -16,6 +16,7 @@
 | React DOM | 18.3.1 | MIT | https://github.com/facebook/react |
 | axios | 1.20.0 | MIT | https://github.com/axios/axios |
 | electron-updater | 6.8.9 | MIT | https://github.com/electron-userland/electron-builder |
+| opencc-js | 1.4.2 | MIT AND Apache-2.0 | https://github.com/nk2028/opencc-js |
 
 Electron 打包产物中已包含 Chromium 与 Node.js 的许可声明：
 

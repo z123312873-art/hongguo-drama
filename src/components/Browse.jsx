@@ -374,6 +374,7 @@ function Browse({ onNavigate, active = true }) {
           .filter(c => c.slug.startsWith('hot-') === ranking);
         return group.length > 0 && <div className="browse-cats" role="group" aria-label={ranking ? '热播榜单' : '短剧分类'} key={String(ranking)}>
         <span className="browse-nav-label">{ranking ? '热播榜' : '分类'}</span>
+        <div className="browse-cat-list">
         {group.map((c) => (
           <button
             key={c.slug}
@@ -384,6 +385,7 @@ function Browse({ onNavigate, active = true }) {
             {c.label}
           </button>
         ))}
+        </div>
       </div>;
       })}
 

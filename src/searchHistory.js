@@ -1,3 +1,5 @@
+import { matchesText } from './chineseScript.mjs';
+
 const STORAGE_KEY = 'hongguo-experience-preview:search-history';
 const catalogTitles = new Set();
 
@@ -35,7 +37,7 @@ export function rememberCatalogTitles(results) {
 export function getSearchSuggestions(keyword, history) {
   const query = keyword.trim().toLocaleLowerCase();
   const terms = normalizeTerms([...history, ...catalogTitles]);
-  return terms.filter((term) => !query || term.toLocaleLowerCase().includes(query)).slice(0, 12).map((term) => ({
+  return terms.filter((term) => !query || term.toLocaleLowerCase().includes(query) || matchesText(term, keyword)).slice(0, 12).map((term) => ({
     term,
     source: history.includes(term) ? '搜索历史' : '本次浏览过的剧名',
   }));

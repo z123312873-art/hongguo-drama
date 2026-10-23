@@ -15,6 +15,7 @@
   --scrim: #29231b40; --skeleton: #eeebe6; --scroll-thumb: #c8c3bc;
   --radius-sm: 6px; --radius: 9px; --radius-lg: 14px;
   --shadow-sm: 0 2px 5px #29231b08; --shadow-md: 0 8px 24px #29231b10; --shadow-lg: 0 24px 64px #29231b29;
+  --ui-scale: 1;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -48,7 +49,7 @@ input::placeholder { color: var(--text-tertiary); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid var(--bg); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-.app-layout { display: flex; height: 100vh; overflow: hidden; }
+.app-layout { display: flex; width: calc(100% / var(--ui-scale)); height: calc(100% / var(--ui-scale)); zoom: var(--ui-scale); overflow: hidden; }
 .sidebar { width: 214px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
 .sidebar-window-drag { height: 24px; flex-shrink: 0; -webkit-app-region: drag; }
 .platform-mac .sidebar-window-drag { height: 58px; }
@@ -73,7 +74,7 @@ input::placeholder { color: var(--text-tertiary); }
 .main-content[hidden], [hidden] { display: none !important; }
 .app-storage-error { display: flex; align-items: center; gap: 16px; justify-content: space-between; padding: 12px 24px; background: var(--danger-bg); color: var(--danger); }
 .app-storage-error span { min-width: 0; overflow-wrap: anywhere; }
-.browse-container, .hongguo-container, .dm-container, .player-container { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0; }
+.browse-container, .hongguo-container, .dm-container, .player-container { width: 100%; max-width: none; margin: 0; padding: 0; }
 .settings-container { width: 100%; max-width: 840px; margin: 0 auto; }
 h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-title h2 { color: var(--text-primary); font-size: 28px; line-height: 1.25; font-weight: 700; letter-spacing: -.035em; }
 .page-description, .hero-text p { font-size: 13px; color: var(--text-secondary); line-height: 1.8; margin-top: 9px; max-width: 70ch; }
@@ -124,6 +125,7 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 
 /* Portrait mode keeps every destination accessible without spending width on a sidebar. */
 .toolbar-actions { display: flex; align-items: center; gap: 16px; }
+.script-toggle { -webkit-app-region: no-drag; }
 .layout-toggle { -webkit-app-region: no-drag; }
 .compact-navigation { display: none; }
 .layout-portrait .sidebar { display: none; }

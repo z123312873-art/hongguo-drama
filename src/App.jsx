@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import { Film, Download, Settings, Play, Home, Search, Clock } from './components/icons';
 import HongguoDownload from './components/HongguoDownload';
 import DownloadManager from './components/DownloadManager';
@@ -8,6 +8,7 @@ import Browse from './components/Browse';
 import PageMenu from './components/PageMenu';
 import WatchHistory from './components/WatchHistory';
 import { initializeTheme } from './theme';
+import { getScriptPreference, setScriptPreference, subscribeScript } from './scriptPreference.js';
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
 import AppUpdateNotice from './components/AppUpdateNotice';
@@ -124,6 +125,7 @@ export default function App() {
     }
   };
 
+  const script = useSyncExternalStore(subscribeScript, getScriptPreference, getScriptPreference);
   const isMac = appInfo?.platform === 'darwin' || (!appInfo?.platform && /Mac/.test(navigator.platform));
   const currentPage = MENU.find((item) => item.id === page);
 
@@ -160,6 +162,10 @@ export default function App() {
           <span className="toolbar-location">{currentPage?.label}</span>
           {page === 'player' && layout === 'portrait' && <PageMenu items={MENU} page={page} onNavigate={navigate} />}
           <div className="toolbar-actions">
+            <button type="button" className="btn btn-outline btn-sm script-toggle" aria-pressed={script === 'hant'}
+              aria-label={script === 'hant' ? '切换为简体中文' : '切换为繁体中文'}
+              title={script === 'hant' ? '切换为简体中文' : '切换为繁体中文'}
+              onClick={() => setScriptPreference(script === 'hant' ? 'hans' : 'hant')}>{script === 'hant' ? '繁体' : '简体'}</button>
             <span className="toolbar-caption">{appInfo?.preview ? '功能预览' : '红果短剧'}</span>
             {page === 'player' && <button className="btn btn-outline btn-sm" onClick={() => { setEpisodesOpen(false); toggleStealth(true); }} title="鼠标移开时暂停隐藏，移回继续；Esc 退出">隐身小窗</button>}
             {page === 'player' && layout === 'portrait' && <button className="btn btn-outline btn-sm portrait-episodes-toggle" aria-expanded={episodesOpen}
