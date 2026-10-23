@@ -13,10 +13,12 @@ const react = {
     return [slots[i], next => { slots[i] = typeof next === 'function' ? next(slots[i]) : next; }];
   },
   useRef: value => ({ current: value }), useCallback: fn => fn, useEffect() {}, useLayoutEffect() {},
+  useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
 };
 const context = { module: { exports: {} }, navigator: { platform: 'Mac' }, require: name => {
   if (name === 'react') return react;
   if (name.endsWith('useStealthWindow')) return () => ({ stealthMode: false, toggleStealth() {} });
+  if (name.includes('scriptPreference')) return { getScriptPreference: () => 'hans', setScriptPreference() {}, subscribeScript: () => () => {} };
   return name;
 } };
 context.exports = context.module.exports;

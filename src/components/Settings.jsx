@@ -210,7 +210,7 @@ function SettingsPage({ active = true, preview = false }) {
               选择文件夹
             </button>
           </div>
-          <p className="settings-hint">文件将保存到 <code>下载目录/红果短剧/剧名/</code> 下</p>
+          <p className="settings-hint">文件将保存到 <code data-script="keep">下载目录/红果短剧/剧名/</code> 下</p>
         </div>
 
         <div className="settings-group">

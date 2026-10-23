@@ -7,6 +7,7 @@ import CommunityPanel from './CommunityPanel';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
+import { matchesText } from '../chineseScript.mjs';
 
 const localMediaKey = (seriesId, episode) => JSON.stringify([seriesId, episode?.vid, episode?.fileUrl, episode?.fileSize, episode?.taskId]);
 
@@ -1324,7 +1325,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <div className="series-picker-list">
             {seriesList.length === 0 && <div className="series-picker-empty">还没有剧集</div>}
             {seriesList
-              .filter((s) => !pickerQuery.trim() || (s.series_title || '').includes(pickerQuery.trim()))
+              .filter((s) => matchesText(s.series_title, pickerQuery))
               .map((s) => {
                 const isActive = String(s.series_id) === String(activeSeriesId);
                 const dl = downloadedMap[String(s.series_id)];

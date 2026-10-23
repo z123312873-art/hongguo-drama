@@ -46,11 +46,13 @@ function mountApp() {
     useCallback(fn, deps) { const i = cursor++; if (!slots[i] || deps.some((d, n) => d !== slots[i].deps[n])) slots[i] = { fn, deps }; return slots[i].fn; },
     useEffect(fn, deps) { const i = cursor++; if (!slots[i] || deps.some((d, n) => d !== slots[i][n])) { slots[i] = deps; pending.push(fn); } },
     useLayoutEffect() {},
+    useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
   };
   const api = new Proxy({ onNavigate(fn) { navigateEvent = fn; } }, { get: (o, k) => o[k] || (() => Promise.resolve({})) });
   const context = { module: { exports: {} }, window: { electronAPI: api }, navigator: { platform: 'Mac' }, require: name => {
     if (name === 'react') return react;
     if (name.endsWith('useStealthWindow')) return () => ({ stealthMode: false });
+    if (name.includes('scriptPreference')) return { getScriptPreference: () => 'hans', setScriptPreference() {}, subscribeScript: () => () => {} };
     return name;
   } };
   context.exports = context.module.exports;
