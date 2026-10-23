@@ -1,5 +1,6 @@
-// Continuous scale for wide windows. The default 1100px window stays at 1.
+// Continuous scale for interior metrics on wide windows. The default 1100px window stays at 1.
 // 1280 sits above that window, so unmaximized use does not move.
+// Callers must not use this to shrink or zoom the window box.
 const BASIS = 1280;
 const SPAN = 12800;
 const MAX = 1.2;
