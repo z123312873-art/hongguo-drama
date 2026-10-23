@@ -4,6 +4,8 @@ import test from 'node:test';
 import { matchesText, toTraditional } from '../../chineseScript.mjs';
 import { convertConfig } from '../../script-jsx/convert.mjs';
 import { uiScale } from '../../uiScale.mjs';
+import { pagesToFill, posterSlots, sourcePageWindow } from '../../catalogFill.mjs';
+import { fontChoice, getFontChoice, setFontChoice } from '../../fontScale.mjs';
 
 test('traditional display keeps ambiguous senses and stays stable', () => {
   const pairs = [
@@ -84,4 +86,34 @@ test('wide windows scale continuously and the default window does not', () => {
   assert.doesNotMatch(layout, /100%\s*\/\s*var\(--ui-scale\)/);
   const posters = fs.readFileSync(new URL('../Browse.css', import.meta.url), 'utf8');
   assert.match(posters, /minmax\(calc\(150px \* var\(--ui-scale, 1\)\), 1fr\)/);
+});
+
+test('catalog pages grow only when the window can show more than one source page', () => {
+  const narrow = posterSlots({ width: 814, height: 450, minCard: 150 });
+  assert.ok(narrow > 0 && narrow < 20);
+  assert.equal(pagesToFill(narrow, 20, 5), 1);
+  const wide = posterSlots({ width: 2274, height: 1140, minCard: 165 });
+  assert.ok(wide > 20);
+  assert.equal(pagesToFill(wide, 20, 5), 2);
+  assert.equal(pagesToFill(wide, 20, 1), 1);
+  assert.equal(pagesToFill(0, 20, 5), 1);
+  assert.equal(pagesToFill(wide, 0, 5), 1);
+  assert.equal(pagesToFill(80, 20, 8), 4);
+  assert.deepEqual(sourcePageWindow(1, 1, 5), { start: 1, count: 1, uiPages: 5 });
+  assert.deepEqual(sourcePageWindow(2, 2, 5), { start: 3, count: 2, uiPages: 3 });
+  assert.equal(sourcePageWindow(3, 2, 5).count, 1);
+});
+
+test('font size defaults to the original interface size', () => {
+  const storage = new Map();
+  globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) };
+  globalThis.document = { documentElement: { style: { setProperty() {} } } };
+  assert.equal(getFontChoice(), 'default');
+  assert.equal(fontChoice('default').scale, 1);
+  assert.equal(fontChoice('missing').scale, 1);
+  assert.equal(setFontChoice('larger'), 'larger');
+  assert.equal(getFontChoice(), 'larger');
+  assert.equal(fontChoice(getFontChoice()).scale, 1.08);
+  assert.throws(() => setFontChoice('huge'), /字号/);
+  assert.equal(getFontChoice(), 'larger');
 });

@@ -6,10 +6,30 @@ import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search } from './icons';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
+import { pagesToFill, posterSlots, sourcePageWindow } from '../catalogFill.mjs';
+import { uiScale } from '../uiScale.mjs';
 
 const pageCache = new Map();
 const PAGE_CACHE_TTL_MS = 60_000;
 const LIST_TIMEOUT_MS = 25_000;
+
+function readPosterSlots() {
+  try {
+    const width = window.innerWidth;
+    if (!Number.isFinite(width) || width <= 0) return 0;
+    const scale = uiScale(width);
+    const grid = document.querySelector?.('.browse-grid, .poster-skeletons');
+    if (grid && grid.clientWidth >= 150) {
+      const height = window.innerHeight - grid.getBoundingClientRect().top - 28;
+      if (height > 120) return posterSlots({ width: grid.clientWidth, height, minCard: 150 * scale });
+    }
+    const sidebar = document.querySelector?.('.sidebar');
+    const sidebarWidth = sidebar && getComputedStyle(sidebar).display !== 'none' ? sidebar.getBoundingClientRect().width : 0;
+    return posterSlots({ width: width - sidebarWidth - 72, height: window.innerHeight - 300, minCard: 150 * scale });
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * Browse —— 分类淘剧
@@ -47,6 +67,7 @@ function Browse({ onNavigate, active = true }) {
   const listRequest = useRef(0);
   const listTimer = useRef(null);
   const toastTimer = useRef(null);
+  const pageSpan = useRef(1);
 
   const invalidateList = useCallback(() => {
     listRequest.current++;
@@ -111,7 +132,8 @@ function Browse({ onNavigate, active = true }) {
     async (cat, gen, pg, forceRefresh = false) => {
       invalidateList();
       const request = listRequest.current;
-      const key = JSON.stringify([sourceRevision, source, cat, gen, pg]);
+      const slots = readPosterSlots();
+      const key = JSON.stringify([sourceRevision, source, cat, gen, pg, slots, pageSpan.current]);
       const cached = pageCache.get(key);
       const fallbackUrl = source === 'hongguo'
         ? `https://hongguoduanju.com/${cat.startsWith('hot-') ? 'rank' : 'category'}/${encodeURIComponent(cat)}${gen ? `/${encodeURIComponent(gen)}` : ''}${pg > 1 ? `?page=${pg}` : ''}` : '';
@@ -132,13 +154,30 @@ function Browse({ onNavigate, active = true }) {
         setError(cached ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
       }, LIST_TIMEOUT_MS);
       try {
-        const res = await window.electronAPI.browseList({ source, category: cat, genre: gen, page: pg, forceRefresh });
+        const planned = sourcePageWindow(pg, pageSpan.current, Number.MAX_SAFE_INTEGER);
+        const res = await window.electronAPI.browseList({ source, category: cat, genre: gen, page: planned.start, forceRefresh });
         if (request !== listRequest.current) return;
         setSourceUrl(res?.sourceUrl || fallbackUrl);
         if (!res?.success) throw new Error(res?.error || '来源暂时不可用');
+        const firstResults = Array.isArray(res.results) ? res.results : [];
+        const reportedPages = Number(res.totalPages) || 0;
+        if (pg === 1) pageSpan.current = reportedPages >= 2 ? pagesToFill(slots, firstResults.length, reportedPages) : 1;
+        const windowed = reportedPages >= 2 ? sourcePageWindow(pg, pageSpan.current, reportedPages) : { start: pg, count: 1, uiPages: reportedPages };
+        let combined = firstResults.slice();
+        const seen = new Set(combined.map(item => item?.series_id).filter(Boolean));
+        for (let extra = 1; extra < windowed.count; extra++) {
+          const more = await window.electronAPI.browseList({ source, category: cat, genre: gen, page: windowed.start + extra, forceRefresh });
+          if (request !== listRequest.current) return;
+          if (!more?.success || !Array.isArray(more.results) || !more.results.length) break;
+          for (const item of more.results) {
+            if (!item?.series_id || seen.has(item.series_id)) continue;
+            seen.add(item.series_id);
+            combined.push(item);
+          }
+        }
         const next = {
-          results: Array.isArray(res.results) ? res.results : [],
-          meta: { total: res.total || 0, totalPages: res.totalPages || 0, genres: res.genres || [], hasMore: res.hasMore === true },
+          results: combined,
+          meta: { total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: res.hasMore === true && windowed.count < 2 },
           sourceUrl: res.sourceUrl || fallbackUrl,
           savedAt: Date.now(),
         };
@@ -184,6 +223,22 @@ function Browse({ onNavigate, active = true }) {
     if (active && !sourcesLoading && mediaSources.some(item => item.id === source)) loadList(category, genre, page);
     return invalidateList;
   }, [active, category, genre, page, loadList, sourcesLoading, mediaSources, invalidateList]);
+
+  useEffect(() => {
+    if (!active || page !== 1 || !results.length) return undefined;
+    let timer;
+    const onResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const perPage = Math.max(1, Math.round(results.length / pageSpan.current));
+        const sourcePages = Math.max(1, (meta.totalPages || 1) * pageSpan.current);
+        const next = pagesToFill(readPosterSlots(), perPage, sourcePages);
+        if (next > pageSpan.current) loadList(category, genre, 1, false);
+      }, 300);
+    };
+    window.addEventListener?.('resize', onResize);
+    return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
+  }, [active, page, results.length, category, genre, loadList, meta.totalPages]);
 
   const switchSource = (next) => {
     if (next === source) return;
