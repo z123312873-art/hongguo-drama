@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
 const idle = { supported: true, reason: '', status: 'idle', version: null, percent: 0, error: '' };
-const release = { version: '9.0', url: 'https://github.com/jackotom/hongguo-drama/releases/tag/v9.0' };
+const release = { version: '9.0', url: 'https://github.com/z123312873-art/hongguo-drama/releases/tag/v9.0' };
 function mount(api = {}, component = 'AppUpdateNotice', props = {}) {
   const slots = [], effects = [], cleanups = [], effectFns = [], events = new Map(), timers = new Map();
   let cursor = 0, tree, timerId = 0;
@@ -144,9 +144,12 @@ function mount(api = {}, component = 'AppUpdateNotice', props = {}) {
     assert.ok(ui.text().includes('系统安装器启动失败')); assert.ok(ui.button('前往发布页手动下载')); assert.ok(!ui.text().includes('已是最新版本'));
     await ui.button('前往发布页手动下载').props.onClick(); assert.equal(opened, 1); ui.unmount();
   });
-  await test('settings no longer offers upstream app update checks', async () => {
-    const ui = mount({ checkAppUpdate: async () => ({ enabled: false, release: null }) }, 'Settings'); await ui.flush();
-    assert.equal(ui.find(n => n.props['aria-label'] === '自动检测更新'), undefined);
+  await test('settings checks this repository and leaves the switch on by default', async () => {
+    const ui = mount({ checkAppUpdate: async () => ({ enabled: true, release: null }) }, 'Settings'); await ui.flush();
+    const box = ui.find(n => n.props['aria-label'] === '自动检测更新');
+    assert.equal(box.props.type, 'checkbox');
+    assert.equal(box.props.checked, true);
+    assert.ok(ui.text().includes('预发布不会提示'));
     assert.equal(ui.button('检查更新'), undefined);
     assert.ok(ui.button('保存设置'));
     ui.unmount();

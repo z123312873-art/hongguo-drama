@@ -3,7 +3,8 @@ import useDialogKeyboard from './useDialogKeyboard';
 import PlayerControls from './PlayerControls';
 import CommentDanmaku, { useCommentDanmaku } from './CommentDanmaku';
 import OfficialDanmaku, { useOfficialDanmaku } from './OfficialDanmaku';
-import { useDanmakuSource, writeDanmakuSource } from './danmakuSource.mjs';
+// 时间轴弹幕在 danmaku.js / OfficialDanmaku；本集评论在 episode-comments.js / CommentDanmaku。
+// 两条通路不要并成同一次请求。播放先用时间轴，这一集没有可用时间轴时才自动改用本集评论。
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
@@ -499,12 +500,27 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   // 原生全屏依附于 video 节点。准备下一集时保留结束帧，换源不换节点。
   if (canPlay) lastVideoSrcRef.current = playableSource;
   const videoSrc = !playbackRequested || compatProgress ? '' : lastVideoSrcRef.current;
-  const danmakuSource = useDanmakuSource();
   // 换清晰度会短暂卸下当前地址。弹幕跟这一集走，不跟这一次片源地址走。
   const danmakuActive = active && showDanmakuControls && playbackRequested && Boolean(current?.vid) && !current.locked;
-  const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: danmakuActive && danmakuSource === 'comments' });
-  const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive && danmakuSource === 'official', preferences: commentDanmaku });
-  const danmaku = { ...(danmakuSource === 'official' ? officialDanmaku : commentDanmaku), sourceKind: danmakuSource, setSource: writeDanmakuSource };
+  const episodeKey = `${activeSeriesId || ''}:${current?.vid || ''}`;
+  const [commentFallbackKey, setCommentFallbackKey] = useState('');
+  // 键必须对上当前集。换集后旧键对不上，本集评论立刻停下，不会铺到下一集。
+  const useEpisodeComments = commentFallbackKey === episodeKey && episodeKey !== ':';
+  // 时间轴弹幕：OfficialDanmaku / getEpisodeDanmaku，带 offset_time。
+  // 本集评论：CommentDanmaku / getEpisodeComments，公开页评论，没有视频时间点。
+  // 两条通路不要并成同一次请求。只有时间轴成功返回且一条都没有时，才自动改用本集评论。
+  // 接口失败仍停在时间轴，方便重试；不能把失败当成“这一集没有弹幕”。
+  const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: useEpisodeComments });
+  const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive && !useEpisodeComments, preferences: commentDanmaku });
+  useEffect(() => {
+    const ready = Boolean(officialDanmaku.feed?.loaded) && !officialDanmaku.loading && !officialDanmaku.error;
+    const missing = danmakuActive && officialDanmaku.supported && ready && officialDanmaku.comments.length === 0;
+    const next = missing ? episodeKey : '';
+    setCommentFallbackKey(currentKey => currentKey === next ? currentKey : next);
+  }, [danmakuActive, episodeKey, officialDanmaku.supported, officialDanmaku.loading, officialDanmaku.error, officialDanmaku.feed, officialDanmaku.comments.length]);
+  const danmaku = useEpisodeComments
+    ? { ...commentDanmaku, sourceKind: 'comments' }
+    : { ...officialDanmaku, sourceKind: 'official' };
 
   useEffect(() => {
     const v = videoRef.current;
@@ -1501,9 +1517,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
             }}
           />
         <VideoEnhancement videoRef={videoRef} source={videoSrc} available={canPlay && active} enhancement={enhancement} />
-        {danmakuSource === 'official'
-          ? <OfficialDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />
-          : <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />}
+        {useEpisodeComments
+          ? <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />
+          : <OfficialDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />}
         <PlayerControls danmaku={showDanmakuControls ? danmaku : null} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           seriesTitle={detail?.series_title} episodes={episodes} currentIndex={currentIndex} onEpisodeChange={goToEpisode}
           onlineQuality={onlineQuality} supportsOnlineQuality={supportsOnlineQuality} onQualityChange={changeOnlineQuality}

@@ -34,7 +34,7 @@ const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const { fitWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
-const { availableRelease } = require('./src/native/app-update');
+const { availableRelease, LATEST_API, LATEST_PAGE, RELEASES_URL, updateRedirectTag } = require('./src/native/app-update');
 const { fetchPublicDetails } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
@@ -203,7 +203,7 @@ function getDefaultSettings() {
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
     cache_next_episode: true,
-    app_updates_enabled: false,
+    app_updates_enabled: true,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
     watch_notifications_enabled: false,
@@ -384,6 +384,9 @@ async function applyProxySettings(settings) {
 function getCurrentSettings() {
   const saved = store.getSettings() || {};
   const merged = { ...getDefaultSettings(), ...saved };
+  // 旧版本把检查写死为关闭，且当时指向原作者仓库，设置里也不能改。
+  // 没有 app_update_channel 的 false 不是用户选择，按现在的默认打开本仓库正式版检查。
+  if (saved.app_updates_enabled === false && saved.app_update_channel !== 'self') merged.app_updates_enabled = true;
   // 保证并发数合法
   const mc = parseInt(merged.max_concurrent, 10);
   MAX_CONCURRENT_DOWNLOADS = Number.isInteger(mc) && mc >= 1 && mc <= 10 ? mc : 3;
@@ -1164,7 +1167,6 @@ const BROWSE_CATEGORIES = [
   { slug: 'real-drama', label: '真人剧' },
   { slug: 'comic-drama', label: '漫剧' },
   { slug: 'ai-drama', label: 'AI剧' },
-  { slug: 'comic', label: '漫画' },
   { slug: 'hot-drama', label: '综合热播榜', group: 'rank' },
   { slug: 'hot-real-drama', label: '真人热播榜', group: 'rank' },
   { slug: 'hot-comic-drama', label: '漫剧热播榜', group: 'rank' },
@@ -3202,6 +3204,8 @@ ipcMain.handle('save-settings', async (event, settings) => {
     const wasCheckingUpdates = current.app_updates_enabled !== false;
     const merged = applyEditableSettings(current, settings);
     merged.download_quality = normalizeDownloadQuality(merged.download_quality);
+    // 这次保存带了开关，才算用户自己的选择。必须先写入再落盘，否则下次启动会把关闭当成旧的隐藏锁又打开。
+    if (Object.prototype.hasOwnProperty.call(settings || {}, 'app_updates_enabled')) merged.app_update_channel = 'self';
     store.saveSettings(merged);
     if (merged.app_updates_enabled === false) { updateDownloadGeneration++; appUpdateInstaller?.cancel(); }
     if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
@@ -3768,8 +3772,9 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   return { success: false, error: '文件夹不存在' };
 });
 
-// Fork builds never contact upstream for app updates. The checker below stays for tests.
-let appUpdateChecksEnabled = false;
+// 只检查本仓库的正式发行。预发布和草稿由 availableRelease 丢掉，不会弹出更新。
+// 写法沿用上游检查，来源固定在 src/native/app-update.js，不读取原作者仓库。
+let appUpdateChecksEnabled = true;
 function appUpdatesAllowed() {
   return appUpdateChecksEnabled === true && !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false;
 }
@@ -3844,19 +3849,19 @@ ipcMain.handle('check-app-update', async event => {
     return { enabled: false, release: null };
   }
   if (!updateRequest) {
-    updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama/releases/latest', {
+    updateRequest = axios.get(LATEST_API, {
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-    }).catch(() => axios.get('https://github.com/jackotom/hongguo-drama/releases/latest', {
+    }).catch(() => axios.get(LATEST_PAGE, {
       // GitHub's public release endpoint does not consume the anonymous API quota.
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
       validateStatus: status => status === 200 || status === 302,
     }).then(response => {
       if (response.status !== 302) return response;
-      const tag = /^https:\/\/github\.com\/jackotom\/hongguo-drama\/releases\/tag\/(v?\d+\.\d+(?:\.\d+)?)$/.exec(response.headers.location || '');
+      const tag = updateRedirectTag(response.headers.location);
       if (!tag) throw new Error('Unexpected update redirect');
-      return { data: { tag_name: tag[1] } };
+      return { data: { tag_name: tag } };
     })).then(response => ({ release: availableRelease(response.data, APP_VERSION), error: '' }))
       .catch(() => ({ release: null, error: '暂时无法检查更新，请检查网络后重试。' }))
       .finally(() => { updateRequest = null; });
@@ -3870,7 +3875,7 @@ ipcMain.handle('open-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || !appUpdatesAllowed()) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
-  try { await shell.openExternal(latestAppRelease?.url || 'https://github.com/jackotom/hongguo-drama/releases/latest'); return { success: true }; }
+  try { await shell.openExternal(latestAppRelease?.url || LATEST_PAGE); return { success: true }; }
   catch { return { success: false, error: '无法打开浏览器，请稍后重试' }; }
 });
 

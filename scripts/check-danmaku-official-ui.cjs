@@ -8,7 +8,7 @@ const root = path.join(__dirname, '../src/components');
 const player = fs.readFileSync(path.join(root, 'Player.jsx'), 'utf8');
 function extractWiring(source) {
   const normalized = source.replace(/\r\n/g, '\n');
-  const start = normalized.indexOf('  const danmakuSource =');
+  const start = normalized.indexOf('  const danmakuActive =');
   const end = normalized.indexOf('\n\n  useEffect', start);
   assert(start >= 0 && end > start, 'Player danmaku hook boundaries must be present');
   return normalized.slice(start, end);
@@ -51,29 +51,41 @@ function mount({ response, enabled = true } = {}) {
     vm.runInNewContext(source, { module, exports: module.exports, require: name => name === 'react' ? react : load(path.resolve(path.dirname(file), name)), window, document, CustomEvent, console });
     return module.exports;
   }
-  const source = load(path.join(root, 'danmakuSource.mjs'));
-  const context = vm.createContext({ ...source, ...load(path.join(root, 'CommentDanmaku.jsx')), ...load(path.join(root, 'OfficialDanmaku.jsx')), props });
+  const commentApi = load(path.join(root, 'CommentDanmaku.jsx'));
+  const officialApi = load(path.join(root, 'OfficialDanmaku.jsx'));
+  const context = vm.createContext({ useState: react.useState, useEffect: react.useEffect, ...commentApi, ...officialApi, props });
   vm.runInContext(`function renderWiring() { const {activeSeriesId,current,active,canPlay,showDanmakuControls,playbackRequested} = props; ${wiring}\nreturn {danmaku,commentDanmaku,officialDanmaku}; }`, context);
   const render = () => { cursor = 0; tree = context.renderWiring(); effects.splice(0).forEach(fn => fn()); return tree; };
   const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } return tree; };
   render();
-  return { props, requests, storage, intervals, render, flush, source, get tree() { return tree; }, unmount() { cleanups.forEach(fn => fn?.()); } };
+  return { props, requests, storage, intervals, render, flush, get tree() { return tree; }, unmount() { cleanups.forEach(fn => fn?.()); } };
 }
 
 (async () => {
   const ui = mount();
   await ui.flush();
   assert.equal(ui.requests.length, 1); assert.equal(ui.requests[0].source, 'official');
+  assert.equal(ui.tree.danmaku.sourceKind, 'official');
   assert.equal(ui.tree.danmaku.settings.fontSize, 26); assert.equal(ui.tree.danmaku.settings.opacity, 65);
   ui.tree.danmaku.update({ fontSize: 30 }); await ui.flush();
-  ui.source.writeDanmakuSource('comments'); await ui.flush();
-  assert.equal(ui.requests.length, 2); assert.equal(ui.requests[1].source, 'comments');
+  assert.equal(ui.requests.length, 1, 'timeline content must not also fetch episode comments');
   assert.equal(ui.tree.danmaku.settings.fontSize, 30); assert.equal(ui.tree.danmaku.settings.blockedWords, '屏蔽');
-  ui.source.writeDanmakuSource('official'); await ui.flush();
-  assert.equal(ui.requests.length, 2, 'loaded source must reuse its current feed');
-  assert.equal(ui.intervals.size, 0, 'unselected comments source must stop its request timer');
+  assert.equal(ui.intervals.size, 0, 'episode comments stay idle while timeline danmaku exists');
   ui.props.activeSeriesId = 'custom:example'; await ui.flush();
-  assert.equal(ui.requests.length, 2); assert.match(ui.tree.danmaku.status, /仅红果来源/); ui.unmount();
+  assert.equal(ui.requests.length, 1); assert.match(ui.tree.danmaku.status, /仅红果来源/); ui.unmount();
+
+  const empty = mount({ response: args => ({ success: true, series_id: args.seriesId, episode_id: args.vid, items: [] }) });
+  await empty.flush();
+  assert.equal(empty.requests.filter(item => item.source === 'official').length, 1);
+  assert.equal(empty.requests.filter(item => item.source === 'comments').length, 1);
+  assert.equal(empty.tree.danmaku.sourceKind, 'comments');
+  assert.ok(empty.intervals.size > 0); empty.unmount();
+
+  const failed = mount({ response: args => ({ success: false, series_id: args.seriesId, episode_id: args.vid, items: [], error: '模拟接口异常' }) });
+  await failed.flush();
+  assert.equal(failed.requests.filter(item => item.source === 'comments').length, 0, 'a failed timeline request must not be treated as an empty episode');
+  assert.equal(failed.tree.danmaku.sourceKind, 'official');
+  assert.equal(failed.tree.danmaku.status, '模拟接口异常'); failed.unmount();
 
   const off = mount({ enabled: false }); await off.flush(); assert.equal(off.requests.length, 0); off.unmount();
   const hidden = mount({ enabled: false }); hidden.props.showDanmakuControls = false;
@@ -90,12 +102,16 @@ function mount({ response, enabled = true } = {}) {
   let settleOld;
   const pending = mount({ response: (args, count) => count === 1 ? new Promise(resolve => { settleOld = resolve; })
     : { success: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 8, text: '当前请求' }] } });
-  pending.source.writeDanmakuSource('comments'); await pending.flush();
-  pending.source.writeDanmakuSource('official'); await pending.flush();
-  assert.equal(pending.requests.filter(r => r.source === 'official').length, 2, 'switching back during pending request must not stay loading');
-  settleOld({ success: false, series_id: pending.props.activeSeriesId, episode_id: pending.props.current.vid, items: [], error: '迟到的旧请求' });
-  await pending.flush(); assert.equal(pending.tree.danmaku.error, ''); assert.equal(pending.tree.danmaku.comments[0].text, '当前请求');
+  await pending.flush();
+  const previousVid = pending.props.current.vid;
   pending.props.current = { vid: '7503780574541122623' }; await pending.flush();
+  assert.equal(pending.requests.filter(r => r.source === 'official').length, 2, 'episode change must request timeline danmaku again');
+  assert.equal(pending.requests.filter(r => r.source === 'comments').length, 0);
+  settleOld({ success: false, series_id: pending.props.activeSeriesId, episode_id: previousVid, items: [], error: '迟到的旧请求' });
+  await pending.flush();
+  assert.equal(pending.tree.danmaku.sourceKind, 'official');
+  assert.equal(pending.tree.danmaku.error, '');
+  assert.equal(pending.tree.danmaku.comments[0].text, '当前请求');
   assert.equal(pending.requests.at(-1).vid, pending.props.current.vid); pending.unmount();
 
   const overlay = fs.readFileSync(path.join(root, 'OfficialDanmaku.jsx'), 'utf8');
@@ -106,5 +122,5 @@ function mount({ response, enabled = true } = {}) {
   assert.match(settings, /openExternalUrl\('https:\/\/github.com\/dawei233\/hongguo-drama'\)/);
   // check-player-controls.cjs verifies the 2.9 one-second pointer idle deadline,
   // including playback keys and fullscreen/source changes that must not renew it.
-  console.log('PASS frontend source wiring: default/selective fetch/shared preferences/retry/stale response/episode switch/control-bar bounds/source attribution');
+  console.log('PASS frontend danmaku wiring: timeline first, comments only when timeline is empty, shared preferences, retry, stale response, episode switch');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -13,6 +13,7 @@ import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
 import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
+import AppUpdateNotice from './components/AppUpdateNotice';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
@@ -205,6 +206,7 @@ export default function App() {
         {stealthMode && <div className="stealth-toolbar"><span>移开暂停隐藏 · 移回继续</span><button className="btn btn-outline btn-sm" onClick={() => toggleStealth(false)}>退出小窗</button></div>}
         {stealthError && <div className="app-storage-error" role="alert">{stealthError}</div>}
         {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>关闭提示</button></div>}
+        <AppUpdateNotice />
         {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{renderPage(id)}</main>)}
       </div>
     </div>

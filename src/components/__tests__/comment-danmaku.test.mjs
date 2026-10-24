@@ -11,6 +11,18 @@ test('settings reject malformed storage and clamp supported numeric values', () 
   assert.equal(normalizeDanmakuSettings({ opacity: null }).opacity, 80);
 });
 
+test('本集评论从画面右侧外逐条进入', () => {
+  const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
+  const options = { width: 800, height: 450, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', area: 'full' }, reducedMotion: false };
+  const comments = Array.from({ length: 12 }, (_, index) => `这是一条很长的本集评论${index}`.repeat(3));
+  advanceDanmaku(state, comments, 0.016, options);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].x, options.width);
+  for (let frame = 0; frame < 30; frame++) advanceDanmaku(state, comments, 0.016, options);
+  assert.equal(state.items.length, 1);
+  assert.ok(state.items[0].x < options.width);
+});
+
 test('scheduler bounds lanes, avoids overlaps, pauses and clamps long frame gaps', () => {
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
   const options = { width: 500, height: 300, settings: DEFAULT_DANMAKU_SETTINGS, reducedMotion: false };
@@ -44,9 +56,9 @@ test('缩小播放器保留可见弹幕并重排，不能压行或重播已消�
   const large = { width: 1987, height: 1248, settings, reducedMotion: false };
   const small = { ...large, width: 500, height: 300 };
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
-  for (let i = 0; i < 70; i++) advanceDanmaku(state, Array(40).fill('长'.repeat(60)), 0.1, large);
+  for (let i = 0; i < 200; i++) advanceDanmaku(state, Array(40).fill('长'.repeat(60)), 0.1, large);
   const cursor = state.cursor;
-  assert.ok(state.items.length > 6);
+  assert.ok(state.items.length >= 1 && state.items.length <= 3, '本集评论同时在屏上的条数受轨道上限约束');
   assert.equal(model.resizeDanmaku(state, large, { ...small, width: 0 }), false);
   model.resizeDanmaku(state, large, small);
   assert.ok(state.items.length > 0);
@@ -140,8 +152,8 @@ test('all three comment densities emit more distinct comments while keeping thei
     const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
     const comments = Array.from({ length: 40 }, (_, i) => `comment ${i}`);
     const options = { width: 1987, height: 1248, settings: { ...DEFAULT_DANMAKU_SETTINGS, density, area: 'full' }, reducedMotion: false };
-    for (let frame = 0; frame < 120; frame++) advanceDanmaku(state, comments, 1 / 60, options);
-    assert.ok(state.nextId >= [3, 4, 8][index], `${density}: ${state.nextId}`);
+    for (let frame = 0; frame < 720; frame++) advanceDanmaku(state, comments, 1 / 60, options);
+    assert.ok(state.nextId >= [1, 2, 3][index], `${density}: ${state.nextId}`);
     assert.equal(new Set(state.items.map(item => item.content)).size, state.items.length);
     return state.nextId;
   });
@@ -155,7 +167,7 @@ test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停�
   const runtime = { width: 500, height: 300, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', speed: 2 }, reducedMotion: false };
   for (let frame = 0; frame < 1800; frame++) {
     advanceDanmaku(state, comments, 1 / 60, runtime);
-    if (frame > 60) assert.ok(state.items.length > 0, `不能空屏: ${frame}`);
+    assert.ok(state.items.length <= 3, `不能一次铺满: ${frame}`);
     assert.equal(new Set(state.items.map(item => item.content)).size, state.items.length);
   }
   assert.ok(state.nextId > comments.length);

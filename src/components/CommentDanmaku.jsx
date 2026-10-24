@@ -155,11 +155,10 @@ export function DanmakuSettings({ danmaku, onClose, panelRef, maxHeight }) {
   const { settings, update } = danmaku;
   return <div className="danmaku-settings" ref={panelRef} role="dialog" aria-label="弹幕设置" data-player-menu style={{ maxHeight }}
     onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
-    <div className="danmaku-settings-heading"><strong>{danmaku.sourceKind === 'official' ? '时间轴弹幕' : '本集评论'}</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
+    <div className="danmaku-settings-heading"><strong>{danmaku.sourceKind === 'comments' ? '本集评论' : '时间轴弹幕'}</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </button></div>
-    <label>弹幕来源<select aria-label="弹幕来源" value={danmaku.sourceKind || 'comments'} onChange={event => danmaku.setSource?.(event.target.value)}><option value="official">时间轴弹幕</option><option value="comments">本集评论（备用）</option></select></label>
-    <p>{danmaku.sourceKind === 'official' ? '按视频时间展示红果剧集弹幕，快进、回退和切集时重新对齐。接口异常时可手动切换本集评论。' : '本集公开评论依次展示，与视频时间无对应。全文可在「剧评与收藏」查看。'}</p>
+    <p>{danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已自动改用本集公开评论。评论没有视频时间点，会逐条从右侧飞过，不会在开播时整排铺满。' : '按视频时间展示时间轴弹幕。这一集没有时间轴内容时，会自动改用本集评论。'}</p>
     <label>不透明度 <output>{settings.opacity}%</output><input autoFocus aria-label="弹幕不透明度" type="range" min="20" max="100" step="5" value={settings.opacity} onChange={event => update({ opacity: Number(event.target.value) })} /></label>
     <label>字号 <output>{settings.fontSize}px</output><input aria-label="弹幕字号" type="range" min="16" max="32" step="2" value={settings.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} /></label>
     <label>滚动速度 <output>{settings.speed}×</output><input aria-label="弹幕滚动速度" type="range" min="0.5" max="2" step="0.25" value={settings.speed} onChange={event => update({ speed: Number(event.target.value) })} /></label>

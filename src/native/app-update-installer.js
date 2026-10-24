@@ -9,7 +9,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
   // Release ZIPs are rebuilt after notarization; their old blockmaps are invalid.
   updater.disableDifferentialDownload = true;
   updater.logger = null;
-  updater.setFeedURL({ provider: 'github', owner: 'jackotom', repo: 'hongguo-drama' });
+  updater.setFeedURL({ provider: 'github', owner: 'z123312873-art', repo: 'hongguo-drama' });
   let state = { supported: true, reason: '', status: 'idle', version: null, percent: 0, error: '', downloaded: false };
   let operation = null, cancellationToken = null, generation = 0, operationGeneration = 0;
   let nativeInstallListener = null, nativeReadyVersion = null;

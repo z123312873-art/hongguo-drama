@@ -1,7 +1,11 @@
 // Adapted from dawei233/hongguo-drama, commit c884fab6c6e36ad38173e251738b9b35f958383f (GPL-3.0).
 // https://github.com/dawei233/hongguo-drama
 /**
- * 「用哪个弹幕源」这一项偏好。
+ * 旧的手动弹幕来源偏好。播放器已不再读取这个键。
+ *
+ * 时间轴弹幕走 OfficialDanmaku，本集评论走 CommentDanmaku。
+ * Player 先请求时间轴；这一集成功返回且没有内容时，才自动改用本集评论。
+ * 保留读写函数，避免旧的本地存储在升级时被误当成仍可切换的开关。
  *
  * 单独一个存储键，理由有两个：
  *  1. 视觉设置（字号/透明度/速度/区域/密度/屏蔽词）应该两个源共用 —— 换源不该

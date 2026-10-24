@@ -104,11 +104,14 @@ export function takeDanmakuReplay(state, options, pending = 0, currentTime = Inf
   return index < 0 ? undefined : state.replayQueue.splice(index, 1)[0];
 }
 
-// One comment per lane prevents long comments catching shorter ones; all lanes share one clock.
+// 本集评论弹幕：公开页评论没有视频时间点，只能依次飞过。
+// 不要在开播时把整批评论铺满画面；时间轴弹幕走 advanceTimedDanmaku，不经过这里。
 export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76 }) {
   if (!(elapsed > 0) || !comments.length || width < 40 || height < 60) return false;
   const delta = Math.min(elapsed, 0.25);
-  const { lineHeight, top, lanes } = danmakuLayout({ height, settings, reducedMotion, bottomInset });
+  const layout = danmakuLayout({ height, settings, reducedMotion, bottomInset });
+  const { lineHeight, top } = layout;
+  const lanes = reducedMotion ? 1 : Math.min(layout.lanes, { sparse: 1, normal: 2, dense: 3 }[settings.density] ?? 2);
   const before = state.items.length;
   for (const item of state.items) { item.age += delta; if (!reducedMotion) item.x -= 85 * settings.speed * delta; }
   retireDanmaku(state, reducedMotion);
@@ -128,9 +131,11 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     const chars = Array.from(content);
     const text = chars.length > 80 ? chars.slice(0, 79).join('') + '…' : content;
     const textWidth = (Array.from(text).length + 1) * settings.fontSize;
-    const x = reducedMotion ? 12 : state.nextId === 0 ? Math.max(12, width - textWidth - 12) : width;
+    // 从画面右侧外进入。第一条若直接摆在屏内，长评论会在开播时叠成一整排。
+    const x = reducedMotion ? 12 : width;
     state.items.push({ id: state.nextId++, text, content, lane, x, y: top + lane * lineHeight, width: textWidth, age: 0 });
-    state.cooldown = reducedMotion ? 6 : { sparse: 0.9, normal: 0.5, dense: 0.25 }[settings.density];
+    const travel = textWidth / Math.max(40, 85 * settings.speed);
+    state.cooldown = reducedMotion ? 6 : Math.max({ sparse: 2.4, normal: 1.8, dense: 1.1 }[settings.density] ?? 1.8, travel * 0.55);
     changed = true;
   }
   return changed;

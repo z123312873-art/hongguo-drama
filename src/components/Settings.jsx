@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useDanmakuSource, writeDanmakuSource } from './danmakuSource.mjs';
 import useDialogKeyboard from './useDialogKeyboard';
 import './Settings.css';
 import AppearanceSettings from './AppearanceSettings';
@@ -46,7 +45,6 @@ function describeProxy(settings) {
 }
 
 function SettingsPage({ active = true, preview = false }) {
-  const danmakuSource = useDanmakuSource();
   const [settings, setSettings] = useState(null);
   const [saved, setSaved] = useState(false);
   const [proxyOpen, setProxyOpen] = useState(false);
@@ -99,7 +97,7 @@ function SettingsPage({ active = true, preview = false }) {
     try {
       // Playback options may change while this retained settings page is hidden.
       const current = await window.electronAPI.getSettings();
-      const editable = ['root', 'name_format', 'download_quality', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled'];
+      const editable = ['root', 'name_format', 'download_quality', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'app_updates_enabled', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled'];
       const submitted = { ...current };
       for (const key of editable) if (Object.hasOwn(next, key)) submitted[key] = next[key];
       if (isProxy) submitted.clear_proxy_password = next.clear_proxy_password === true && !String(next.proxy_password || '');
@@ -196,6 +194,10 @@ function SettingsPage({ active = true, preview = false }) {
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.auto_delete_watched === true} onChange={event => update('auto_delete_watched', event.target.checked)} /><span className="proxy-switch-text">看完自动删除<em>看完一集后删除该集已下载的视频、在线播放缓存和转码缓存。下载文件会永久删除；需要时可重新下载。保存后生效。</em></span></label>
         </div>
         <div className="settings-group">
+          <span className="settings-label">软件更新</span>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label="自动检测更新" checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">自动检测更新<em>只检查这个仓库的正式版本，预发布不会提示。发现正式新版后由你决定是否下载安装。保存后生效。</em></span></label>
+        </div>
+        <div className="settings-group">
           <span className="settings-label">弹幕按钮设置</span>
           <div className="settings-inline-save">
           <label className="proxy-switch-row"><input type="checkbox" aria-label="显示弹幕按钮" checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">显示弹幕按钮<em>保存后生效。关闭时隐藏弹幕及弹幕设置按钮，并停用弹幕；再次开启会恢复原有弹幕偏好。</em></span></label>
@@ -203,11 +205,7 @@ function SettingsPage({ active = true, preview = false }) {
           </div>
         </div>
         <div className="settings-group">
-          <label className="settings-label" htmlFor="danmaku-source">弹幕来源</label>
-          <select id="danmaku-source" className="input-field select-field" value={danmakuSource} onChange={event => writeDanmakuSource(event.target.value)}>
-            <option value="official">时间轴弹幕</option><option value="comments">本集评论（备用）</option>
-          </select>
-          <p className="settings-hint">切换立即生效，仅请求所选来源。时间轴弹幕跟随视频进度；本集评论依次展示，与视频时间无对应。两种来源共用显示偏好。</p>
+          <p className="settings-hint">播放时先使用带时间点的时间轴弹幕。这一集没有可用时间轴弹幕时，自动改用本集评论，并逐条飞过，不再提供手动切换。</p>
           <button type="button" className="btn btn-outline btn-sm" onClick={async () => {
             try {
               const result = await window.electronAPI.openExternalUrl('https://github.com/dawei233/hongguo-drama');

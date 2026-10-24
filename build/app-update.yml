@@ -1,5 +1,5 @@
 # 红果短剧 2.9：应用内更新来源；实际版本读取发行清单。
 provider: github
-owner: jackotom
+owner: z123312873-art
 repo: hongguo-drama
 updaterCacheDirName: hongguo-downloader-updater

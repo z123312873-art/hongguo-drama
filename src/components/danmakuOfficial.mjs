@@ -6,7 +6,7 @@ import { commentIsBlocked, danmakuLayout, retireDanmaku, takeDanmakuReplay } fro
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
-/** 默认走真弹幕；存储里出现任何其它值都回落到默认。 */
+/** 默认走时间轴弹幕。播放器不再按这个存储值切换，只在时间轴为空时自动改用本集评论。 */
 export const DEFAULT_DANMAKU_SOURCE = 'official';
 
 export function normalizeDanmakuSource(value) {
