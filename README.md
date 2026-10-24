@@ -45,23 +45,20 @@
 | 會提示的情況 | 之後編號更高的正式版。下載與安裝都要你自己確認 |
 | 不檢查的來源 | 原作者倉庫 [jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama) |
 
-已經裝著 2.9.0 的人，不會因為同一個版本號再跳出更新。請用發行頁上的 SHA256 核對安裝檔。2.8 的舊下載連結維持不變。
+已經裝著 2.9.0 的人，不會因為同一個版本號再跳出更新。請用發行頁上的 SHA256 核對安裝檔。
 
 本專案是社群維護的開源修改版，**不是紅果、西飯或河馬的官方用戶端，也沒有平台官方背書**。不提供付費分集解鎖。劇集、清晰度與可播放範圍取決於來源平臺。
 
 ## 下載與安裝
 
-媒體工具已內建，不需要另外安裝 Node.js、Homebrew 或 FFmpeg。
+這個倉庫只發行 **Windows x64** 安裝檔。媒體工具已內建，不需要另外安裝 Node.js 或 FFmpeg。
 
-| 裝置 | 下載 | 安裝方式 |
-|---|---|---|
-| Windows x64（建議） | [2.9 正式版安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-2.9-traditional/hongguo-downloader-2.9-win-x64-setup.exe) | 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。之後由應用內檢查本倉庫的正式版 |
-| Mac | [上游 2.9 發行頁](https://github.com/jackotom/hongguo-drama/releases/tag/v2.9) | 這個繁體倉庫目前只發行 Windows 安裝檔。Mac 請用上游的 DMG，那不是本倉庫的繁體安裝包 |
-| Windows 便攜版 | [上游 2.9 便攜檔](https://github.com/jackotom/hongguo-drama/releases/tag/v2.9) | 便攜版要手動替換，不會走這個繁體倉庫的應用內更新 |
+**[下載 2.9 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-2.9-traditional/hongguo-downloader-2.9-win-x64-setup.exe)**
 
-- Windows 安裝檔未簽章，系統可能出現安全提示。請從本倉庫的發行頁下載，並對照該頁的 SHA256。
-- 一般使用只需要上表的安裝檔。發行頁裡的 `latest*.yml`、`.blockmap` 給更新程式用；Source code 是原始碼，不能直接執行。
-- 從很舊的版本換到 2.9 時，先退出舊程式再安裝。設定、觀看紀錄與已下載的影片請留在原來的資料目錄，不必清空。
+- 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。之後由應用內檢查本倉庫的正式版。
+- 安裝檔未簽章，系統可能出現安全提示。請從 [2.9 發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional) 下載，並對照該頁的 SHA256。
+- 一般使用只需要這個安裝檔。發行頁裡的 `latest*.yml`、`.blockmap` 給更新程式用；Source code 是原始碼，不能直接執行。
+- 從較舊的程式換到 2.9 時，先退出舊程式再安裝。設定、觀看紀錄與已下載的影片留在原來的資料目錄。
 
 ## 開始使用
 
@@ -151,7 +148,6 @@
 - 下載位置、檔名規則、代理與各項提醒都在「設定」。代理可跟隨系統或環境變數、手動指定 HTTP/HTTPS，或強制直連。
 - 「跟隨系統」主要讀取 `HTTP_PROXY`、`HTTPS_PROXY` 等環境變數，不保證認得所有系統代理或 PAC。
 - 自動檢測更新預設開啟，大約每 6 小時查一次本倉庫的正式版。右上角提醒可以關掉。未按下載就不會抓安裝檔，也不會在退出時自動安裝。
-- Windows 便攜版與 Mac 上游安裝包不走這個繁體倉庫的應用內更新。
 
 ### 外觀、收藏與彈幕
 
@@ -188,24 +184,21 @@
 
 ### 影片、設定與紀錄放在哪裡？
 
-影片在設定裡的下載目錄，按來源與劇名分資料夾。設定、任務與觀看紀錄預設在：
-
-- macOS：`~/Library/Application Support/hongguo-downloader/`
-- Windows：`%APPDATA%\hongguo-downloader\`
+影片在設定裡的下載目錄，按來源與劇名分資料夾。設定、任務與觀看紀錄在 Windows 上預設位於 `%APPDATA%\hongguo-downloader\`。
 
 若自行指定使用者資料目錄，以該位置為準。從劇庫移除、刪除任務紀錄、刪除影片與清理快取是不同操作，請看確認框再按。
 
 ### 怎樣更新？
 
-Windows 安裝版預設檢查本倉庫的正式版。出現較新的正式版時，先由你決定是否下載，下載完成後再由你決定是否重新啟動安裝。預發布不會提示。便攜版與 Mac 上游安裝包請到各自的發行頁手動替換。
+Windows x64 安裝版預設檢查本倉庫的正式版。出現較新的正式版時，先由你決定是否下載，下載完成後再由你決定是否重新啟動安裝。預發布不會提示。
 
 ### Windows 裝了新版，為什麼還是舊版本？
 
-先退出所有正在執行的紅果短劇，再執行檔名以 `-setup.exe` 結尾的安裝檔，並從安裝程式建立的捷徑啟動。不要繼續用指向舊便攜版的桌面或工作列捷徑。設定頁顯示的版本號才是目前執行的版本。
+先退出所有正在執行的紅果短劇，再執行 `hongguo-downloader-2.9-win-x64-setup.exe`，並從安裝程式建立的捷徑啟動。不要沿用以前的舊捷徑。設定頁顯示的版本號才是目前執行的版本。
 
 ### 自己建置也有簽章嗎？
 
-沒有。自行建置的 Windows 安裝檔不會自動簽章。上游的 Mac 正式包是否有 Developer ID 與公證，以上游發行頁為準。不需要為了這個程式關閉整個系統的 Gatekeeper。
+沒有。自行建置的 Windows 安裝檔不會自動簽章。不需要為了這個程式關閉整個系統的安全檢查。
 
 ### 如何回報問題？
 
