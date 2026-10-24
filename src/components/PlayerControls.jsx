@@ -32,6 +32,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   const speedRef = useRef(null);
   const navigationKeysRef = useRef(new Set());
   const pointerRef = useRef(null);
+  const idleDeadlineRef = useRef(0);
   const expanded = fullscreen || windowFill;
 
   useEffect(() => {
@@ -70,26 +71,28 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     const scheduleHide = () => {
       clearTimeout(timer);
       if (available && !media.paused && !menuOpen && !danmakuOpen && !selectionPanel && !dragging) {
-        timer = setTimeout(hide, 2000);
+        // Fullscreen and source changes keep the deadline set by actual user activity.
+        if (!idleDeadlineRef.current) idleDeadlineRef.current = Date.now() + 1000;
+        timer = setTimeout(hide, Math.max(0, idleDeadlineRef.current - Date.now()));
       }
     };
-    const reveal = () => { clearTimeout(pauseTimer); setControlsHidden(false); scheduleHide(); };
+    const reveal = () => { clearTimeout(pauseTimer); idleDeadlineRef.current = Date.now() + 1000; setControlsHidden(false); scheduleHide(); };
     const onPointerLeave = () => { clearTimeout(timer); hide(); };
     const onKey = event => {
       const physicalKey = event.code || event.key;
       // Keep the release paired across source/effect changes, even if Shift is released first.
       if (event.type === 'keyup' && navigationKeysRef.current.delete(physicalKey)) return;
       if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return;
+      if (event.key === 'Tab') { reveal(); return; }
+      if (menuOpen || danmakuOpen || selectionPanel || ignoresPlaybackShortcut(event.target, event.key)) return;
       const key = shortcutKey(event);
-      if (!menuOpen && !ignoresPlaybackShortcut(event.target) && key && [shortcuts.previous, shortcuts.next, shortcuts.backward, shortcuts.forward].includes(key)) {
-        if (event.type === 'keydown') {
-          navigationKeysRef.current.add(physicalKey);
-          // 2.8: Seeking renews the idle timer without revealing hidden controls.
-          if ([shortcuts.backward, shortcuts.forward].includes(key)) scheduleHide();
-        }
-        return;
+      const action = key && SHORTCUT_ACTIONS.find(item => shortcuts[item.id] === key);
+      if (!action) return;
+      if (action.id === 'play') { reveal(); return; }
+      if (event.type === 'keydown') {
+        navigationKeysRef.current.add(physicalKey);
+        // Keyboard-only playback actions must not extend pointer inactivity.
       }
-      reveal();
     };
     const onPointerMove = event => {
       const previous = pointerRef.current;
@@ -264,9 +267,9 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
         <button type="button" data-player-control aria-label={media.paused ? '播放' : '暂停'} title={`播放/暂停（${formatShortcut(shortcuts.play)}）`} disabled={!available} onClick={togglePlay}>{media.paused ? <Play size={18} /> : <Pause size={18} />}</button>
         <span className="player-controls-time">{formatTime(media.time)} / {formatTime(media.duration)}</span>
         {danmaku && <div className="player-controls-danmaku">
-          <button type="button" data-player-menu className={`danmaku-icon-button ${danmaku.enabled ? 'danmaku-enabled' : ''}`} aria-label={danmaku.enabled ? '关闭评论弹幕' : '开启评论弹幕'} aria-pressed={danmaku.enabled}
-            title={danmaku.supported ? '将当前集公开评论显示在画面上' : '仅红果来源的当前集支持评论弹幕'} disabled={!danmaku.supported} onClick={danmaku.toggle}><span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-state-mark" /></span></button>
-          <button type="button" data-player-menu className="danmaku-icon-button" ref={danmakuButtonRef} aria-label="弹幕设置" title="评论弹幕设置" aria-haspopup="dialog" aria-expanded={danmakuOpen}
+          <button type="button" data-player-menu className={`danmaku-icon-button ${danmaku.enabled ? 'danmaku-enabled' : ''}`} aria-label={`${danmaku.enabled ? '关闭' : '开启'}${danmaku.sourceKind === 'official' ? '时间轴弹幕' : '本集评论'}`} aria-pressed={danmaku.enabled}
+            title={danmaku.supported ? (danmaku.sourceKind === 'official' ? '按视频时间展示时间轴弹幕' : '依次展示本集评论，与视频时间无对应') : '仅红果来源的当前集支持弹幕'} disabled={!danmaku.supported} onClick={danmaku.toggle}><span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-state-mark" /></span></button>
+          <button type="button" data-player-menu className="danmaku-icon-button" ref={danmakuButtonRef} aria-label="弹幕设置" title="弹幕显示设置" aria-haspopup="dialog" aria-expanded={danmakuOpen}
             onClick={() => { setMenuOpen(false); setSelectionPanel(null); setDanmakuOpen(open => !open); }}>
             <span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-settings-mark"><SettingsIcon size={10} /></span></span>
           </button>
@@ -296,7 +299,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
                 <span>{quality === 'auto' ? (supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定') : quality.toUpperCase()}</span><span aria-hidden="true">{onlineQuality === quality ? '✓' : ''}</span>
               </button>)}
             </div>
-            <p className="player-quality-hint">{supportsOnlineQuality ? '网页片源清晰度上限由上游决定，自动模式可能仅有低清画面。720P / 1080P 使用 App/API 片源；不可用会提示，不会自动降级。切换后保留播放进度。' : '此来源的清晰度由片源决定，暂不支持指定画质。当前画面分辨率不代表来源的最高画质。'}</p>
+            <p className="player-quality-hint">{supportsOnlineQuality ? '所选清晰度会保留。某一集没有对应片源时，只临时播放该集的实际画面；自动播放或手动切到下一集，会重新按自动、720P 或 1080P 取源。切换后保留播放进度和弹幕。' : '此来源的清晰度由片源决定，暂不支持指定画质。当前画面分辨率不代表来源的最高画质。'}</p>
           </div>}
         </div>
         <div className="player-controls-volume">

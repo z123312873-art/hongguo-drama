@@ -150,6 +150,37 @@ const checks = [
       assert.equal(await f.fetchPlayUrlFromWeb('11', '1'), null, 'unverified webpage must not be labelled as the requested episode');
     }
   }],
+  ['Protected website SEO preview never replaces the complete App episode', async () => {
+    const calls = [];
+    let protectedPlayback = true, appAvailable = true;
+    const f = load('hongguo.js', {
+      axios: {
+        get: async () => { calls.push('web'); return { data: webPage('11', '1', { protectedPlayback,
+          publicVideoSeo: { available: true, itemId: '11', seriesId: '1', durationSeconds: 166.488 } }) }; },
+        post: async () => { calls.push('api'); return { status: 200, headers: {}, data: Buffer.alloc(0) }; },
+      },
+      './app-source': { fetchAppPlayUrl: async (_vid, options) => {
+        calls.push(options?.quality || 'app');
+        if (!appAvailable) throw new Error('unavailable');
+        return { url: media('complete'), source: 'app' };
+      } },
+    });
+    const result = await f.fetchPlayUrlSingle('11', '1');
+    assert.equal(result.source, 'app', 'SEO duration describes the episode, not the public preview file');
+    assert.deepEqual(calls, ['web', 'app'], 'known preview must skip the redundant alternate page');
+    appAvailable = false; calls.length = 0;
+    const unavailable = await f.fetchPlayUrlSingle('11', '1', { force: true });
+    assert.equal(unavailable.code, 'SOURCE_UNAVAILABLE');
+    assert.equal(unavailable.sources.find(item => item.source === 'web').code, 'PREVIEW_ONLY');
+    f.markWebMediaFailure({ source: 'web', vid: '11' }); calls.length = 0;
+    assert.equal((await f.fetchPlayUrlSingle('11', '1', { force: true })).code, 'SOURCE_UNAVAILABLE',
+      'final web recovery must not reintroduce the preview');
+    protectedPlayback = false;
+    assert.equal((await f.fetchPlayUrlSingle('11', '1', { force: true })).source, 'web', 'complete public web remains a valid recovery');
+    appAvailable = true; calls.length = 0;
+    assert.equal((await f.fetchPlayUrlSingle('11', '1', { quality: '1080p' })).source, 'app');
+    assert.deepEqual(calls, ['1080p'], 'explicit quality remains App-only');
+  }],
   ['Web accepts only an identity-bound VideoObject and ignores earlier recommended media', async () => {
     const unrelated = `<script type="application/ld+json">${JSON.stringify({ '@type': 'VideoObject', url: 'https://hongguoduanju.com/player/2/22', contentUrl: media('recommendation') })}</script>`;
     let html = unrelated + webPage();

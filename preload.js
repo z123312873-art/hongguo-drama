@@ -1,9 +1,10 @@
-// 红果短剧 2.8：桌面桥接入口，发行说明见 docs/release-2.8.md。
+// 红果短剧 2.9：桌面桥接入口，发行说明见 docs/release-2.9.md。
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPublicDetails: (seriesId, vid) => ipcRenderer.invoke('get-public-details', seriesId, vid),
   getEpisodeComments: options => ipcRenderer.invoke('get-episode-comments', options),
+  getEpisodeDanmaku: options => ipcRenderer.invoke('get-episode-danmaku', options),
   setStealthMode: enabled => ipcRenderer.invoke('set-stealth-mode', enabled),
   onStealthState: cb => {
     const listener = (_event, state) => cb(state);
@@ -40,6 +41,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchResolve: (seriesId) => ipcRenderer.invoke('search-resolve', seriesId),
   searchWindowShow: (visible, sourceUrl) => ipcRenderer.invoke('search-window-show', visible, sourceUrl),
   getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
+  forgetSeries: (seriesId) => ipcRenderer.invoke('forget-series', seriesId),
+  removeWatchHistory: (seriesId) => ipcRenderer.invoke('remove-watch-history', seriesId),
+  cleanupWatchedEpisode: (seriesId, vidIndex) => ipcRenderer.invoke('cleanup-watched-episode', seriesId, vidIndex),
   removeSeries: (seriesId) => ipcRenderer.invoke('remove-series', seriesId),
   purgeEmptySeries: () => ipcRenderer.invoke('purge-empty-series'),
   restoreDismissedSeries: () => ipcRenderer.invoke('restore-dismissed-series'),
@@ -88,8 +92,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSeriesEpisodes: (seriesId) => ipcRenderer.invoke('get-series-episodes', seriesId),
   downloadSingleEpisode: (seriesId, vidIndex, quality) =>
     ipcRenderer.invoke('download-single-episode', seriesId, vidIndex, quality),
-  savePlaybackPosition: (seriesId, vidIndex, currentTime) =>
-    ipcRenderer.invoke('save-playback-position', seriesId, vidIndex, currentTime),
+  savePlaybackPosition: (seriesId, vidIndex, currentTime, metadata) =>
+    ipcRenderer.invoke('save-playback-position', seriesId, vidIndex, currentTime, metadata),
   getPlaybackPosition: (seriesId) => ipcRenderer.invoke('get-playback-position', seriesId),
 
   // 观看记录

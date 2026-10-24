@@ -9,7 +9,7 @@ const tick = (ui, time) => {
   let finish;
   const ui = mount({ prepare: p => p.prefetch ? new Promise(r => { finish = r; }) : { success: true, url: 'hongguo-stream://one' } });
   await ui.flush(); ui.metadata();
-  assert.ok(ui.button('缓存下一集'), 'cache toggle must be visible');
+  assert.equal(ui.button('缓存下一集'), undefined, 'cache preference lives in Settings');
   assert.equal(ui.media.currentTime, 0);
   assert.equal(ui.prepares.length, 2, 'opening episode one must immediately prefetch episode two');
   tick(ui, 1); tick(ui, 2); await ui.flush();
@@ -25,10 +25,11 @@ const tick = (ui, time) => {
     tick(disabled, 90); await disabled.flush();
     assert.ok(!disabled.prepares.some(p => p.prefetch)); disabled.unmount();
   }
-  const cancel = mount({ prepare: p => p.prefetch ? new Promise(() => {}) : { success: true, url: 'hongguo-stream://one' } });
+  const changedSettings = { cache_next_episode: true };
+  const cancel = mount({ apiOverrides: { getSettings: async () => changedSettings }, prepare: p => p.prefetch ? new Promise(() => {}) : { success: true, url: 'hongguo-stream://one' } });
   await cancel.flush(); cancel.metadata(); tick(cancel, 90); await cancel.flush();
-  await cancel.button('缓存下一集').props.onClick(); await cancel.flush();
-  assert.equal(cancel.settingsSaved.at(-1).cache_next_episode, false);
+  cancel.props.active = false; await cancel.flush();
+  changedSettings.cache_next_episode = false; cancel.props.active = true; await cancel.flush();
   assert.ok(cancel.releases.some(r => r.requestId === cancel.prepares[1].requestId)); cancel.unmount();
   const failed = mount({ prepare: p => p.prefetch ? { success: false, error: 'offline' } : { success: true, url: 'hongguo-stream://normal' } });
   await failed.flush(); failed.metadata(); tick(failed, 90); await failed.flush(); tick(failed, 91); await failed.flush();
@@ -41,5 +42,5 @@ const tick = (ui, time) => {
   chain.episode(2); await chain.flush(); chain.metadata(); await chain.flush();
   assert.equal(chain.prepares.at(-1).vidIndex, 3);
   assert.equal(chain.prepares.at(-1).prefetch, true); chain.unmount();
-  console.log('PASS next-cache: immediate trigger, reuse, skip, saved toggle, cancellation, failure fallback, next-episode chain');
+  console.log('PASS next-cache: immediate trigger, reuse, skip, settings refresh, cancellation, failure fallback, next-episode chain');
 })().catch(error => { console.error(error); process.exitCode = 1; });

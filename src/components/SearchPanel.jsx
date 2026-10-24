@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import './HongguoDownload.css';
 import { Search, Film, RefreshCw, ExternalLink } from './icons';
 import { isSubmitKey } from './episodeRange';
-import { readSearchHistory, saveSearchTerm, clearSearchHistory, rememberCatalogTitles, getSearchSuggestions } from '../searchHistory';
+import { readSearchHistory, saveSearchTerm, removeSearchTerm, clearSearchHistory, rememberCatalogTitles, getSearchSuggestions } from '../searchHistory';
 
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
@@ -72,6 +72,15 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
       setHistoryError('');
     } catch {
       setHistoryError('搜索历史清除失败，请重试。');
+    }
+  };
+
+  const removeHistory = (term) => {
+    try {
+      setHistory(removeSearchTerm(term));
+      setHistoryError('');
+    } catch {
+      setHistoryError('这条搜索历史删除失败，请重试。');
     }
   };
 
@@ -200,7 +209,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
       <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">本机联想：匹配搜索历史和本次浏览过的真实剧名。</p>
       {history.length > 0 && <div className="search-history">
         <div className="search-history-heading"><span>本机搜索历史</span><button type="button" className="btn-chip" onClick={clearHistory}>清除历史</button></div>
-        <div className="search-history-terms">{history.map((term) => <button type="button" className="btn-chip" key={term} title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button>)}</div>
+        <div className="search-history-terms">{history.map((term) => <span className="search-history-term" key={term}><button type="button" className="btn-chip" title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button><button type="button" className="search-history-remove" aria-label={`删除搜索历史：${term}`} title="删除这条搜索历史" onClick={() => removeHistory(term)}>×</button></span>)}</div>
       </div>}
       {historyError && <p className="search-history-error" role="alert">{historyError}</p>}
       <p className="settings-hint" style={{ marginTop: 8 }}>

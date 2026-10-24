@@ -22,6 +22,12 @@ export function saveSearchTerm(term) {
   return history;
 }
 
+export function removeSearchTerm(term) {
+  const history = readSearchHistory().filter(value => value !== term);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  return history;
+}
+
 export function clearSearchHistory() {
   window.localStorage.removeItem(STORAGE_KEY);
 }

@@ -33,19 +33,39 @@ if (process.argv[2] !== 'main') {
     ui.metadata(); ui.error(3); await ui.flush(); assert.equal(ui.transcodes.at(-1).quality,'1080p'); assert.equal(ui.transcodes.at(-1).filePath,null);
     ui.episode(2); await ui.flush(); assert.equal(ui.prepares.at(-1).quality,'1080p'); ui.unmount();
   });
+  await check('a lower picture on one episode does not replace 1080p for the next episode', async () => {
+    const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: async () => ({ success: true, url: 'hongguo-stream://mock', notice: '本集没有可确认的 1080P 片源，实际为 720P（1280×720），已改用该清晰度' }) });
+    await ui.flush();
+    select(ui).props.onChange({ target: { value: '1080p' } });
+    await ui.flush();
+    ui.metadata();
+    assert.equal(select(ui).props.value, '1080p');
+    ui.episode(2);
+    await ui.flush();
+    assert.equal(select(ui).props.value, '1080p');
+    assert.equal(ui.prepares.at(-1).quality, '1080p');
+    assert.equal(ui.prepares.at(-1).vidIndex, 2);
+    ui.unmount();
+  });
   await check('online fallback keeps explicit quality independent of download selection',async()=>{
     const downloads=[];
-    const ui=mount({prepare:async()=>({success:false,error:'取源失败'}),settings:{download_quality:'720p'},
+    const ui=mount({props:{target:{seriesId:'A',vidIndex:1,ts:1}},prepare:async()=>({success:false,error:'取源失败'}),settings:{download_quality:'720p'},
       apiOverrides:{downloadSingleEpisode:async(...p)=>{downloads.push(p);return {success:false,error:'片源不足1080P'};}}});
-    await ui.flush(); assert(select(ui)); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush();
+    await ui.flush(); assert.equal(downloads.at(-1)?.[2],'720p', 'automatic playback fallback uses the download default');
+    assert(select(ui)); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush();
+    assert.equal(ui.prepares.at(-1)?.quality,'1080p');
     assert.equal(downloads.at(-1)[2],'1080p'); assert.match(text(alert(ui)),/片源不足1080P/); ui.unmount();
   });
-  await check('online quality leaves skipped local files intact when auto-delete is enabled',async()=>{
-    const deletes=[];
-    const ui=mount({local:true,settings:{auto_delete_watched:true},apiOverrides:{deleteEpisodeFile:async(...p)=>{deletes.push(p);return {success:true,count:1};}}});
-    await ui.flush(); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush(); ui.metadata();
-    ui.find(n=>n.type==='video').props.onEnded(); await ui.flush();
-    assert.equal(deletes.length,0,'a skipped low-quality original was never played'); ui.unmount();
+  await check('quality switching preserves files until the ended episode is cleaned',async()=>{
+    const cleaned=[];
+    const ui=mount({local:true,settings:{auto_delete_watched:true},apiOverrides:{cleanupWatchedEpisode:async(...p)=>{cleaned.push(p);return {success:true,count:1,freed:20};}}});
+    try {
+      await ui.flush(); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush(); ui.metadata();
+      assert.equal(cleaned.length,0,'changing quality must not delete files before playback ends');
+      ui.find(n=>n.type==='video').props.onEnded(); await ui.flush();
+      assert.deepEqual(cleaned,[['A',1]],'cleanup must target the ended episode, never the next one');
+      assert.equal(ui.prepares.at(-1).vidIndex,2); assert.equal(ui.prepares.at(-1).quality,'1080p');
+    } finally { ui.unmount(); }
   });
   await check('remembered explicit quality skips unverified files and third-party keeps automatic playback',async()=>{
     const storage=new Map([['hongguo:online-quality','1080p']]);

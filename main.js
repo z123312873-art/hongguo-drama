@@ -1,5 +1,5 @@
 /**
- * main.js - 红果短剧 2.8 下载器（独立版）主进程
+ * main.js - 红果短剧 2.9 下载器（独立版）主进程
  *
  * 功能：
  *   1. 红果短剧解析（分享链接 / series_id -> 全剧集列表）
@@ -13,7 +13,9 @@ const path = require('path');
 const IS_PREVIEW = require('./package.json').name === 'hongguo-experience-preview';
 if (IS_PREVIEW) {
   app.setName('红果短剧预览');
-  app.setPath('userData', path.join(app.getPath('appData'), 'hongguo-experience-preview'));
+  if (!app.commandLine.hasSwitch('user-data-dir')) {
+    app.setPath('userData', path.join(app.getPath('appData'), 'hongguo-experience-preview'));
+  }
 }
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
@@ -32,9 +34,10 @@ const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const { fitWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
-const { availableRelease } = require('./src/native/app-update');
+const { availableRelease, LATEST_API, LATEST_PAGE, RELEASES_URL, updateRedirectTag } = require('./src/native/app-update');
 const { fetchPublicDetails } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
+const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
 const mediaAccess = require('./src/native/media-access').createMediaAccess(process.env.VITE_DEV_SERVER_URL);
 const rendererSecurity = require('./src/native/renderer-security').createRendererSecurity(
   path.join(__dirname, 'dist-react', 'index.html'), process.env.VITE_DEV_SERVER_URL);
@@ -200,7 +203,7 @@ function getDefaultSettings() {
     // 兼容模式：本机无法解码 HEVC 时自动转码为 H.264（解决「黑屏有声」）
     compat_mode: true,
     cache_next_episode: true,
-    app_updates_enabled: false,
+    app_updates_enabled: true,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
     watch_notifications_enabled: false,
@@ -381,6 +384,9 @@ async function applyProxySettings(settings) {
 function getCurrentSettings() {
   const saved = store.getSettings() || {};
   const merged = { ...getDefaultSettings(), ...saved };
+  // 旧版本把检查写死为关闭，且当时指向原作者仓库，设置里也不能改。
+  // 没有 app_update_channel 的 false 不是用户选择，按现在的默认打开本仓库正式版检查。
+  if (saved.app_updates_enabled === false && saved.app_update_channel !== 'self') merged.app_updates_enabled = true;
   // 保证并发数合法
   const mc = parseInt(merged.max_concurrent, 10);
   MAX_CONCURRENT_DOWNLOADS = Number.isInteger(mc) && mc >= 1 && mc <= 10 ? mc : 3;
@@ -540,6 +546,7 @@ function upsertSeriesRegistry(data) {
     })),
     updatedAt: Date.now(),
     dismissed: false, // 用户主动移除过；再次登记时自动恢复显示
+    forgotten: false,
   };
   if (idx === -1) seriesRegistry.unshift(entry);
   else seriesRegistry[idx] = { ...seriesRegistry[idx], ...entry, dismissed: false };
@@ -794,7 +801,7 @@ async function executeHongguoDownload(task) {
         finally { cached.disk.readers--; disposeOnlineDisk(cached); }
       } else await fsp.writeFile(tmpPath, cached.buffer, { mode: 0o600 });
       source.token.throwIfRequested();
-      try { task.actualQuality = await verifyDownloadQuality(tmpPath, quality); reusedCache = true; }
+      try { task.actualQuality = await verifyDownloadQuality(tmpPath, qualityForDeliveredFile(quality, cached)); reusedCache = true; }
       catch (_) { fs.unlinkSync(tmpPath); }
       source.token.throwIfRequested();
       checkCustomAccess(vid);
@@ -805,10 +812,11 @@ async function executeHongguoDownload(task) {
       }
     }
     if (!reusedCache) await withMediaRecovery(vid, hongguoInfo?.series_id, { playInfo: checkedPlayInfo, quality, force: true, cancelToken: source.token }, async playInfo => {
+      const acceptedQuality = qualityForDeliveredFile(quality, playInfo);
       source.token.throwIfRequested();
       if (playInfo.format === 'hls') {
         await prepareHlsFile(playInfo,tmpPath,{cancelToken:source.token,onProgress:received => { task.receivedBytes = received; sendToRenderer('download-progress',{id,progress:0,receivedBytes:received,totalBytes:0}); }});
-        task.actualQuality = await verifyDownloadQuality(tmpPath,quality);
+        task.actualQuality = await verifyDownloadQuality(tmpPath,acceptedQuality);
         source.token.throwIfRequested(); checkCustomAccess(vid);
         publishDownloadFile(tmpPath,finalPath);
         return;
@@ -835,7 +843,7 @@ async function executeHongguoDownload(task) {
         const decodedPath = tmpPath + '.decoded';
         try {
           await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
-          task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
+          task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           source.token.throwIfRequested();
           publishDownloadFile(decodedPath, finalPath);
         } finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
@@ -847,14 +855,14 @@ async function executeHongguoDownload(task) {
         const decodedPath = tmpPath + '.decoded';
         try {
           await decryptInWorker({ srcPath: tmpPath, dstPath: decodedPath, key }, { cancelToken: source.token });
-          task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
+          task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           source.token.throwIfRequested();
           publishDownloadFile(decodedPath, finalPath);
         }
         finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
         fs.unlinkSync(tmpPath);
       } else {
-        task.actualQuality = await verifyDownloadQuality(tmpPath, quality);
+        task.actualQuality = await verifyDownloadQuality(tmpPath, acceptedQuality);
         source.token.throwIfRequested();
         publishDownloadFile(tmpPath, finalPath);
       }
@@ -1159,7 +1167,6 @@ const BROWSE_CATEGORIES = [
   { slug: 'real-drama', label: '真人剧' },
   { slug: 'comic-drama', label: '漫剧' },
   { slug: 'ai-drama', label: 'AI剧' },
-  { slug: 'comic', label: '漫画' },
   { slug: 'hot-drama', label: '综合热播榜', group: 'rank' },
   { slug: 'hot-real-drama', label: '真人热播榜', group: 'rank' },
   { slug: 'hot-comic-drama', label: '漫剧热播榜', group: 'rank' },
@@ -1281,6 +1288,18 @@ ipcMain.handle('remove-series', async (event, seriesId) => {
   return { success: true };
 });
 
+/** 保留播放与文件索引，仅从可恢复的列表中永久移除。 */
+ipcMain.handle('forget-series', async (_event, seriesId) => {
+  try {
+    const sid = String(seriesId);
+    if (!seriesRegistry.some(entry => String(entry.series_id) === sid)) return { success: false, error: '未找到该剧' };
+    const next = seriesRegistry.map(entry => String(entry.series_id) === sid ? { ...entry, dismissed: true, forgotten: true } : entry);
+    store.saveSeries(next);
+    seriesRegistry = next;
+    return { success: true };
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
 /** 批量移除没有下载过任何一集的短剧（清理浏览时留下的空档案） */
 ipcMain.handle('purge-empty-series', async () => {
   let removed = 0;
@@ -1388,13 +1407,13 @@ ipcMain.handle('rescan-downloads', async () => {
 ipcMain.handle('restore-dismissed-series', async () => {
   let n = 0;
   for (const s of seriesRegistry) {
-    if (s.dismissed) { s.dismissed = false; n++; }
+    if (s.dismissed && !s.forgotten) { s.dismissed = false; n++; }
   }
   if (n > 0) saveSeriesRegistry();
   return { success: true, count: n };
 });
 
-ipcMain.handle('dismissed-count', async () => seriesRegistry.filter((s) => s.dismissed).length);
+ipcMain.handle('dismissed-count', async () => seriesRegistry.filter((s) => s.dismissed && !s.forgotten).length);
 
 // ===== 一键合并（ffmpeg concat 流复制，无损且快）=====
 let mergeTasks = []; // { id, seriesId, seriesTitle, status, progress, output, total, done, error }
@@ -1873,12 +1892,12 @@ ipcMain.handle('get-series-episodes', async (event, seriesId) => {
 });
 
 // 断点续播
-ipcMain.handle('save-playback-position', async (event, seriesId, vidIndex, currentTime) => {  try {
+ipcMain.handle('save-playback-position', async (event, seriesId, vidIndex, currentTime, metadata) => {  try {
     const map = store.getPlayback() || {};
     const sid = String(seriesId);
     const series = seriesRegistry.find(item => String(item.series_id) === sid);
     if (!series) return { success: false, error: '未找到短剧档案' };
-    map[sid] = watchHistory.recordPlayback(map[sid], series, Number(vidIndex), Number(currentTime));
+    map[sid] = watchHistory.recordPlayback(map[sid], series, Number(vidIndex), Number(currentTime), Date.now(), metadata);
     store.savePlayback(map);
     return { success: true };
   } catch (error) {
@@ -1900,8 +1919,9 @@ ipcMain.handle('play-series', async (event, payload) => {
   const entry = seriesRegistry.find(item => String(item.series_id) === String(seriesId));
   if (!entry) return { success: false, error: '未找到短剧档案，请重新打开详情' };
   if (payload?.resume === true && entry.dismissed) {
-    try { entry.dismissed = false; saveSeriesRegistry(); }
-    catch (error) { entry.dismissed = true; return { success: false, error: error.message }; }
+    const wasForgotten = entry.forgotten;
+    try { entry.dismissed = false; entry.forgotten = false; saveSeriesRegistry(); }
+    catch (error) { entry.dismissed = true; entry.forgotten = wasForgotten; return { success: false, error: error.message }; }
   }
   sendToRenderer('navigate', {
     page: 'player',
@@ -1915,6 +1935,12 @@ function playbackQuality(value = 'auto', vid = '') {
   if (!['auto', '720p', '1080p'].includes(value)) throw new Error('在线播放清晰度无效，请选择自动、720p 或 1080p');
   if (value !== 'auto' && /^(xifan|hema|custom):/.test(String(vid))) throw new Error('此来源暂不支持指定在线播放清晰度，请选择自动');
   return value;
+}
+
+function qualityForDeliveredFile(requested, info) {
+  const delivered = info?.deliveredQuality || info?.quality;
+  if (info?.qualityLimited === true && ['auto', '720p', '1080p'].includes(delivered)) return delivered;
+  return requested;
 }
 
 function onlineCacheKey(vid, quality = 'auto') {
@@ -2388,7 +2414,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
   let quality;
   try { quality = playbackQuality(payload.quality, vid); } catch (error) { return { success: false, error: error.message }; }
   const sourceVid = String(vid), key = onlineCacheKey(sourceVid, quality), streamId = randomUUID();
-  const session = { vid: sourceVid, cacheKey: key, requestId, requests: new Set(), entry: null };
+  const session = { vid: sourceVid, seriesId: String(seriesId || ''), vidIndex: Number(vidIndex), cacheKey: key, requestId, requests: new Set(), entry: null };
   onlineSessions.set(streamId, session);
   try {
     checkCustomAccess(sourceVid);
@@ -2410,7 +2436,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
             }
           };
           const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,force,signal:controller.signal},async playInfo => {
-            const entry = {quality,size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
+            const entry = {quality,deliveredQuality:playInfo.quality,qualityLimited:playInfo.qualityLimited===true,notice:playInfo.notice||'',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
             else {
@@ -2435,7 +2461,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
     session.entry = { ...entry }; entry.lastUsed = Date.now();
     return { success: true, url: `${STREAM_SCHEME}://play/${streamId}`, streamId, size: entry.size,
-      cached, streaming: !!entry.playInfo };
+      cached, streaming: !!entry.playInfo, notice: entry.notice || '' };
   } catch (error) {
     releaseOnlineSession(streamId);
     return { success: false, error: error.message, code: error.code };
@@ -3068,10 +3094,12 @@ async function refreshWatchHistory(force = false) {
         const knownSequels = new Set((previousRecord.sequels || []).map(item => item.series_id));
         const newSequel = candidates?.some(item => !knownSequels.has(item.series_id));
         if (fresh.episodes.length >= oldSeries.episodes.length) {
-          const wasDismissed = oldSeries.dismissed === true;
+          const currentSeries = seriesRegistry.find(item => String(item.series_id) === sid);
+          const wasDismissed = currentSeries?.dismissed === true;
+          const wasForgotten = currentSeries?.forgotten === true;
           upsertSeriesRegistry(fresh);
           if (wasDismissed) {
-            seriesRegistry.find(item => String(item.series_id) === sid).dismissed = true;
+            Object.assign(seriesRegistry.find(item => String(item.series_id) === sid), { dismissed: true, forgotten: wasForgotten });
             saveSeriesRegistry();
           }
         }
@@ -3107,6 +3135,16 @@ async function refreshWatchHistory(force = false) {
   return historyRefresh;
 }
 
+ipcMain.handle('remove-watch-history', async (_event, seriesId) => {
+  try {
+    const map = { ...store.getPlayback() };
+    delete map[String(seriesId)];
+    store.savePlayback(map);
+    sendToRenderer('watch-history-updated', { removedSeriesId: String(seriesId) });
+    return { success: true };
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
 ipcMain.handle('get-watch-history', async () => ({ success: true, results: historyRows() }));
 ipcMain.handle('refresh-watch-history', async () => refreshWatchHistory(true));
 ipcMain.handle('delete-watch-history', async (_event, seriesId) => {
@@ -3114,7 +3152,7 @@ ipcMain.handle('delete-watch-history', async (_event, seriesId) => {
     const map = store.getPlayback();
     if (!watchHistory.forgetPlayback(map, seriesId)) return { success: false, error: '这部剧不在观看记录中' };
     store.savePlayback(map);
-    sendToRenderer('watch-history-updated', {});
+    sendToRenderer('watch-history-updated', { removedSeriesId: String(seriesId) });
     return { success: true };
   } catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
 });
@@ -3166,6 +3204,8 @@ ipcMain.handle('save-settings', async (event, settings) => {
     const wasCheckingUpdates = current.app_updates_enabled !== false;
     const merged = applyEditableSettings(current, settings);
     merged.download_quality = normalizeDownloadQuality(merged.download_quality);
+    // 这次保存带了开关，才算用户自己的选择。必须先写入再落盘，否则下次启动会把关闭当成旧的隐藏锁又打开。
+    if (Object.prototype.hasOwnProperty.call(settings || {}, 'app_updates_enabled')) merged.app_update_channel = 'self';
     store.saveSettings(merged);
     if (merged.app_updates_enabled === false) { updateDownloadGeneration++; appUpdateInstaller?.cancel(); }
     if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
@@ -3476,10 +3516,11 @@ ipcMain.handle('delete-series-files', async (event, seriesId, options) => {
 });
 
 /** 删除单集本地文件（看完即删用） */
-ipcMain.handle('delete-episode-file', async (event, seriesId, vidIndex) => {
+async function deleteEpisodeFile(seriesId, vidIndex) {
   try {
     const sid = String(seriesId);
     const idx = Number(vidIndex);
+    if (!sid || !Number.isSafeInteger(idx) || idx < 1) return { success: false, error: '剧集信息无效', count: 0, freed: 0 };
     const tasks = downloadTasks.filter(task => String(task.hongguoInfo?.series_id) === sid && Number(task.hongguoInfo?.vid_index) === idx);
     if (tasks.some(isTaskInFlight) || mergeTasks.some(task => task.seriesId === sid && task.status === 'running')) return { success: false, error: '该集正在下载或合并，暂不删除', count: 0, freed: 0 };
     const entry = seriesRegistry.find(item => String(item.series_id) === sid);
@@ -3499,6 +3540,40 @@ ipcMain.handle('delete-episode-file', async (event, seriesId, vidIndex) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('delete-episode-file', (_event, seriesId, vidIndex) => deleteEpisodeFile(seriesId, vidIndex));
+
+/** 前端先释放看完的媒体；只清本集，不影响预缓存的下一集。 */
+ipcMain.handle('cleanup-watched-episode', async (_event, seriesId, vidIndex) => {
+  try {
+    const sid = String(seriesId), idx = Number(vidIndex);
+    if (!sid || !Number.isSafeInteger(idx) || idx < 1) return { success: false, error: '剧集信息无效' };
+    const matches = entry => entry && String(entry.seriesId) === sid && Number(entry.vidIndex) === idx;
+    const compatFiles = ['auto', '720p', '1080p'].map(quality => compatPathFor(sid, idx, quality));
+    if ([...onlineSessions.values()].some(session => matches(session.entry || session)) || compatFiles.some(file => compatPreparing.has(file))) {
+      return { success: false, error: '该集仍在播放或准备，稍后再清理' };
+    }
+    const result = await deleteEpisodeFile(sid, idx);
+    if (!result.success) return result;
+    for (const [key, entry] of [...onlineCache]) {
+      if (!matches(entry)) continue;
+      const bytes = entry.size || 0;
+      deleteOnlineCacheEntry(key);
+      if (entry.filePath && fs.existsSync(entry.filePath)) { onlineCache.set(key, entry); result.failed++; continue; }
+      result.freed += bytes;
+      result.count++;
+    }
+    for (const file of compatFiles) {
+      if (isFileInUse(file)) { result.failed++; continue; }
+      try {
+        if (fs.existsSync(file)) { const size = fs.statSync(file).size; fs.unlinkSync(file); result.freed += size; result.count++; }
+      } catch (_) { result.failed++; }
+    }
+    result.success = !result.failed;
+    if (!result.success) result.error = '部分缓存清理失败，请稍后重试';
+    return result;
+  } catch (error) { return { success: false, error: error.message }; }
 });
 
 /** 各处磁盘占用统计（用于展示「可释放多少」） */
@@ -3697,8 +3772,9 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   return { success: false, error: '文件夹不存在' };
 });
 
-// Fork builds never contact upstream for app updates. The checker below stays for tests.
-let appUpdateChecksEnabled = false;
+// 只检查本仓库的正式发行。预发布和草稿由 availableRelease 丢掉，不会弹出更新。
+// 写法沿用上游检查，来源固定在 src/native/app-update.js，不读取原作者仓库。
+let appUpdateChecksEnabled = true;
 function appUpdatesAllowed() {
   return appUpdateChecksEnabled === true && !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false;
 }
@@ -3773,19 +3849,19 @@ ipcMain.handle('check-app-update', async event => {
     return { enabled: false, release: null };
   }
   if (!updateRequest) {
-    updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama/releases/latest', {
+    updateRequest = axios.get(LATEST_API, {
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-    }).catch(() => axios.get('https://github.com/jackotom/hongguo-drama/releases/latest', {
+    }).catch(() => axios.get(LATEST_PAGE, {
       // GitHub's public release endpoint does not consume the anonymous API quota.
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
       validateStatus: status => status === 200 || status === 302,
     }).then(response => {
       if (response.status !== 302) return response;
-      const tag = /^https:\/\/github\.com\/jackotom\/hongguo-drama\/releases\/tag\/(v?\d+\.\d+(?:\.\d+)?)$/.exec(response.headers.location || '');
+      const tag = updateRedirectTag(response.headers.location);
       if (!tag) throw new Error('Unexpected update redirect');
-      return { data: { tag_name: tag[1] } };
+      return { data: { tag_name: tag } };
     })).then(response => ({ release: availableRelease(response.data, APP_VERSION), error: '' }))
       .catch(() => ({ release: null, error: '暂时无法检查更新，请检查网络后重试。' }))
       .finally(() => { updateRequest = null; });
@@ -3799,7 +3875,7 @@ ipcMain.handle('open-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || !appUpdatesAllowed()) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
-  try { await shell.openExternal(latestAppRelease?.url || 'https://github.com/jackotom/hongguo-drama/releases/latest'); return { success: true }; }
+  try { await shell.openExternal(latestAppRelease?.url || LATEST_PAGE); return { success: true }; }
   catch { return { success: false, error: '无法打开浏览器，请稍后重试' }; }
 });
 
@@ -3811,6 +3887,12 @@ ipcMain.handle('get-public-details', async (event, seriesId, vid) => {
 ipcMain.handle('get-episode-comments', async (event, options) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
   return fetchEpisodeComments(options);
+});
+
+ipcMain.handle('get-episode-danmaku', async (_event, options) => {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return fetchDanmaku(null);
+  const { seriesId, vid, fresh, limit } = options;
+  return fetchDanmaku({ seriesId, vid, fresh, limit });
 });
 
 ipcMain.handle('get-app-info', async () => ({
@@ -3954,6 +4036,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   try {
     const dataFile = path.join(app.getPath('userData'), 'data.json');
     store.init(dataFile);
+    setDeviceIdentityFile(path.join(app.getPath('userData'), 'danmaku-client.json'));
     loadDownloadTasks();
     loadSeriesRegistry();
     try { rebuildSeriesRegistryFromTasks(); } catch (_) { /* storage-error reports the failed write when the window opens. */ }

@@ -2,18 +2,19 @@
 const assert = require('node:assert/strict');
 const { mount } = require('./check-player-resume.cjs');
 
-function target(tagName, { role = '', editable = false, menu = false, insidePlayer = true, playerControl = false } = {}) {
+function target(tagName, { role = '', editable = false, menu = false, closedMenuTrigger = false, insidePlayer = true, playerControl = false } = {}) {
   return { tagName: tagName.toUpperCase(), isContentEditable: editable,
     closest(selectors) {
       return selectors.split(',').some(raw => {
         const selector = raw.trim();
+        if (selector === 'button[aria-haspopup][aria-expanded="false"]' && closedMenuTrigger) return true;
         if (selector === tagName) return true;
         if (selector === '.player-container' && insidePlayer) return true;
         if (selector === '[data-player-control]' && playerControl) return true;
         if (selector === '[data-player-menu]' && menu) return true;
         if (selector.includes('[contenteditable') && editable) return true;
         const wantedRole = selector.match(/\[role=["']?([^\]"']+)["']?\]/)?.[1];
-        return wantedRole === role || (menu && wantedRole === 'menu');
+        return wantedRole === role || (menu && !closedMenuTrigger && wantedRole === 'menu');
       }) ? this : null;
     },
   };
@@ -123,6 +124,20 @@ async function ready() {
       assert.equal(down.defaultPrevented, false, modifier);
       assert.deepEqual(ui.mediaCalls, before, modifier);
     }
+  });
+  await test('closed menu trigger focus releases playback keys and retains native Space/Enter', async ui => {
+    const focused = target('button', { menu: true, closedMenuTrigger: true });
+    ui.media.currentTime = 40;
+    assert.equal(press(ui, 'ArrowRight', focused).down.defaultPrevented, true, 'closed menu trigger must not swallow seek');
+    assert.equal(ui.media.currentTime, 45);
+    assert.equal(press(ui, 'd', focused).down.defaultPrevented, true, 'closed menu trigger must not swallow speed');
+    const before = { ...ui.mediaCalls };
+    for (const key of [' ', 'Enter']) {
+      const { down, up } = press(ui, key, focused);
+      assert.equal(down.defaultPrevented, false, 'activation key still opens the menu');
+      assert.equal(up.defaultPrevented, false);
+    }
+    assert.deepEqual(ui.mediaCalls, before, 'menu activation must not pause playback');
   });
   await test('sidebar Space retains default button activation without toggling playback', async ui => {
     const before = { ...ui.mediaCalls };

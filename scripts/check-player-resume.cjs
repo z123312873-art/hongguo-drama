@@ -14,12 +14,19 @@ vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/ch
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
 function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [], apiOverrides = {} } = {}) {
-  props = { setEpisodesOpen() {}, ...props };
+  // Playback fixtures model an explicit play command; target:null exercises passive library entry.
+  props = { setEpisodesOpen() {}, ...((local || saved) ? { target: { seriesId, resume: true, ts: 1 } } : {}), ...props };
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
-  const releases = [], settingsSaved = [];
+  const releases = [], settingsSaved = [], historyListeners = new Set();
   const events = new Map(), mediaEvents = new Map(), timers = new Map();
   const listenerOptions = new Map(), mediaCalls = { play: 0, pause: 0 };
-  const document = { activeElement: null, querySelector: () => null };
+  const documentEvents = new Map();
+  const document = { activeElement: null, querySelector: () => null, fullscreenElement: null,
+    addEventListener: (name, fn) => documentEvents.set(name, fn), removeEventListener: name => documentEvents.delete(name),
+    exitFullscreen: async () => { document.fullscreenElement = null; documentEvents.get('fullscreenchange')?.(); } };
+  const scrollArea = { scrollTop: 360 };
+  const stage = { closest: selector => selector === '.main-content' ? scrollArea : null,
+    requestFullscreen: async () => { document.fullscreenElement = stage; scrollArea.scrollTop = 0; documentEvents.get('fullscreenchange')?.(); } };
   let cursor = 0, tree, timerId = 0, oldSrc = '', oldKey;
   let transcodeProgress;
   const media = { currentTime: 0, duration: 100, readyState: 0, videoWidth: 640, paused: false,
@@ -51,6 +58,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
     getSeriesEpisodes: async () => ({ success: true, data: { series_id: seriesId, series_title: '测试剧', total: episodeCount, episodes } }),
     getPlaybackPosition: async () => saved,
     savePlaybackPosition: async (...args) => saves.push(args),
+    onWatchHistoryUpdated: listener => { historyListeners.add(listener); return () => historyListeners.delete(listener); },
     prepareOnlinePlay: async p => { prepares.push(p); return prepare ? prepare(p) : { success: true, url: `hongguo-stream://mock-${prepares.length}` }; },
     transcodeForPlayback: async p => { transcodes.push(p); return transcode ? transcode(p) : { success: true, url: 'file:///mock-compat.mp4' }; },
     cancelTranscodeForPlayback: async p => cancelled.push(p),
@@ -70,7 +78,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const shortcutModule = { exports: {} };
   vm.runInNewContext(shortcutSource, { module: shortcutModule, exports: shortcutModule.exports, window, Event });
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
@@ -79,6 +87,8 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const render = () => {
     cursor = 0; tree = context.module.exports.default(props);
     const video = find(n => n.type === 'video');
+    const stageNode = find(n => n.props.className?.split(' ').includes('player-stage'));
+    if (stageNode) stageNode.props.ref.current = stage;
     if (video) { if (video.props.src !== oldSrc || video.props.key !== oldKey) { media.src = video.props.src; media.load(); oldSrc = video.props.src; oldKey = video.props.key; } video.props.ref.current = media; }
     else for (const slot of slots) if (slot?.current === media) slot.current = null;
     effects.splice(0).forEach(fn => fn()); return tree;
@@ -100,7 +110,8 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   };
   render();
   return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, document, dispatchKey,
-    releases, settingsSaved,
+    releases, settingsSaved, stage, scrollArea,
+    historyUpdated: payload => [...historyListeners].forEach(listener => listener(payload)),
     flushBatched: async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); render(); },
     transcodeProgress: payload => transcodeProgress?.(payload),
     button: label => find(n => n.type === 'button' && text(n).includes(label)),
@@ -114,6 +125,54 @@ module.exports = { mount };
 if (require.main === module) (async () => {
   let failures = 0;
   const test = async (name, fn) => { if (process.argv[2] && !name.includes(process.argv[2])) return; try { await fn(); console.log(`PASS ${name}`); } catch (e) { failures++; console.error(`FAIL ${name}: ${e.stack}`); } };
+  await test('removed history stays removed through hidden player unload and new playback can record again', async () => {
+    for (const resume of [false, true]) {
+      const ui = mount({ local: true }); await ui.flush(); ui.metadata();
+      ui.media.currentTime = 42; ui.props.active = false; ui.render();
+      ui.historyUpdated({ removedSeriesId: 'A' }); await ui.flush();
+      const afterRemoval = ui.saves.length;
+      ui.events.get('beforeunload')();
+      ui.find(n => n.type === 'video').props.onPause();
+      for (const timer of ui.timers.values()) if (timer.delay === 5000) timer.fn();
+      assert.equal(ui.saves.length, afterRemoval, 'old pause/timer/unload must not restore removed history');
+      if (resume) {
+        ui.props.active = true; ui.render(); await ui.media.play();
+        assert.ok(ui.saves.length > afterRemoval, 'new real playback may create a fresh history record');
+      }
+      const beforeUnmount = ui.saves.length; ui.unmount();
+      if (!resume) assert.equal(ui.saves.length, beforeUnmount, 'hidden player cleanup must not restore removed history');
+    }
+  });
+  await test('history completion forwards valid media duration and the ended event without auto-delete', async () => {
+    const ui = mount({ local: true, episodeCount: 1 }); await ui.flush(); ui.metadata();
+    ui.media.currentTime = 100;
+    ui.find(n => n.type === 'video').props.onEnded(); await ui.flush();
+    assert.ok(ui.saves.some(args => args[1] === 1 && args[2] === 100 && args[3]?.duration === 100 && args[3]?.ended === true));
+    ui.unmount();
+  });
+  await test('fullscreen scroll restores the player page after button and Escape exits', async () => {
+    const ui = mount(); await ui.flush();
+    try {
+      for (const fromButton of [true, false]) {
+        ui.scrollArea.scrollTop = fromButton ? 360 : 280;
+        const expected = ui.scrollArea.scrollTop;
+        const toggle = ui.find(n => typeof n.props.onToggleFullscreen === 'function').props.onToggleFullscreen;
+        await toggle();
+        assert.equal(ui.scrollArea.scrollTop, 0, 'entering fullscreen removes the player from the page flow');
+        if (fromButton) await toggle(); else await ui.document.exitFullscreen();
+        for (const [id, timer] of ui.timers) if (timer.delay === 0) { ui.timers.delete(id); timer.fn(); }
+        assert.equal(ui.scrollArea.scrollTop, expected, 'exit must restore the page position from before fullscreen');
+      }
+    } finally { ui.unmount(); }
+  });
+  await test('fullscreen scroll is restored after a rejected request and remains usable', async () => {
+    const ui = mount(); await ui.flush();
+    try {
+      ui.stage.requestFullscreen = async () => { ui.scrollArea.scrollTop = 0; throw new Error('denied'); };
+      await ui.find(n => typeof n.props.onToggleFullscreen === 'function').props.onToggleFullscreen();
+      assert.equal(ui.scrollArea.scrollTop, 360);
+    } finally { ui.unmount(); }
+  });
   await test('online unsupported-source error reconnects once without decoder certainty or automatic transcode', async () => {
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } }); await ui.flush();
     ui.error(4); await ui.flush();
@@ -234,7 +293,7 @@ if (require.main === module) (async () => {
     ui.unmount();
   });
   await test('network failure refreshes the same episode once and retains position', async () => {
-    const ui = mount({ settings: { cache_next_episode: false } }); await ui.flush(); await ui.button('在线播放').props.onClick(); await ui.flush(); ui.metadata();
+    const ui = mount({ settings: { cache_next_episode: false } }); await ui.flush(); await ui.button('播放本集').props.onClick(); await ui.flush(); ui.metadata();
     ui.media.currentTime = 42; ui.error(2); await ui.flush();
     assert.equal(ui.prepares.length, 2, 'network failure should reconnect once');
     assert.equal(ui.prepares[1].force, true);

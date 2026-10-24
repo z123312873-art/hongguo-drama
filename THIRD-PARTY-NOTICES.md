@@ -1,6 +1,6 @@
 # 第三方组件许可说明
 
-适用应用版本：红果短剧 2.8；以下第三方组件保留各自的版本与许可。
+适用源码／应用目标版本：红果短剧 2.9；以下第三方组件保留各自的版本与许可。
 
 本软件（红果短剧下载器）使用了以下第三方组件。各组件的版权归其各自作者所有，
 本软件对这些组件的使用均遵循其原始许可证。
@@ -125,3 +125,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## 时间轴弹幕实现来源：dawei233/hongguo-drama
+
+- 项目：https://github.com/dawei233/hongguo-drama
+- 固定来源提交：c884fab6c6e36ad38173e251738b9b35f958383f
+- 许可：GPL-3.0，沿用来源的许可与作者说明；本项目 LICENSE 的标准 GPL-3.0 正文保持不变。
+- 引用范围：分时弹幕请求与签名、分页解析和缓存、时间轴投放模型、弹幕来源切换及相应测试。文件内保留来源说明，复用本项目已有 SM3 实现。
+- 2.9 在本项目现有 2.8 修复之上移植相关模块，并非用该 fork 的旧版本整体覆盖。
+- 来源接口不是官方开放平台，也不代表获得平台授权；接口变动可能使获取失效。

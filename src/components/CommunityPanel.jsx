@@ -9,7 +9,7 @@ const reviewDate = value => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
 };
 
-export default function CommunityPanel({ seriesId, episodeId, title }) {
+export default function CommunityPanel({ seriesId, episodeId, title, cover }) {
   const id = String(seriesId || '');
   const panelId = useId();
   const [openedSeries, setOpenedSeries] = useState('');
@@ -39,7 +39,7 @@ export default function CommunityPanel({ seriesId, episodeId, title }) {
         if (!data?.success) throw new Error(data?.error || '公开剧评暂时无法加载');
         if (cancelled) return;
         setResult({ key: requestKey, data });
-        setLibrary(saveLocalSeries({ id, title, published_at: data.published_at }));
+        setLibrary(saveLocalSeries({ id, title, cover, published_at: data.published_at }));
       } catch (failure) {
         if (!cancelled) setError(failure.message || '公开剧评暂时无法加载');
       } finally {
@@ -47,7 +47,7 @@ export default function CommunityPanel({ seriesId, episodeId, title }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [opened, id, episodeId, title, requestKey]);
+  }, [opened, id, episodeId, title, cover, requestKey]);
 
   if (!id) return null;
   const episodeScope = scope === 'episode' && !!episodeId;
@@ -65,7 +65,7 @@ export default function CommunityPanel({ seriesId, episodeId, title }) {
             setShareStatus('官方分享链接已复制');
           } catch { setShareStatus('复制失败，请重试'); }
         }}>复制分享链接</button>
-        <button type="button" className={`btn ${favorite ? 'community-favorited' : 'btn-outline'}`} aria-pressed={favorite} onClick={() => setLibrary(saveLocalSeries({ id, title, favorite: !favorite }))}>{favorite ? '已收藏到本机' : '收藏到本机'}</button>
+        <button type="button" className={`btn ${favorite ? 'community-favorited' : 'btn-outline'}`} aria-pressed={favorite} onClick={() => setLibrary(saveLocalSeries({ id, title, cover, favorite: !favorite }))}>{favorite ? '已收藏到本机' : '收藏到本机'}</button>
         <button type="button" className="btn btn-outline" aria-expanded={opened} aria-controls={panelId} onClick={() => setOpenedSeries(opened ? '' : id)}>{opened ? '收起剧评' : '查看公开剧评'}</button>
       </div>
     </div>

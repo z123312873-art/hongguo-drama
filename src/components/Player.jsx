@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import useDialogKeyboard from './useDialogKeyboard';
 import PlayerControls from './PlayerControls';
 import CommentDanmaku, { useCommentDanmaku } from './CommentDanmaku';
+import OfficialDanmaku, { useOfficialDanmaku } from './OfficialDanmaku';
+// 时间轴弹幕在 danmaku.js / OfficialDanmaku；本集评论在 episode-comments.js / CommentDanmaku。
+// 两条通路不要并成同一次请求。播放先用时间轴，这一集没有可用时间轴时才自动改用本集评论。
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
@@ -24,7 +27,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const [shortcuts, setShortcuts] = useState(readShortcuts);
   const [showDanmakuControls, setShowDanmakuControls] = useState(false);
   useEffect(() => subscribeShortcuts(setShortcuts), []);
-  const [portraitActionsOpen, setPortraitActionsOpen] = useState(false);
+  const [managementOpen, setManagementOpen] = useState(false);
   const [windowFill, setWindowFill] = useState(false);
   useEffect(() => { if (!portrait || !active) setWindowFill(false); }, [portrait, active]);
   const [seriesList, setSeriesList] = useState([]);
@@ -47,7 +50,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const [autoNext, setAutoNext] = useState(true);
   const [autoAdvancing, setAutoAdvancing] = useState(false);
   const [cacheNext, setCacheNext] = useState(true);
-  const [cacheNextSaving, setCacheNextSaving] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [downloadQuality, setDownloadQuality] = useState('auto');
   const [onlineQualityChoice, setOnlineQualityChoice] = useState(() => {
@@ -59,11 +61,11 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const [qualityLoading, setQualityLoading] = useState(true);
   const [waitingFor, setWaitingFor] = useState(null); // 正在等待下载的集号
   const [toast, setToast] = useState(null);
+  const [rateNotice, setRateNotice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [merging, setMerging] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);   // 剧集选择面板
   const [pickerQuery, setPickerQuery] = useState('');
-  const [dismissedCount, setDismissedCount] = useState(0);
 
   // 在线播放（按需流式或临时准备后缓存）
   const [onlineVid, setOnlineVid] = useState(null);
@@ -85,15 +87,18 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const [decodeFailed, setDecodeFailed] = useState(false);    // 当前集解不出画面
   const [playbackError, setPlaybackError] = useState('');
   const [playbackVersion, setPlaybackVersion] = useState(0);
+  const [playbackRequested, setPlaybackRequested] = useState(false);
   const [compatCache, setCompatCache] = useState({ files: 0, bytes: 0 });
   const [mergeAsk, setMergeAsk] = useState(false);            // 合并格式选择
 
   const videoRef = useRef(null);
   const stageRef = useRef(null);
+  const fullscreenScrollRef = useRef(null);
   const playbackRateRef = useRef(1);
   const toastTimer = useRef(null);
+  const rateNoticeTimer = useRef(null);
   const pendingSeekRef = useRef(0); // 切集后要跳转的秒数
-  const pendingAutoplayRef = useRef(true);
+  const pendingAutoplayRef = useRef(false);
   const activeRef = useRef(active);
   activeRef.current = active;
   const navigationVersion = useRef(0);
@@ -122,15 +127,22 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const rejectedLocalRef = useRef(null);
 
   // 只有收到当前片源的 metadata 后才保存，避免旧元素的 pause 覆盖新集断点。
-  const persistPosition = useCallback((force = false) => {
+  const persistPosition = useCallback((force = false, ended = false) => {
     const media = loadedMediaRef.current;
     if (!media?.played || media.version !== mediaVersion.current) return;
     const seconds = media.element.currentTime;
     if (!Number.isFinite(seconds) || seconds < 0) return;
     if (!force && Math.abs(seconds - lastSavedRef.current) < 3) return;
     lastSavedRef.current = seconds;
-    window.electronAPI.savePlaybackPosition(media.seriesId, media.vidIndex, seconds).catch(() => {});
+    window.electronAPI.savePlaybackPosition(media.seriesId, media.vidIndex, seconds,
+      { duration: media.element.duration, ended: ended || media.element.ended === true }).catch(() => {});
   }, []);
+
+  useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(payload => {
+    const media = loadedMediaRef.current;
+    // A retained hidden player must not recreate a record removed on the history page.
+    if (media && String(media.seriesId) === payload?.removedSeriesId) media.played = false;
+  }), []);
 
   const currentPosition = useCallback(() => {
     const media = loadedMediaRef.current;
@@ -141,7 +153,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const releaseOnline = useCallback(() => {
     const request = onlineRequestRef.current;
     onlineRequestRef.current = null;
-    if (request) window.electronAPI.releaseOnlinePlay({ requestId: request.requestId, streamId: request.streamId }).catch(() => {});
+    if (request) return window.electronAPI.releaseOnlinePlay({ requestId: request.requestId, streamId: request.streamId }).catch(() => {});
   }, []);
 
   const releasePrefetch = useCallback(() => {
@@ -160,6 +172,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
   const resetPlayback = useCallback((autoplay = true) => {
     fallbackRef.current = null;
+    setPlaybackRequested(true);
     pendingAutoplayRef.current = autoplay && activeRef.current;
     setAutoAdvancing(false);
     persistPosition(true);
@@ -202,6 +215,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     releasePrefetch();
     clearTimeout(decodeTimer.current);
     clearTimeout(toastTimer.current);
+    clearTimeout(rateNoticeTimer.current);
   }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch]);
 
   const showToast = useCallback((text) => {
@@ -221,8 +235,12 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       v.defaultPlaybackRate = next;
       v.playbackRate = next;
     }
-    if (notify) showToast(`播放速度 ${next}×`);
-  }, [showToast]);
+    if (notify) {
+      setRateNotice(next);
+      clearTimeout(rateNoticeTimer.current);
+      rateNoticeTimer.current = setTimeout(() => setRateNotice(null), 1800);
+    }
+  }, []);
 
   // 载入已登记的剧集列表
   const loadSeriesList = useCallback(async () => {
@@ -312,8 +330,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     storageDirtyRef.current = false;
     await refreshOnlineCacheInfo();
     try {
-      const dc = await window.electronAPI.dismissedCount();
-      setDismissedCount(dc || 0);
       const st = await window.electronAPI.getStorageUsage();
       if (st && st.success) {
         const map = {};
@@ -366,12 +382,19 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (!cancelled) {
         setDownloadQuality(['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto');
         setShowDanmakuControls(settings?.show_danmaku_controls !== false);
+        setAutoDelete(settings?.auto_delete_watched === true);
+        setCacheNext(settings?.cache_next_episode !== false);
+        setAutoCompat(settings?.compat_mode !== false);
       }
     }).catch(() => {
       if (!cancelled) showToast('默认下载清晰度读取失败，请确认清晰度后再下载');
     }).finally(() => { if (!cancelled) setQualityLoading(false); });
     return () => { cancelled = true; };
   }, [active]);
+
+  useEffect(() => {
+    if (!cacheNext) releasePrefetch();
+  }, [cacheNext, releasePrefetch]);
 
   useEffect(() => {
     if (!window.electronAPI.onTranscodeProgress) return undefined;
@@ -381,48 +404,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       setCompatProgress({ vidIndex: d.vidIndex, percent: d.percent || 0 });
     });
   }, []);
-
-  /**
-   * 注意：以下三个用到 episodes 的函数必须定义在 episodes 之后。
-   * useCallback 的依赖数组在「定义时」就会求值，若提前引用后声明的 const
-   * 会触发 TDZ（Cannot access 'X' before initialization）导致整页白屏。
-   */
-  const toggleCacheNext = async () => {
-    const next = !cacheNext;
-    setCacheNext(next);
-    setCacheNextSaving(true);
-    if (!next) releasePrefetch();
-    try {
-      const settings = await window.electronAPI.getSettings();
-      const result = await window.electronAPI.saveSettings({ ...settings, cache_next_episode: next });
-      if (!result?.success) throw new Error(result?.error || '设置保存失败');
-      showToast(next ? '已开启：开始播放就缓存下一集' : '已关闭缓存下一集');
-    } catch (error) {
-      showToast(`本次已${next ? '开启' : '关闭'}，但未能保存设置：${error.message}`);
-    } finally { setCacheNextSaving(false); }
-  };
-
-  const toggleAutoCompat = async () => {
-    const next = !autoCompat;
-    try {
-      const s = await window.electronAPI.getSettings();
-      const result = await window.electronAPI.saveSettings({ ...s, compat_mode: next });
-      if (!result?.success) throw new Error(result?.error || '设置保存失败');
-      setAutoCompat(next);
-      showToast(next ? '兼容模式已开启：无法解码时自动转码' : '兼容模式已关闭');
-    } catch (error) { showToast('兼容模式未更改：' + error.message); }
-  };
-
-  const toggleAutoDelete = async () => {
-    const next = !autoDelete;
-    try {
-      const s = await window.electronAPI.getSettings();
-      const result = await window.electronAPI.saveSettings({ ...s, auto_delete_watched: next });
-      if (!result?.success) throw new Error(result?.error || '设置保存失败');
-      setAutoDelete(next);
-      showToast(next ? '已开启：看完一集自动删除本地文件' : '已关闭自动删除');
-    } catch (error) { showToast('自动删除设置未更改：' + error.message); }
-  };
 
   // 打开剧集面板时，补全各剧的下载进度（只拉一次）
   useEffect(() => {
@@ -514,12 +495,32 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
   const compatUrl = current ? compatMap[current.vid_index] : null;
   const isOnlinePlaying = onlineVid && current && current.vid === onlineVid && onlineUrl;
-  const canPlay = !!(!playbackError && !onlineProgress && current && !current.locked && (compatUrl || usableLocal(current, String(activeSeriesId)) || isOnlinePlaying));
+  const canPlay = !!(playbackRequested && !playbackError && !onlineProgress && current && !current.locked && (compatUrl || usableLocal(current, String(activeSeriesId)) || isOnlinePlaying));
   const playableSource = compatUrl || (isOnlinePlaying ? onlineUrl : current?.fileUrl) || '';
   // 原生全屏依附于 video 节点。准备下一集时保留结束帧，换源不换节点。
   if (canPlay) lastVideoSrcRef.current = playableSource;
-  const videoSrc = compatProgress ? '' : lastVideoSrcRef.current;
-  const danmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: active && canPlay && showDanmakuControls, source: videoSrc });
+  const videoSrc = !playbackRequested || compatProgress ? '' : lastVideoSrcRef.current;
+  // 换清晰度会短暂卸下当前地址。弹幕跟这一集走，不跟这一次片源地址走。
+  const danmakuActive = active && showDanmakuControls && playbackRequested && Boolean(current?.vid) && !current.locked;
+  const episodeKey = `${activeSeriesId || ''}:${current?.vid || ''}`;
+  const [commentFallbackKey, setCommentFallbackKey] = useState('');
+  // 键必须对上当前集。换集后旧键对不上，本集评论立刻停下，不会铺到下一集。
+  const useEpisodeComments = commentFallbackKey === episodeKey && episodeKey !== ':';
+  // 时间轴弹幕：OfficialDanmaku / getEpisodeDanmaku，带 offset_time。
+  // 本集评论：CommentDanmaku / getEpisodeComments，公开页评论，没有视频时间点。
+  // 两条通路不要并成同一次请求。只有时间轴成功返回且一条都没有时，才自动改用本集评论。
+  // 接口失败仍停在时间轴，方便重试；不能把失败当成“这一集没有弹幕”。
+  const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: useEpisodeComments });
+  const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive && !useEpisodeComments, preferences: commentDanmaku });
+  useEffect(() => {
+    const ready = Boolean(officialDanmaku.feed?.loaded) && !officialDanmaku.loading && !officialDanmaku.error;
+    const missing = danmakuActive && officialDanmaku.supported && ready && officialDanmaku.comments.length === 0;
+    const next = missing ? episodeKey : '';
+    setCommentFallbackKey(currentKey => currentKey === next ? currentKey : next);
+  }, [danmakuActive, episodeKey, officialDanmaku.supported, officialDanmaku.loading, officialDanmaku.error, officialDanmaku.feed, officialDanmaku.comments.length]);
+  const danmaku = useEpisodeComments
+    ? { ...commentDanmaku, sourceKind: 'comments' }
+    : { ...officialDanmaku, sourceKind: 'official' };
 
   useEffect(() => {
     const v = videoRef.current;
@@ -634,7 +635,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const handlePlaying = useCallback((event) => {
     const media = loadedMediaRef.current;
     const element = event.currentTarget;
-    if (playbackVersion !== mediaVersion.current || !canPlay || media?.version !== mediaVersion.current || media.element !== element) return;
+    if (!activeRef.current || element.paused || playbackVersion !== mediaVersion.current || !canPlay || media?.version !== mediaVersion.current || media.element !== element) return;
     if (element.currentSrc && element.currentSrc !== videoSrc) return;
     if (!media.played) {
       media.played = true;
@@ -691,6 +692,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         setOnlineUrl(res.url);
         setOnlineProgress(null);
         refreshOnlineCacheInfo();
+        if (res.notice) showToast(res.notice);
         queueNextPrefetchRef.current(vidIndex);
       };
       // A finished prefetch swaps the source in this same update, so the next episode does not drop to the preparing screen.
@@ -781,7 +783,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     fallbackAttemptRef.current = null;
     reconnectAttemptRef.current = null;
     setCompatMap({});
-    if (current && !current.locked) startOnlinePlay(currentIndex, seekTo, true, autoplay);
+    if (playbackRequested && current && !current.locked) startOnlinePlay(currentIndex, seekTo, true, autoplay);
   };
 
   // 找下一集（按集号顺序）
@@ -828,34 +830,43 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     queueNextPrefetchRef.current(currentIndex);
   };
 
-  // 播放结束 -> 连播（未下载的集自动转在线播放，做到「不下载也能连着看」）
-  const handleEnded = useCallback(() => {
+  // 先交接下一集或释放当前媒体，再清理刚看完的文件和缓存。
+  const handleEnded = useCallback(async () => {
     const { currentIndex: ci, autoNext: an, activeSeriesId: sid } = stateRef.current;
-    const finished = episodes.find((e) => e.vid_index === ci);
-
-    // 看完自动删：先把刚看完这集的本地文件清掉，再决定下一集怎么播
-    if (autoDelete && sid && usableLocal(finished, String(sid))) {
-      window.electronAPI.deleteEpisodeFile(sid, ci).then((r) => {
-        if (!r?.success) throw new Error(r?.error || '删除失败，请在剧库中重试');
-        if (r.count > 0) {
-          showToast(`第 ${ci} 集已看完，自动删除本地文件（释放 ${fmtSize(r.freed)}）`);
-          refreshCacheInfo();
-          loadDetail(sid);
-        }
-      }).catch(error => showToast(`第 ${ci} 集自动删除失败：${error.message}`));
+    const next = an ? findNext(ci) : null;
+    persistPosition(true, true);
+    const released = autoDelete && sid ? releaseOnline() : null;
+    if (autoDelete && sid) {
+      loadedMediaRef.current = null;
+      videoRef.current?.pause();
+      videoRef.current?.removeAttribute('src');
+      videoRef.current?.load();
+      lastVideoSrcRef.current = '';
+      setCompatMap(previous => { const result = { ...previous }; delete result[ci]; return result; });
     }
-
-    if (!an) return;
-    const next = findNext(ci);
-    if (!next) {
-      showToast(episodes.some((ep) => ep.locked) ? '已播完可播放集数，其余集数需在来源平台解锁' : '已经是最后一集');
-      return;
+    if (next) {
+      goToEpisode(next.vid_index, 0);
+      setAutoAdvancing(true);
+    } else {
+      if (autoDelete && sid) {
+        resetPlayback(false);
+        setPlaybackRequested(false);
+        pendingSeekRef.current = 0;
+      }
+      if (an) showToast(episodes.some(ep => ep.locked) ? '已播完可播放集数，其余集数需在来源平台解锁' : '已经是最后一集');
     }
-    goToEpisode(next.vid_index, 0);
-    setAutoAdvancing(true);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findNext, goToEpisode, showToast, startOnlinePlay, autoDelete, episodes, refreshCacheInfo, loadDetail]);
+    if (autoDelete && sid) {
+      await released;
+      window.electronAPI.cleanupWatchedEpisode(sid, ci).then(async result => {
+        if (!result?.success) throw new Error(result?.error || '清理失败，请在剧库中重试');
+        if (result.count > 0) showToast(`第 ${ci} 集已看完，清理文件和缓存（释放 ${fmtSize(result.freed)}）`);
+        refreshCacheInfo();
+        loadDetail(sid);
+        const cache = await window.electronAPI.compatCacheStatus();
+        if (cache?.success) setCompatCache({ files: cache.files, bytes: cache.bytes });
+      }).catch(error => showToast(`第 ${ci} 集自动清理失败：${error.message}`));
+    }
+  }, [findNext, goToEpisode, showToast, autoDelete, episodes, refreshCacheInfo, loadDetail, persistPosition, resetPlayback, releaseOnline]);
 
   // 离开页面、暂停和关闭窗口强制保存最后一秒。
   useEffect(() => {
@@ -898,14 +909,35 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (activeRef.current && pendingAutoplayRef.current) v.play().catch(() => { if (playbackVersion === mediaVersion.current) setAutoAdvancing(false); });
   };
 
+  const restoreFullscreenScroll = useCallback(() => {
+    const saved = fullscreenScrollRef.current;
+    if (!saved || document.fullscreenElement) return;
+    saved.element.scrollTop = saved.top;
+    fullscreenScrollRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    const restore = () => {
+      if (!document.fullscreenElement) frame = requestAnimationFrame(restoreFullscreenScroll);
+    };
+    document.addEventListener('fullscreenchange', restore);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener('fullscreenchange', restore); };
+  }, [restoreFullscreenScroll]);
+
   const toggleFullscreen = useCallback(async () => {
     if (document.querySelector('.stealth-mode')) { showToast('请先退出隐身小窗'); return; }
     try {
       if (portrait) { setWindowFill(fill => !fill); return; }
       if (document.fullscreenElement === stageRef.current) await document.exitFullscreen();
-      else await stageRef.current?.requestFullscreen();
-    } catch { showToast('无法进入或退出全屏，请重试'); }
-  }, [portrait, showToast]);
+      else {
+        const element = stageRef.current?.closest('.main-content');
+        // Fullscreen takes the player out of flow and can clamp the page's scrollTop to zero.
+        if (element && !fullscreenScrollRef.current) fullscreenScrollRef.current = { element, top: element.scrollTop };
+        await stageRef.current?.requestFullscreen();
+      }
+    } catch { restoreFullscreenScroll(); showToast('无法进入或退出全屏，请重试'); }
+  }, [portrait, showToast, restoreFullscreenScroll]);
 
   // Capture handled keys before media controls; cancel keyup too so focused buttons cannot toggle twice.
   useEffect(() => {
@@ -913,7 +945,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     const held = new Set();
     const onKey = (event) => {
       const video = videoRef.current;
-      if (!video || event.defaultPrevented || ignoresPlaybackShortcut(event.target)) return;
+      if (!video || event.defaultPrevented || ignoresPlaybackShortcut(event.target, event.key)) return;
       const key = shortcutKey(event);
       const action = SHORTCUT_ACTIONS.find(item => shortcuts[item.id] === key);
       if (!action) return;
@@ -962,6 +994,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     reconnectAttemptRef.current = null;
     onlineSourceRef.current = null;
     resetPlayback(autoplay);
+    setPlaybackRequested(autoplay);
     setCompatMap({});
     setActiveSeriesId(String(sid));
     setDetail(null);
@@ -977,7 +1010,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       const selected = d.episodes.find(e => e.vid_index === wantedIndex && !e.locked) || d.episodes.find(e => !e.locked);
       setCurrentIndex(selected?.vid_index || 1);
       pendingSeekRef.current = selected?.vid_index === saved?.vid_index ? saved.currentTime || 0 : 0;
-      if ((requestedIndex || saved || stateRef.current.onlineQuality !== 'auto') && selected && !usableLocal(selected, String(sid))) {
+      if (autoplay && selected && !usableLocal(selected, String(sid))) {
         pendingTargetRef.current = { seriesId: String(sid), vidIndex: selected.vid_index, seekTo: pendingSeekRef.current, autoplay: pendingAutoplayRef.current };
       }
     } catch (e) {
@@ -998,7 +1031,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         if (cancelled) return;
         const wanted = target?.seriesId && list.find(s => String(s.series_id) === String(target.seriesId));
         const selected = wanted || [...list].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-        if (selected) await switchSeries(selected.series_id, wanted ? target.vidIndex : 0, !!(wanted && target.resume), navigation === navigationVersion.current);
+        if (selected) await switchSeries(selected.series_id, wanted ? target.vidIndex : 0, !!(wanted && target.resume), !!wanted && target.autoplay !== false && navigation === navigationVersion.current);
         else setLoading(false);
       } catch (e) {
         if (!cancelled) { setLoading(false); showToast('加载剧库失败: ' + e.message); }
@@ -1013,7 +1046,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (!active || (!returned && !pickerOpen)) return;
     let cancelled = false;
     loadSeriesList().then(list => {
-      if (!cancelled && !selectedSeriesRef.current && list[0]) switchSeries(list[0].series_id);
+      if (!cancelled && !selectedSeriesRef.current && list[0]) switchSeries(list[0].series_id, 0, true, false);
     }).catch(() => { if (!cancelled) showToast('刷新剧库失败，请重新打开剧集面板'); });
     return () => { cancelled = true; };
   }, [active, pickerOpen, loadSeriesList, switchSeries, showToast]);
@@ -1027,17 +1060,17 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
   // 从列表移除一部短剧（只取消登记，不删本地文件）
   const removeSeries = async (sid, title) => {
-    const res = await window.electronAPI.removeSeries(sid);
+    const res = await window.electronAPI.forgetSeries(sid).catch(error => ({ success: false, error: error.message }));
     if (!res || !res.success) {
       showToast((res && res.error) || '移除失败');
       return;
     }
-    showToast(`已从列表移除《${title}》（本地文件保留）`);
+    showToast(`已永久移除《${title}》的剧库记录（本地文件保留）`);
     const list = await loadSeriesList();
     refreshCacheInfo();
     if (String(sid) === String(activeSeriesId)) {
       const next = list[0];
-      if (next) await switchSeries(next.series_id);
+      if (next) await switchSeries(next.series_id, 0, true, false);
       else {
         selectionVersion.current++;
         selectedSeriesRef.current = '';
@@ -1045,29 +1078,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         setActiveSeriesId('');
         setDetail(null);
       }
-    }
-  };
-
-  const purgeEmpty = async () => {
-    const res = await window.electronAPI.purgeEmptySeries();
-    if (res && res.success) {
-      showToast(res.count > 0 ? `已清理 ${res.count} 部未下载的剧` : '没有可清理的剧');
-      const list = await loadSeriesList();
-      refreshCacheInfo();
-      if (!list.some((s) => String(s.series_id) === String(activeSeriesId))) {
-        if (list[0]) await switchSeries(list[0].series_id);
-        else { selectionVersion.current++; selectedSeriesRef.current = ''; resetPlayback(); setActiveSeriesId(''); setDetail(null); }
-      }
-    }
-  };
-
-  const restoreDismissed = async () => {
-    const res = await window.electronAPI.restoreDismissedSeries();
-    if (res && res.success) {
-      showToast(res.count > 0 ? `已恢复 ${res.count} 部被移除的剧` : '没有被移除的剧');
-      const list = await loadSeriesList();
-      if (!selectedSeriesRef.current && list[0]) await switchSeries(list[0].series_id);
-      refreshCacheInfo();
     }
   };
 
@@ -1146,7 +1156,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
   useEffect(() => {
     if (actionsHidden || !active || !portrait) {
-      setPortraitActionsOpen(false);
+      setManagementOpen(false);
       setEpisodesOpen(false);
     }
     if (actionsHidden || !active) setPickerOpen(false);
@@ -1202,38 +1212,23 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               </button>
             )}
           </div>
-          {dismissedCount > 0 && (
-            <button className="btn btn-outline btn-sm" onClick={restoreDismissed}>
-              恢复已移除的 {dismissedCount} 部
-            </button>
-          )}
+
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`player-container ${portraitActionsOpen ? 'portrait-actions-open' : ''} ${episodesOpen ? '' : 'episodes-collapsed'}`}>
+    <div className={`player-container ${episodesOpen ? '' : 'episodes-collapsed'}`}>
       <div className="player-header" hidden={actionsHidden}>
         <div className="player-title">
           <Play size={22} />
           <h2>我的剧库</h2>
         </div>
-        <div className="player-header-right" id="player-management">
-          <p className="player-download-quality-hint" id="player-online-quality-hint">在线播放清晰度用于当前播放、切集及播放失败后的下载回退。指定画质只支持红果片源；其他来源由片源决定。已有低清文件会保留并改用在线片源。</p>
-          <p className="player-download-quality-hint" id="player-download-quality-hint">手动下载使用此项；在线播放选“自动”时，下载回退也使用此项。画质不可用会提示，不自动降级；已有文件保留。</p>
+        <div className="player-header-right">
+          <p className="player-download-quality-hint" id="player-online-quality-hint">自动、720P、1080P 都会保留。某一集片源不够时只临时播放该集的实际画面，自动播放下一集仍按所选清晰度重新取源。</p>
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
 
-          <button
-            aria-pressed={cacheNext}
-            className={`btn btn-outline ${cacheNext ? 'btn-autonext-on' : ''}`}
-            onClick={toggleCacheNext}
-            disabled={cacheNextSaving}
-            title="当前集开始播放就预缓存下一集，减少切集等待；会使用网络流量"
-          >
-            <Download size={15} />
-            缓存下一集 {cacheNext ? '开' : '关'}
-          </button>
           <button
             aria-pressed={autoNext}
             className={`btn btn-outline ${autoNext ? 'btn-autonext-on' : ''}`}
@@ -1242,24 +1237,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           >
             <Layers size={15} />
             连播 {autoNext ? '开' : '关'}
-          </button>
-          <button
-            aria-pressed={autoCompat}
-            className={`btn btn-outline ${autoCompat ? 'btn-autonext-on' : ''}`}
-            onClick={toggleAutoCompat}
-            title="本机无法解码 HEVC 时自动转码为 H.264 播放（解决黑屏有声）"
-          >
-            <Zap size={15} />
-            兼容模式 {autoCompat ? '开' : '关'}
-          </button>
-          <button
-            aria-pressed={autoDelete}
-            className={`btn btn-outline ${autoDelete ? 'btn-autonext-on' : ''}`}
-            onClick={toggleAutoDelete}
-            title="看完一集后自动删除该集的本地文件（边看边清，不占磁盘）"
-          >
-            <Trash2 size={15} />
-            看完自动删 {autoDelete ? '开' : '关'}
           </button>
           <label className="player-download-quality">
             <span>在线播放清晰度</span>
@@ -1271,6 +1248,35 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               <option value="1080p">1080P</option>
             </select>
           </label>
+
+        </div>
+      </div>
+
+      {/* 剧集选择：当前剧 + 下拉管理面板（替代原来会越堆越长的横条） */}
+      <div className="player-series-row" hidden={actionsHidden}>
+        <div className="player-series-current">
+          <span className="player-series-label">当前剧集</span>
+          <span className="player-series-name" title={detail ? detail.series_title : ''}>
+            {detail ? detail.series_title : '—'}
+          </span>
+        </div>
+        <div className="player-series-actions">
+        <button className="btn btn-outline player-management-toggle" aria-expanded={managementOpen}
+          aria-controls="player-management" onClick={() => setManagementOpen((open) => !open)}>管理</button>
+        <button
+          aria-expanded={pickerOpen}
+          className={`btn btn-outline series-picker-btn ${pickerOpen ? 'open' : ''}`}
+          onClick={() => setPickerOpen((v) => !v)}
+        >
+          切换剧集
+          <span className="series-count">{seriesList.length}</span>
+          <ChevronDown size={15} />
+        </button>
+        </div>
+      </div>
+
+      <div className="player-management" id="player-management" hidden={!managementOpen || actionsHidden}>
+          <p className="player-download-quality-hint" id="player-download-quality-hint">手动下载使用此项；在线播放选“自动”时，下载回退也使用此项。画质不可用会提示，不自动降级；已有文件保留。</p>
           <label className="player-download-quality">
             <span>下载清晰度</span>
             <select className="input-field" value={downloadQuality} disabled={qualityLoading}
@@ -1294,30 +1300,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
             <Layers size={15} />
             {merging ? '提交中...' : '合并导出全集'}
           </button>
-        </div>
-      </div>
-
-      {/* 剧集选择：当前剧 + 下拉管理面板（替代原来会越堆越长的横条） */}
-      <div className="player-series-row" hidden={actionsHidden}>
-        <div className="player-series-current">
-          <span className="player-series-label">正在播放</span>
-          <span className="player-series-name" title={detail ? detail.series_title : ''}>
-            {detail ? detail.series_title : '—'}
-          </span>
-        </div>
-        <div className="player-series-actions">
-        <button className="btn btn-outline portrait-management-toggle" aria-expanded={portraitActionsOpen}
-          aria-controls="player-management" onClick={() => setPortraitActionsOpen((open) => !open)}>管理</button>
-        <button
-          aria-expanded={pickerOpen}
-          className={`btn btn-outline series-picker-btn ${pickerOpen ? 'open' : ''}`}
-          onClick={() => setPickerOpen((v) => !v)}
-        >
-          切换剧集
-          <span className="series-count">{seriesList.length}</span>
-          <ChevronDown size={15} />
-        </button>
-        </div>
+        {onNavigate && <button className="btn btn-outline" onClick={() => onNavigate('settings')}>播放设置</button>}
       </div>
 
       {pickerOpen && !actionsHidden && (
@@ -1370,7 +1353,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
                         {dl && dl.completed > 0 ? `已下载 ${dl.completed}/${dl.total} 集` : `共 ${(s.episodes || []).length} 集 · 未下载`}
                       </div>
                     </div>
-                    {isActive && <span className="series-row-cur">播放中</span>}
+                    {isActive && <span className="series-row-cur">当前</span>}
                     {(() => {
                       const st = storageMap[String(s.series_id)];
                       const hasFiles = st && st.files > 0;
@@ -1406,10 +1389,11 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
                           )}
                           <button
                             className="icon-btn series-row-del"
-                            title="从列表移除（不删除本地文件）"
+                            title="永久移除剧库记录（不删除本地文件）"
+                            aria-label={`永久移除 ${s.series_title} 的剧库记录`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              removeSeries(s.series_id, s.series_title);
+                              setConfirmAsk({ title: '永久移除剧库记录', message: `将永久移除《${s.series_title}》的剧库记录，不能通过恢复列表找回。本地视频文件不会删除；以后可重新搜索添加。`, okText: '永久移除', danger: true, onOk: () => removeSeries(s.series_id, s.series_title) });
                             }}
                           >
                             <X size={15} />
@@ -1427,15 +1411,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               <span className="series-picker-usage">
                 本地已占用 <b>{fmtSize(storageTotal.bytes)}</b> / {storageTotal.files} 个文件
               </span>
-            )}
-            <button className="btn btn-outline btn-sm" onClick={purgeEmpty} title="把没有下载过任何一集的剧从列表中移除">
-              <Trash2 size={14} />
-              清理未下载的剧
-            </button>
-            {dismissedCount > 0 && (
-              <button className="btn btn-outline btn-sm" onClick={restoreDismissed}>
-                恢复已移除 ({dismissedCount})
-              </button>
             )}
             {storageTotal.files > 0 && (
               <button
@@ -1481,6 +1456,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       <div className="player-viewing-layout">
       {/* 播放区 */}
       <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} data-picture-mode={pictureMode} ref={stageRef}>
+          {rateNotice !== null && <div className="player-rate-notice" role="status" aria-live="polite">{rateNotice}×</div>}
           <video
             ref={videoRef}
             crossOrigin="anonymous"
@@ -1541,7 +1517,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
             }}
           />
         <VideoEnhancement videoRef={videoRef} source={videoSrc} available={canPlay && active} enhancement={enhancement} />
-        <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />
+        {useEpisodeComments
+          ? <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />
+          : <OfficialDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={danmaku} />}
         <PlayerControls danmaku={showDanmakuControls ? danmaku : null} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           seriesTitle={detail?.series_title} episodes={episodes} currentIndex={currentIndex} onEpisodeChange={goToEpisode}
           onlineQuality={onlineQuality} supportsOnlineQuality={supportsOnlineQuality} onQualityChange={changeOnlineQuality}
@@ -1585,6 +1563,13 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               </>
             ) : current?.locked || (episodes.length > 0 && episodes.every((ep) => ep.locked)) ? (
               <><Film size={34} /><p>需在来源平台解锁后观看</p><span className="player-placeholder-sub">本应用不提供解锁</span></>
+            ) : !playbackRequested && current ? (
+              <><Film size={34} /><p>第 {current.vid_index} 集 · 等待播放</p>
+                <button className="btn btn-primary" onClick={() => goToEpisode(current.vid_index, pendingSeekRef.current)}>
+                  <Play size={15} />播放本集
+                </button>
+                <span className="player-placeholder-sub">点击后继续观看，也可选择其他集数</span>
+              </>
             ) : current ? (
               <>
                 <Film size={34} />
@@ -1654,8 +1639,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
                 <Zap size={15} />
                 重新转码后播放
               </button>
-              <button className="btn btn-outline" onClick={toggleAutoCompat}>
-                {autoCompat ? '关闭自动转码' : '开启自动转码'}
+              <button className="btn btn-outline" onClick={() => onNavigate?.('settings')}>
+                播放设置
               </button>
             </div>
           </div>
@@ -1678,7 +1663,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       )}
 
       {detail?.web_accessible_episodes != null && detail.web_accessible_episodes < detail.total && (
-        <p className="player-tips">网页源提供前 {detail.web_accessible_episodes} 集，后续集数自动尝试 App 片源。</p>
+        <p className="player-tips">网页标记前 {detail.web_accessible_episodes} 集可访问；仅有预览或无完整片源时，自动尝试 App 片源。</p>
       )}
 
       {episodes.some((ep) => ep.locked) && <p className="player-tips">锁定集需在来源平台解锁，本应用不提供解锁；连播会跳过锁定集。</p>}
@@ -1725,7 +1710,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       </section>
       </div>
 
-      {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} />}
+      {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} cover={detail?.cover || ''} />}
       {toast && <div className="dm-toast dm-toast-success" onClick={() => setToast(null)}>{toast}</div>}
 
       {/* 合并格式选择 */}

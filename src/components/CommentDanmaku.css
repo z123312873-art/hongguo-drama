@@ -23,3 +23,5 @@
 
 .danmaku-settings textarea { width: 100%; min-height: 64px; resize: vertical; padding: 7px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--bg-input); color: var(--text-primary); font: inherit; line-height: 1.5; }
 .danmaku-filter-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.comment-danmaku-status { position: absolute; top: 12px; left: 12px; max-width: calc(100% - 24px); padding: 4px 8px; border-radius: 6px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 12px; line-height: 1.5; }

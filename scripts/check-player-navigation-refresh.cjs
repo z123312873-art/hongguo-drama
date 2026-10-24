@@ -121,18 +121,15 @@ const picker = ui => ui.find(n => n.props.className?.includes('series-picker-btn
       picker(ui).props.onClick(); await ui.flush(); assert.equal(scans, 2, 'management must see completed files');
     } finally { ui.unmount(); }
   });
-  for (const action of ['return', 'restore']) await test(`empty library ${action} selects its first available episode`, async () => {
+  await test('empty library return selects its first episode without playback', async () => {
     let list = [];
-    const ui = mount({ local: true, apiOverrides: {
-      getSeriesList: async () => list, dismissedCount: async () => 1,
-      restoreDismissedSeries: async () => { list = [{ series_id: 'A' }]; return { success: true, count: 1 }; },
-    } });
+    const ui = mount({ local: true, props: { target: null }, apiOverrides: { getSeriesList: async () => list } });
     try {
       await ui.flush();
-      if (action === 'return') {
-        ui.props.active = false; await ui.flush(); list = [{ series_id: 'A' }]; ui.props.active = true; await ui.flush();
-      } else { await ui.button('恢复已移除').props.onClick(); await ui.flush(); }
-      assert.ok(ui.find(n => n.props['aria-label'] === '第 1 集'), 'restored library needs selected episode data');
+      ui.props.active = false; await ui.flush(); list = [{ series_id: 'A' }]; ui.props.active = true; await ui.flush();
+      assert.ok(ui.find(n => n.props['aria-label'] === '第 1 集'));
+      assert.equal(ui.find(n => n.type === 'video').props.src, undefined);
+      assert.equal(ui.button('恢复已移除'), undefined);
     } finally { ui.unmount(); }
   });
   await test('storage recovery event clears the displayed failure', async () => {

@@ -633,13 +633,16 @@
 }
 
 .player-series-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.portrait-management-toggle, .portrait-episodes-toggle { display: none; }
+.portrait-episodes-toggle { display: none; }
+.player-management { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; padding: 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px; }
+.player-management[hidden] { display: none; }
 .layout-portrait .player-container { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .layout-portrait .player-header { position: relative; margin: 0; }
 .layout-portrait .player-title { display: none; }
-.layout-portrait .player-header-right { display: none; position: absolute; top: 42px; right: 0; left: 0; z-index: 8; background: var(--bg-card); padding: 16px; border: 1px solid var(--border); border-radius: 9px; }
-.layout-portrait .portrait-actions-open .player-header-right { display: flex; }
-.layout-portrait .portrait-management-toggle, .layout-portrait .portrait-episodes-toggle { display: inline-flex; }
+.layout-portrait .player-header-right { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 8px; }
+.layout-portrait .player-header-right .player-stat { display: none; }
+.layout-portrait .player-management { flex-shrink: 0; max-height: 35%; overflow: auto; }
+.layout-portrait .portrait-episodes-toggle { display: inline-flex; }
 .layout-portrait .player-series-row { flex-shrink: 0; min-height: 42px; padding: 0 0 8px; gap: 8px; }
 .layout-portrait .player-series-label { display: none; }
 .layout-portrait .series-count { display: none; }
@@ -678,3 +681,17 @@
 .player-download-quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
 .player-download-quality .input-field { width: auto; max-width: 100%; min-height: 31px; padding: 5px 8px; font-size: 12px; }
 .player-download-quality-hint { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+
+.player-rate-notice {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 8;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, .68);
+  color: #fff;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}

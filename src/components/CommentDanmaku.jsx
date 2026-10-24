@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, appendCommentPage, commentIsBlocked, advanceDanmaku } from './danmakuModel.mjs';
+import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, appendCommentPage, commentIsBlocked, advanceDanmaku, resizeDanmaku } from './danmakuModel.mjs';
 import './CommentDanmaku.css';
 
 const STORAGE_KEY = 'hongguo:comment-danmaku:v1';
@@ -103,6 +103,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8) });
     const reset = () => {
       state.items = [];
+      state.replayQueue = [];
       state.cooldown = 0;
       previous = 0;
       setItems([...state.items]);
@@ -111,7 +112,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
       const node = nodes.current.get(item.id);
       if (node) node.style.transform = `translate(${item.x}px, ${item.y}px)`;
     });
-    const canAdvance = () => !video.paused && !video.ended && !video.seeking && video.readyState >= 2 && !document.hidden;
+    const canAdvance = () => !video.paused && !video.ended && !document.hidden;
     const tick = now => {
       frame = 0;
       if (!canAdvance()) { previous = 0; return; }
@@ -123,24 +124,25 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     };
     const start = () => { if (!frame && canAdvance()) { previous = 0; frame = requestAnimationFrame(tick); } };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; previous = 0; };
-    const seek = () => { stop(); reset(); };
+    const emptied = () => { stop(); };
     const resize = () => {
       const nextWidth = layer.clientWidth;
       const nextHeight = layer.clientHeight;
       if (nextWidth === width && nextHeight === height) return;
+      if (!resizeDanmaku(state, options(), { ...options(), width: nextWidth, height: nextHeight })) return;
       width = nextWidth; height = nextHeight;
-      reset(); start();
+      setItems([...state.items]); paint(); start();
     };
     // Settings keep current trajectories and consumption; only new arrivals use the new lanes.
     start();
     const observer = new ResizeObserver(resize);
     observer.observe(layer);
-    const events = { playing: start, play: start, seeked: start, canplay: start, pause: stop, ended: stop, waiting: stop, seeking: seek, emptied: seek };
+    const events = { playing: start, play: start, seeked: start, canplay: start, pause: stop, ended: stop, waiting: start, seeking: start, emptied };
     Object.entries(events).forEach(([name, handler]) => video.addEventListener(name, handler));
     return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
   }, [running, available, comments, settings, reducedMotion, source, videoRef, feed]);
 
-  if (!running || !available) return null;
+  if (!running) return null;
   return <div ref={layerRef} className={`comment-danmaku ${reducedMotion ? 'comment-danmaku-static' : ''}`}>
     <div aria-hidden="true" style={{ opacity: settings.opacity / 100, fontSize: settings.fontSize }}>
       {(comments.length ? items : EMPTY).map(item => <span className="comment-danmaku-item" key={item.id} ref={node => { if (node) nodes.current.set(item.id, node); else nodes.current.delete(item.id); }}
@@ -151,12 +153,12 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
 
 export function DanmakuSettings({ danmaku, onClose, panelRef, maxHeight }) {
   const { settings, update } = danmaku;
-  return <div className="danmaku-settings" ref={panelRef} role="dialog" aria-label="评论弹幕设置" data-player-menu style={{ maxHeight }}
+  return <div className="danmaku-settings" ref={panelRef} role="dialog" aria-label="弹幕设置" data-player-menu style={{ maxHeight }}
     onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
-    <div className="danmaku-settings-heading"><strong>评论弹幕</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
+    <div className="danmaku-settings-heading"><strong>{danmaku.sourceKind === 'comments' ? '本集评论' : '时间轴弹幕'}</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </button></div>
-    <p>本集公开评论依次展示，与视频时间无对应。全文可在「剧评与收藏」查看。</p>
+    <p>{danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已自动改用本集公开评论。评论没有视频时间点，会逐条从右侧飞过，不会在开播时整排铺满。' : '按视频时间展示时间轴弹幕。这一集没有时间轴内容时，会自动改用本集评论。'}</p>
     <label>不透明度 <output>{settings.opacity}%</output><input autoFocus aria-label="弹幕不透明度" type="range" min="20" max="100" step="5" value={settings.opacity} onChange={event => update({ opacity: Number(event.target.value) })} /></label>
     <label>字号 <output>{settings.fontSize}px</output><input aria-label="弹幕字号" type="range" min="16" max="32" step="2" value={settings.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} /></label>
     <label>滚动速度 <output>{settings.speed}×</output><input aria-label="弹幕滚动速度" type="range" min="0.5" max="2" step="0.25" value={settings.speed} onChange={event => update({ speed: Number(event.target.value) })} /></label>
@@ -167,6 +169,6 @@ export function DanmakuSettings({ danmaku, onClose, panelRef, maxHeight }) {
     <p>内置词含常见涉政及辱骂词；自定义词始终生效。命中后整条隐藏，仅保存在本机。词库无法覆盖所有表达或变体。</p>
     <p>默认在上半屏显示。跟随播放暂停与倍速；系统开启减少动态效果时，改为静态轮换。</p>
     <p role="status">{danmaku.saveError || danmaku.status}</p>
-    <div className="danmaku-settings-actions">{danmaku.error && <button type="button" onClick={danmaku.retry}>继续加载</button>}<button type="button" onClick={danmaku.reset}>恢复默认</button></div>
+    <div className="danmaku-settings-actions">{danmaku.error && <button type="button" onClick={danmaku.retry}>重试加载</button>}<button type="button" onClick={danmaku.reset}>恢复默认</button></div>
   </div>;
 }
