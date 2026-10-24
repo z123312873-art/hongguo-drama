@@ -55,7 +55,7 @@ const { mount } = require('./check-player-resume.cjs');
     forgetSeries: async sid => { forgotten.push(sid); list = list.filter(item => item.series_id !== sid); return { success: true }; },
     deleteSeriesFiles: () => { throw new Error('record removal must never delete files'); },
   } });
-  await library.flush(); library.button('切换剧集').props.onClick(); await library.flush();
+  await library.flush(); library.button('切换短剧').props.onClick(); await library.flush();
   library.find(n => n.props['aria-label'] === '永久移除 甲 的剧库记录').props.onClick({ stopPropagation() {} });
   await library.flush(); assert.deepEqual(forgotten, [], 'record removal requires the concrete confirmation');
   await library.button('永久移除').props.onClick(); await library.flush();

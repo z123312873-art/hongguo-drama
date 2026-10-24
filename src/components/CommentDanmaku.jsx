@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import DanmakuLine from './DanmakuLine';
 import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, appendCommentPage, commentIsBlocked, advanceDanmaku, danmakuSeed, resizeDanmaku } from './danmakuModel.mjs';
 import './CommentDanmaku.css';
 
@@ -110,7 +111,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     };
     const paint = () => state.items.forEach(item => {
       const node = nodes.current.get(item.id);
-      if (node) node.style.transform = `translate(${item.x}px, ${item.y}px)`;
+      if (node) node.style.transform = `translate3d(${Math.round(item.x)}px, ${Math.round(item.y)}px, 0)`;
     });
     const canAdvance = () => !video.paused && !video.ended && !document.hidden;
     const tick = now => {
@@ -146,7 +147,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
   return <div ref={layerRef} className={`comment-danmaku ${reducedMotion ? 'comment-danmaku-static' : ''}`}>
     <div aria-hidden="true" style={{ opacity: settings.opacity / 100, fontSize: settings.fontSize }}>
       {(comments.length ? items : EMPTY).map(item => <span className="comment-danmaku-item" key={item.id} ref={node => { if (node) nodes.current.set(item.id, node); else nodes.current.delete(item.id); }}
-        style={{ transform: `translate(${item.x}px, ${item.y}px)` }}>{item.text}</span>)}
+        style={{ transform: `translate3d(${Math.round(item.x)}px, ${Math.round(item.y)}px, 0)` }}><DanmakuLine text={item.text} /></span>)}
     </div>
   </div>;
 }

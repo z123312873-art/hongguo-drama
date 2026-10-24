@@ -28,3 +28,41 @@ export function clipDanmakuText(value, max = 80) {
   const chars = Array.from(text);
   return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : text;
 }
+
+function emojiCluster(char) {
+  const code = char.codePointAt(0);
+  return code === 0x200d || code === 0xfe0f || code === 0xfe0e || /\p{Extended_Pictographic}/u.test(char);
+}
+
+// 表情往往比一个汉字宽。宽度估小了，后一条会在间距还没留够时出发。
+export function measureDanmakuText(value, fontSize) {
+  const text = String(value || '');
+  let units = 0;
+  let emoji = false;
+  for (const char of text) {
+    if (emojiCluster(char)) { units += 1.35; emoji = true; }
+    else units += 1;
+  }
+  // 没有表情时沿用原来的字宽，时间轴续发间距不变。表情按更宽的字形留空。
+  if (!emoji) return (Array.from(text).length + 1) * fontSize;
+  return Math.ceil((units + 0.4) * fontSize);
+}
+
+export function splitDanmakuRuns(value) {
+  const runs = [];
+  let buffer = '';
+  let emoji = false;
+  const push = () => {
+    if (!buffer) return;
+    runs.push({ emoji, text: buffer });
+    buffer = '';
+  };
+  for (const char of String(value || '')) {
+    const next = emojiCluster(char);
+    if (buffer && next !== emoji) push();
+    emoji = next;
+    buffer += char;
+  }
+  push();
+  return runs;
+}
