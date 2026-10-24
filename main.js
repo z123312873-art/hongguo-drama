@@ -3891,8 +3891,8 @@ ipcMain.handle('get-episode-comments', async (event, options) => {
 
 ipcMain.handle('get-episode-danmaku', async (_event, options) => {
   if (!options || typeof options !== 'object' || Array.isArray(options)) return fetchDanmaku(null);
-  const { seriesId, vid, fresh, limit } = options;
-  return fetchDanmaku({ seriesId, vid, fresh, limit });
+  const { seriesId, vid, fresh, limit, prefetch } = options;
+  return fetchDanmaku({ seriesId, vid, fresh, limit, prefetch: prefetch === true });
 });
 
 ipcMain.handle('get-app-info', async () => ({
