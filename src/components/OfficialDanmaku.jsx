@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { commentIsBlocked, resizeDanmaku } from './danmakuModel.mjs';
 import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus } from './danmakuOfficial.mjs';
 import DanmakuLine from './DanmakuLine';
+import { syncDanmakuLayer, clearDanmakuLayer } from './danmakuSpace.mjs';
 import './CommentDanmaku.css';
 
 /**
@@ -162,6 +163,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
       lastFrame = now;
       const emitting = !video.seeking && video.readyState >= 2;
       if (advanceTimedDanmaku(state, list, video.currentTime, delta, { ...options(), emitting })) setItems([...state.items]);
+      syncDanmakuLayer('timeline', state.items);
       paint();
       if (emitting || state.items.length) frame = requestAnimationFrame(tick);
     };
@@ -185,7 +187,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     observer.observe(layer);
     const events = { playing: start, play: start, seeked: seek, canplay: start, pause: stop, ended: stop, waiting: start, seeking: seek, emptied };
     Object.entries(events).forEach(([name, handler]) => video.addEventListener(name, handler));
-    return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
+    return () => { clearDanmakuLayer('timeline'); stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
   }, [running, available, list, settings, reducedMotion, source, videoRef, feed]);
 
   if (!enabled || !active || !supported) return null;

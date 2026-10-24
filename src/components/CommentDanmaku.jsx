@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DanmakuLine from './DanmakuLine';
+import { foreignDanmaku } from './danmakuSpace.mjs';
 import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, appendCommentPage, commentIsBlocked, advanceDanmaku, danmakuSeed, resizeDanmaku } from './danmakuModel.mjs';
 import './CommentDanmaku.css';
 
@@ -101,7 +102,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     let width = layer.clientWidth;
     let height = layer.clientHeight;
     const controls = layer.parentElement?.querySelector('.player-controls-bar');
-    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), seed: danmakuSeed(feed.seriesId, feed.episodeId) });
+    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), seed: danmakuSeed(feed.seriesId, feed.episodeId), obstacles: foreignDanmaku('timeline') });
     const reset = () => {
       state.items = [];
       state.replayQueue = [];
@@ -159,7 +160,7 @@ export function DanmakuSettings({ danmaku, onClose, panelRef, maxHeight }) {
     <div className="danmaku-settings-heading"><strong>{danmaku.sourceKind === 'both' ? '时间轴弹幕和本集评论' : danmaku.sourceKind === 'comments' ? '本集评论' : '时间轴弹幕'}</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </button></div>
-    <p>{danmaku.sourceKind === 'both' ? '时间轴弹幕仍按视频时间出现。本集评论会另外分散飞过，同一集的节奏固定，换集会换一套。表情代码会显示成 emoji。' : danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已改用本集公开评论。评论按这一集打散飞过，不会在开播时排成一列。表情代码会显示成 emoji。' : '先读取时间轴弹幕。读到内容后会再补上本集评论；这一集没有时间轴内容时，改为展示本集评论。'}</p>
+    <p>{danmaku.sourceKind === 'both' ? '时间轴弹幕仍按视频时间出现。本集评论会另外分散飞过；同一行速度对齐，快的不会追上、慢的也不会被盖住。同一集的节奏固定，换集会换一套。表情代码会显示成 emoji。' : danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已改用本集公开评论。评论按这一集打散飞过，不会在开播时排成一列。表情代码会显示成 emoji。' : danmaku.error ? '时间轴弹幕没有载入，可重试。这一集先不改用本集评论，避免把读取失败说成本集没有弹幕。' : '正在读取时间轴弹幕。只要读到内容，无论多少条，都会再补上本集评论；一条都没有时，改为展示本集评论。'}</p>
     <label>不透明度 <output>{settings.opacity}%</output><input autoFocus aria-label="弹幕不透明度" type="range" min="20" max="100" step="5" value={settings.opacity} onChange={event => update({ opacity: Number(event.target.value) })} /></label>
     <label>字号 <output>{settings.fontSize}px</output><input aria-label="弹幕字号" type="range" min="16" max="32" step="2" value={settings.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} /></label>
     <label>滚动速度 <output>{settings.speed}×</output><input aria-label="弹幕滚动速度" type="range" min="0.5" max="2" step="0.25" value={settings.speed} onChange={event => update({ speed: Number(event.target.value) })} /></label>
