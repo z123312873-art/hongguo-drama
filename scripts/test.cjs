@@ -1,4 +1,4 @@
-// Platform-independent checks plus unit tests. Skips Windows installers,
+// Hongguo Drama 2.9: platform-independent checks plus all native and renderer unit tests. Skips Windows installers,
 // real FFmpeg/media fixtures, and Electron GUI launches.
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -33,8 +33,7 @@ const checks = fs.readdirSync(__dirname)
 let failed = 0;
 const unitTests = [
   ...fs.readdirSync(path.join(root, 'src/components/__tests__')).filter((name) => name.endsWith('.mjs')).map((name) => path.join('src/components/__tests__', name)),
-  'src/native/episode-comments.test.cjs',
-  'src/native/episode-panel.test.cjs',
+  ...fs.readdirSync(path.join(root, 'src/native')).filter((name) => name.endsWith('.test.cjs')).map((name) => path.join('src/native', name)),
 ];
 if (!run(['--test', ...unitTests])) failed++;
 if (!run(['src/components/check-ui-state.cjs'])) failed++;

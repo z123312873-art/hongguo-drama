@@ -72,11 +72,34 @@ function DownloadManager({ onNavigate, active = true }) {
   const [orderVersion, setOrderVersion] = useState(0);
   const [loadError, setLoadError] = useState('');
   const toastTimerRef = useRef(null);
+  const moreActionsRef = useRef(null);
   const activeRef = useRef(active);
   activeRef.current = active;
   const requests = useRef({ tasks: 0, queue: 0, series: 0, merges: 0 });
   const taskIndex = useRef(new Map());
   const downloadedSeries = useRef(new Set());
+
+  useEffect(() => {
+    const menu = moreActionsRef.current;
+    const close = () => { if (menu) menu.open = false; };
+    if (!active) { close(); return; }
+    const outside = event => { if (!menu?.contains(event.target)) close(); };
+    const escape = event => {
+      if (event.key !== 'Escape' || !menu?.open) return;
+      event.preventDefault(); event.stopPropagation();
+      close(); menu.querySelector('summary')?.focus();
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('focusin', outside);
+    document.addEventListener('keydown', escape);
+    window.addEventListener('blur', close);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('focusin', outside);
+      document.removeEventListener('keydown', escape);
+      window.removeEventListener('blur', close);
+    };
+  }, [active]);
 
   const refresh = useCallback(async () => {
     const request = ++requests.current.tasks;
@@ -447,7 +470,7 @@ function DownloadManager({ onNavigate, active = true }) {
           <Zap size={15} />
           {failedCount > 0 ? `重试失败 (${failedCount})` : '重试失败'}
         </button>
-        <details className="dm-more-actions"><summary>更多操作</summary><div className="dm-more-menu">
+        <details className="dm-more-actions" ref={moreActionsRef}><summary>更多操作</summary><div className="dm-more-menu" onClick={event => { const button = event.target.closest('button'); if (button && !button.disabled) moreActionsRef.current.open = false; }}>
         <button
           className="btn btn-outline"
           onClick={selectAllFailed}

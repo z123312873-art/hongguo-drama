@@ -16,7 +16,7 @@ export function readLocalLibrary() {
   }
 }
 
-export function saveLocalSeries({ id, title, published_at, favorite }) {
+export function saveLocalSeries({ id, title, published_at, favorite, cover }) {
   const current = readLocalLibrary();
   if (current.error) return current;
   const seriesId = String(id || '').trim();
@@ -27,15 +27,29 @@ export function saveLocalSeries({ id, title, published_at, favorite }) {
     title: String(title).trim(),
     published_at: validPublishedAt(published_at) ? published_at : previous?.published_at ?? null,
     favorite: typeof favorite === 'boolean' ? favorite : previous?.favorite ?? false,
+    cover: typeof cover === 'string' && /^https?:\/\//i.test(cover) ? cover : previous?.cover || '',
   };
   const items = [...current.items.filter(item => item.id !== seriesId), next];
   try {
-    // Only public title/id/date and the local favorite flag are persisted, never reviews.
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite }))));
+    // Persist public metadata and the local favorite flag, never reviews.
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, cover: item.cover || '' }))));
     window.dispatchEvent(new Event(CHANGE_EVENT));
     return { items, error: '' };
   } catch (error) {
     return { ...current, error: `未能保存到本机：${error.message}。请释放存储空间后重试。` };
+  }
+}
+
+export function removeLocalSeries(id) {
+  const current = readLocalLibrary();
+  if (current.error) return current;
+  const items = current.items.filter(item => item.id !== id);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    window.dispatchEvent(new Event(CHANGE_EVENT));
+    return { items, error: '' };
+  } catch (error) {
+    return { ...current, error: `未能移除本机记录：${error.message}。原有记录未改动。` };
   }
 }
 

@@ -44,7 +44,7 @@ export default function App() {
   const [playerTarget, setPlayerTarget] = useState(null); // 浏览页点播 -> 播放页选中
   const rememberPlayerSeries = useCallback((seriesId) => {
     // 保留命令时间戳避免重复初始化；重新挂载时只按当前系列的最新断点恢复。
-    setPlayerTarget(target => ({ seriesId, resume: true, ts: target?.ts }));
+    setPlayerTarget(target => ({ seriesId, resume: true, autoplay: false, ts: target?.ts }));
   }, []);
 
   useEffect(() => {

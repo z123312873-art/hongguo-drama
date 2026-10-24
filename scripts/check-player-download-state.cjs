@@ -97,6 +97,8 @@ function mountApp() {
     ui.episode(2); await ui.flush(); ui.metadata(); ui.media.currentTime = 28;
     app.render(); app.navigate('feed'); assert.equal(app.player(), undefined); ui.unmount();
     app.navigate('player'); ui = await start(f, app.player().props);
+    assert.equal(ui.prepares.length, 0, 'returning to library waits for explicit playback');
+    ui.button('播放本集').props.onClick(); await ui.flush(); ui.metadata();
     assert.equal(ui.prepares.at(-1).vidIndex, 2, 'consumed initial episode must not replay');
     assert.equal(ui.media.currentTime, 28);
     ui.find(n => n.props.className?.includes('series-picker-btn')).props.onClick(); await ui.flush();
@@ -104,6 +106,8 @@ function mountApp() {
     await ui.flush(); ui.episode(2); await ui.flush(); ui.metadata(); ui.media.currentTime = 41;
     app.render(); app.navigate('feed'); ui.unmount(); app.navigate('player');
     ui = await start(f, app.player().props);
+    assert.equal(ui.prepares.length, 0);
+    ui.button('播放本集').props.onClick(); await ui.flush(); ui.metadata();
     assert.equal(ui.prepares.at(-1).seriesId, 'B', 'return must retain the manually selected series');
     assert.equal(ui.prepares.at(-1).vidIndex, 2); assert.equal(ui.media.currentTime, 41); ui.unmount();
   });

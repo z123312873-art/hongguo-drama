@@ -45,3 +45,20 @@ assert.equal(forgetPlayback(kept, ''), false);
 assert.equal(forgetPlayback(kept, '__proto__'), false);
 assert.equal(forgetPlayback(null, '1000001'), false);
 console.log('PASS watch history: watched-only, resume metadata, ordering, update baseline, sequel matching, acknowledgement, single removal');
+
+const finalSeries = { series_id: 'last', total: 3, episodes: [] };
+const complete = recordPlayback(null, finalSeries, 3, 100, 1000, { duration: 100, ended: true });
+assert.equal(listHistory([finalSeries], { last: complete })[0].completed, true, '片尾事件应保存完成状态');
+const replay = recordPlayback(complete, finalSeries, 1, 5, 1100, { duration: 100, ended: false });
+assert.equal(listHistory([finalSeries], { last: replay })[0].completed, true, '重看不能丢失已看完状态');
+assert.equal(listHistory([{ ...finalSeries, total: 4 }], { last: complete })[0].completed, false, '新增集应重新归入未看完');
+const fourth = recordPlayback(complete, { ...finalSeries, total: 4 }, 4, 100, 1150, { duration: 100, ended: true });
+const shorterReplay = recordPlayback(fourth, finalSeries, 3, 100, 1175, { duration: 100, ended: true });
+assert.equal(listHistory([{ ...finalSeries, total: 4 }], { last: shorterReplay })[0].completed, true, '目录暂时缩短后重看片尾不能降低历史完成上限');
+for (const metadata of [undefined, { duration: Infinity, ended: true }, { duration: 100, ended: false }, { duration: '100', ended: true }]) {
+ const record = recordPlayback(null, finalSeries, 3, 100, 1200, metadata);
+ assert.equal(listHistory([finalSeries], { last: record })[0].completed, false, '旧记录或无效片尾证据不能假定完成');
+}
+const early = recordPlayback(null, finalSeries, 3, 5, 1300, { duration: 100, ended: true });
+assert.equal(listHistory([finalSeries], { last: early })[0].completed, false, '不在片尾不能标记完成');
+console.log('PASS completion evidence: final episode end, replay persistence, new episodes, legacy and invalid metadata');

@@ -25,7 +25,7 @@ function load(ownsLock, preview = false, options = {}) {
   Object.assign(app, {
     getVersion: () => 'test', getPath: name => name === 'userData' ? userData : '/tmp',
     setName() {}, setPath: (name, value) => { if (name === 'userData') userData = value; },
-    commandLine: { appendSwitch() {} },
+    commandLine: { appendSwitch() {}, hasSwitch: name => { assert.equal(name, 'user-data-dir'); return false; } },
     requestSingleInstanceLock: () => { events.push(['lock', userData]); return ownsLock; },
     quit: () => events.push(['quit']),
     whenReady: () => { events.push(['ready']); return { then: callback => ready.push(callback) }; },

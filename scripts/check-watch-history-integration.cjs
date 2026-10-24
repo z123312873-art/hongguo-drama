@@ -78,6 +78,41 @@ async function check(name, fn) {
     assert.equal(history[0].vid_index, 2);
     assert.equal(history[0].currentTime, 17.5);
   });
+  await check('removed history remains absent after retained player unload until fresh playback', async () => {
+    const { mount } = require('./check-player-resume.cjs');
+    for (const replay of [false, true]) {
+      const ui = mount({ local: true, seriesId: sid, apiOverrides: {
+        savePlaybackPosition: (...args) => ipc('save-playback-position', ...args),
+      } });
+      try {
+        await ui.flush(); ui.metadata(); ui.media.currentTime = 42;
+        ui.props.active = false; ui.render();
+        assert.equal((await ipc('remove-watch-history', sid)).success, true);
+        const removal = events.findLast(event => event.name === 'watch-history-updated');
+        assert.equal(removal.payload.removedSeriesId, sid);
+        ui.historyUpdated(removal.payload);
+        ui.events.get('beforeunload')();
+        ui.find(node => node.type === 'video').props.onPause();
+        assert.equal((await rows()).length, 0);
+        if (replay) {
+          ui.props.active = true; ui.render(); await ui.media.play();
+          assert.equal((await rows()).length, 1, 'deliberate new playback creates history again');
+        }
+      } finally { ui.unmount(); }
+      store.init(dataFile);
+      assert.equal((await rows()).length, replay ? 1 : 0, 'unmount must preserve removal across restart');
+    }
+  });
+  await check('completion evidence crosses IPC and survives persistence', async () => {
+    assert.equal((await ipc('save-playback-position', sid, 3, 100, { duration: 100, ended: true })).success, true);
+    store.init(dataFile);
+    assert.equal((await rows())[0].completed, true);
+    await ipc('save-playback-position', sid, 1, 1, { duration: 100, ended: false });
+    assert.equal((await rows())[0].completed, true);
+    fetchDetail = async () => series(4);
+    await ipc('refresh-watch-history');
+    assert.equal((await rows())[0].completed, false);
+  });
   await check('manual refresh updates stored episodes and preserves acknowledged updates', async () => {
     store.saveSettings({ root, watch_updates_enabled: false, watch_sequels_enabled: true });
     await ipc('save-playback-position', sid, 2, 12);

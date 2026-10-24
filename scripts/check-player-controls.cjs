@@ -14,7 +14,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
 (async () => {
   const slots = [], effects = [], cleanups = [], listeners = new Map(), documentListeners = new Map(), stageListeners = new Map(), windowListeners = new Map(), timers = new Map();
   let nextTimer = 0, keyboardFocus = false, now = 0, blurs = 0;
-  const advance = (milliseconds = 2000) => {
+  const advance = (milliseconds = 1000) => {
     const until = now + milliseconds;
     for (;;) {
       const next = [...timers].filter(([, timer]) => timer.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
@@ -44,7 +44,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     else if (document.fullscreenElement === stage) await document.exitFullscreen();
     else await stage.requestFullscreen();
   };
-  const context = { module: { exports: {} }, document, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: (fn, delay) => { timers.set(++nextTimer, { fn, at: now + delay }); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
+  const context = { module: { exports: {} }, document, Date: { now: () => now }, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: (fn, delay) => { timers.set(++nextTimer, { fn, at: now + delay }); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
   context.exports = context.module.exports; vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const visit = node => { if (!node || typeof node !== 'object') return; out.push(node); node.children?.forEach(visit); }; visit(tree); return out; };
   const find = label => nodes().find(node => node.props['aria-label'] === label);
@@ -116,6 +116,17 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     const event = { type, key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, target: keyTarget, defaultPrevented: false, ...extra };
     windowListeners.get(type)?.(event); render();
   };
+  for (const change of ['fullscreen', 'source', 'continuing']) {
+    movePointer(); advance(900); render();
+    if (change === 'fullscreen') await props.onToggleFullscreen();
+    else if (change === 'source') props.source += '-idle';
+    else props.continuing = true;
+    render(); advance(99); render(); assert.ok(!hidden(), `${change}: one second has not elapsed`);
+    advance(1); render(); assert.ok(hidden(), `${change}: passive effect rebuild must retain the pointer idle deadline`);
+    if (change === 'fullscreen') await props.onToggleFullscreen();
+    else if (change === 'continuing') props.continuing = false;
+    render();
+  }
   movePointer();
   document.activeElement = find('退出全屏');
   document.activeElement.blur = () => { blurs++; document.activeElement = null; };
@@ -141,27 +152,36 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
           advance(3000); render();
           assert.ok(hidden(), `${key} seek release must stay hidden after Shift release`);
           movePointer(); assert.ok(!hidden(), 'real pointer movement reveals controls after seek');
-          advance(1900); render();
+          advance(900); render();
           keyboard('keydown', key, { shiftKey: custom }); keyboard('keyup', key, { shiftKey: custom });
-          assert.ok(!hidden(), 'seek preserves controls that were already visible');
-          advance(200); render();
-          assert.ok(!hidden(), `${key} visible seek renews the idle timer past the original 2-second deadline`);
-          advance(1799); render();
-          assert.ok(!hidden(), `${key} visible seek stays visible until 2 seconds after activity`);
-          advance(1); render(); assert.ok(hidden(), `${key} visible seek hides after 2 idle seconds`);
-
-          movePointer(); advance(1900); render();
-          keyboard('keydown', key, { shiftKey: custom, defaultPrevented });
+          assert.ok(!hidden(), 'playback keys preserve the currently visible bar');
+          advance(99); render(); assert.ok(!hidden(), 'pointer idle has not yet reached one second');
+          advance(1); render(); assert.ok(hidden(), 'bar hides exactly one second after pointer movement, even after keyboard seeks');
           for (let repeat = 0; repeat < 6; repeat++) {
-            advance(500); render();
-            assert.ok(!hidden(), `${key} held seek stays visible across the original deadline (repeat ${repeat})`);
             keyboard('keydown', key, { shiftKey: custom, defaultPrevented, repeat: true });
+            advance(100); render(); assert.ok(hidden(), 'held seek must not wake the bar or pointer');
           }
           if (custom) keyboard('keyup', 'Shift');
           keyboard('keyup', key, { shiftKey: false, defaultPrevented });
-          advance(1999); render(); assert.ok(!hidden(), `${key} held seek stays visible before idle expiry`);
-          advance(1); render(); assert.ok(hidden(), `${key} held seek resumes hiding after 2 idle seconds`);
         }
+      }
+    }
+  }
+  for (const custom of [false, true]) {
+    props.shortcuts = { ...shortcutModule.exports.DEFAULT_SHORTCUTS, ...(custom ? { faster: 'shift+q', slower: 'shift+w', autoNext: 'shift+e', fullscreen: 'shift+r' } : {}) }; render();
+    for (const key of custom ? ['q', 'w', 'e', 'r'] : ['d', 's', 'a', 'f']) {
+      for (const defaultPrevented of [false, true]) {
+        advance(); render(); assert.ok(hidden());
+        keyboard('keydown', key, { shiftKey: custom, defaultPrevented });
+        keyboard('keydown', key, { shiftKey: custom, defaultPrevented, repeat: true });
+        listeners.get('ratechange')?.(); listeners.get('volumechange')?.(); render();
+        assert.ok(hidden(), `${key}: speed, volume and playback actions must not reveal hidden controls`);
+        if (custom) keyboard('keyup', 'Shift');
+        keyboard('keyup', key, { shiftKey: false, defaultPrevented });
+        assert.ok(hidden(), `${key}: releasing a playback action must not reveal controls`);
+        movePointer(); advance(900); render(); keyboard('keydown', key, { shiftKey: custom });
+        keyboard('keyup', key, { shiftKey: custom }); advance(100); render();
+        assert.ok(hidden(), `${key}: keyboard-only activity must not extend pointer idle`);
       }
     }
   }
@@ -202,10 +222,12 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   assert.ok(!hidden(), 'visible controls remain visible after an episode shortcut');
   advance(); render();
   keyboard('keydown', 'ArrowDown', { target: { closest: query => query.includes('[data-player-menu]') ? {} : null } });
-  assert.ok(!hidden(), 'menu input navigation still reveals and retains controls');
+  assert.ok(hidden(), 'keys owned by other menus must not reveal playback controls');
   advance(); render();
   keyboard('keydown', 'ArrowDown', { ctrlKey: true });
-  assert.ok(!hidden(), 'modified system keys keep ordinary reveal behavior');
+  assert.ok(hidden(), 'modified system keys must not disturb viewing');
+  for (const key of ['x', 'Escape', 'AudioVolumeUp', 'AudioVolumeDown']) { keyboard('keydown', key); keyboard('keyup', key); assert.ok(hidden(), `${key}: unrelated keys stay quiet`); }
+  keyboard('keydown', 'Tab'); assert.ok(!hidden(), 'Tab reveals controls for keyboard access');
   advance(); render();
   keyboard('keydown', ' '); media.pause(); render();
   assert.ok(!hidden(), 'intentional keyboard pause reveals controls');
@@ -423,5 +445,5 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     assert.equal(controls(blocked).props.continuing, false, 'autoplay rejection must leave the play control accessible');
     blocked.unmount();
   }
-  console.log('PASS video controls: visible seek idle renewal and repeat boundaries; previous-to-auto-next continuity with stationary-pointer/video-focus/early-pause events; real movement/click/Tab/focused-control/manual-pause access; persistent-pause recovery; default/custom previous/next keydown/keyup/reset/preparation/source/metadata/playing, local/online shortcut matrix, input/menu boundaries, play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
+  console.log('PASS video controls: one-second pointer idle and quiet held-key boundaries; previous-to-auto-next continuity with stationary-pointer/video-focus/early-pause events; real movement/click/Tab/focused-control/manual-pause access; persistent-pause recovery; default/custom previous/next keydown/keyup/reset/preparation/source/metadata/playing, local/online shortcut matrix, input/menu boundaries, play/pause, seek, volume, lower-right 4× menu, fullscreen idle/reveal, auto-next pause/preparing/source/metadata/play continuity, local/online parent wiring, failure/end recovery, pause/menu/drag/focus guards, portrait and exit cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

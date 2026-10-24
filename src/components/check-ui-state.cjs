@@ -63,7 +63,7 @@ async function mount(file, api, props = {}) {
     location: { href: 'http://localhost/' },
   });
   class ResizeObserver { observe() {} unobserve() {} disconnect() {} }
-  const shared = { window, document, localStorage, navigator: window.navigator, console, crypto: require('node:crypto').webcrypto, Event, CustomEvent, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, queueMicrotask, structuredClone, ResizeObserver, setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), setInterval: () => 1, clearInterval() {}, requestAnimationFrame: fn => { const id = ++timerId; timers.set(id, { fn, delay: 16 }); return id; } };
+  const shared = { window, document, localStorage, navigator: window.navigator, console, crypto: require('node:crypto').webcrypto, Event, CustomEvent, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, queueMicrotask, structuredClone, ResizeObserver, setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), setInterval: () => 1, clearInterval() {}, requestAnimationFrame: fn => { const id = ++timerId; timers.set(id, { fn, delay: 16 }); return id; }, cancelAnimationFrame: id => timers.delete(id) };
   const loadModule = (resolved) => {
     if (cache.has(resolved)) return cache.get(resolved).exports;
     const module = { exports: {} };

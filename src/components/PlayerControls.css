@@ -76,3 +76,6 @@
   .player-now-playing > span { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) { .player-controls { transition: none; } }
+
+.player-stage:has(> .player-controls.controls-hidden),
+.player-stage:has(> .player-controls.controls-hidden) .player-video { cursor: none; }

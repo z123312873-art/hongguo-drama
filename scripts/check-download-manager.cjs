@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { transformSync } = require('esbuild');
 
 function mount(api = {}, props = {}) {
-  const slots = [], effects = [], cleanups = [], events = new Map(), timers = new Map();
+  const slots = [], effects = [], cleanups = [], events = new Map(), timers = new Map(), domEvents = new Map();
   let cursor = 0, tree, timerId = 0, writes = 0, dialogOpen;
   const changed = (old, deps) => !old || deps.some((d, i) => !Object.is(d, old[i]));
   const react = {
@@ -17,20 +17,22 @@ function mount(api = {}, props = {}) {
     useEffect: (fn, deps) => { const i = cursor++; if (changed(slots[i], deps)) { slots[i] = deps; effects.push(() => { cleanups[i]?.(); cleanups[i] = fn(); }); } },
   };
   const defaults = { getDownloadTasks: async () => [], getSeriesList: async () => [], getMergeTasks: async () => [], getQueueStatus: async () => ({ active: 0, queued: 0, maxConcurrent: 3 }) };
-  const window = { electronAPI: new Proxy({ ...defaults, ...api }, { get: (obj, key) => obj[key] || (key.startsWith('on') ? fn => { events.set(key, fn); return () => events.delete(key); } : async () => ({ success: true })) }) };
+  const domTarget = scope => ({ addEventListener: (name, fn) => domEvents.set(`${scope}:${name}`, fn), removeEventListener: name => domEvents.delete(`${scope}:${name}`) });
+  const moreActions = { open: false, contains: target => target?.insideMenu === true, querySelector: () => ({ focus() { moreActions.focused = true; } }) };
+  const window = { ...domTarget('window'), electronAPI: new Proxy({ ...defaults, ...api }, { get: (obj, key) => obj[key] || (key.startsWith('on') ? fn => { events.set(key, fn); return () => events.delete(key); } : async () => ({ success: true })) }) };
   const setTimer = (fn, delay, interval = false) => { const id = ++timerId; timers.set(id, { fn, delay, interval }); return id; };
   const module = { exports: {} };
   vm.runInNewContext(transformSync(fs.readFileSync(`${__dirname}/../src/components/DownloadManager.jsx`, 'utf8'), { loader: 'jsx', format: 'cjs' }).code, {
     module, exports: module.exports, require: name => name === 'react' ? react : name === './useDialogKeyboard' ? open => { dialogOpen = open; } : {}, window,
-    document: { querySelector: () => null }, console, setTimeout: (fn, delay) => setTimer(fn, delay), clearTimeout: id => timers.delete(id), setInterval: (fn, delay) => setTimer(fn, delay, true), clearInterval: id => timers.delete(id),
+    document: { ...domTarget('document'), querySelector: () => null }, console, setTimeout: (fn, delay) => setTimer(fn, delay), clearTimeout: id => timers.delete(id), setInterval: (fn, delay) => setTimer(fn, delay, true), clearInterval: id => timers.delete(id),
   });
-  const render = () => { cursor = 0; tree = module.exports.default(props); effects.splice(0).forEach(fn => fn()); };
+  const render = () => { cursor = 0; tree = module.exports.default(props); const visit = node => { if (!node || typeof node !== 'object') return; if (node.props?.className === 'dm-more-actions' && node.props.ref) node.props.ref.current = moreActions; node.children?.forEach(visit); }; visit(tree); effects.splice(0).forEach(fn => fn()); };
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
   const textOf = n => typeof n === 'string' || typeof n === 'number' ? String(n) : n?.children?.map(textOf).join('') || '';
   const find = predicate => nodes().find(predicate);
   render();
   return {
-    render, find, nodes, text: () => textOf(tree), button: label => find(n => n.type === 'button' && textOf(n).includes(label)),
+    render, find, nodes, moreActions, dispatch: (scope, name, event = {}) => domEvents.get(`${scope}:${name}`)?.(event), domListeners: () => domEvents.size, text: () => textOf(tree), button: label => find(n => n.type === 'button' && textOf(n).includes(label)),
     flush: async () => { for (let i = 0; i < 25; i++) { await Promise.resolve(); render(); } },
     advance: ms => { for (const [id, timer] of [...timers]) if (timer.delay <= ms && timers.has(id)) { if (!timer.interval) timers.delete(id); timer.fn(); } },
     emit: (name, data) => events.get(name)?.(data), setProps: next => { props = { ...props, ...next }; render(); },
@@ -45,6 +47,28 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
 (async () => {
   let failures = 0, passed = 0;
   const test = async (name, fn) => { if (process.argv[2] && !new RegExp(process.argv[2]).test(name)) return; try { await fn(); passed++; } catch (error) { failures++; console.error(`FAIL ${name}: ${error.stack}`); } };
+  await test('more menu dismisses outside, focus exit, Escape, window blur, actions and page exit', async () => {
+    const ui = mount(); await ui.flush();
+    for (const [scope, name] of [['document', 'pointerdown'], ['document', 'focusin'], ['window', 'blur']]) {
+      ui.moreActions.open = true;
+      if (scope === 'document') {
+        ui.dispatch(scope, name, { target: { insideMenu: true } });
+        assert.equal(ui.moreActions.open, true, 'interacting inside must keep the menu open');
+      }
+      ui.dispatch(scope, name, { target: {} });
+      assert.equal(ui.moreActions.open, false, `${name} outside must close the menu`);
+    }
+    ui.moreActions.open = true;
+    ui.dispatch('document', 'keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    assert.equal(ui.moreActions.open, false, 'Escape must close the menu');
+    assert.equal(ui.moreActions.focused, true, 'Escape returns focus to the summary');
+    ui.moreActions.open = true;
+    ui.find(n => n.props.className === 'dm-more-menu').props.onClick({ target: { closest: () => ({ disabled: false }) } });
+    assert.equal(ui.moreActions.open, false, 'choosing an action closes the menu');
+    ui.moreActions.open = true; ui.setProps({ active: false });
+    assert.equal(ui.moreActions.open, false, 'leaving the download page closes the menu');
+    ui.unmount(); assert.equal(ui.domListeners(), 0);
+  });
   await test('automatic retry is visible, stoppable and separate from terminal failures', async () => {
     let stopped, retried;
     const ui = mount({getDownloadTasks: async () => [task(1)],

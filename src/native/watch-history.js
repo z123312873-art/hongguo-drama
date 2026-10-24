@@ -12,9 +12,10 @@ function listHistory(series, playback, showSequels = true) {
     const record = playback[item.series_id];
     const sequels = showSequels && Array.isArray(record.sequels) ? record.sequels : [];
     const seen = new Set(record.seenSequelIds || []);
+    const total = Math.max(totalEpisodes(item), record.knownTotal || 0);
     return {
       series_id: item.series_id, series_title: item.series_title, cover: item.cover || '',
-      total: Math.max(totalEpisodes(item), record.knownTotal || 0),
+      total, completed: total > 0 && Number.isInteger(record.completedEpisode) && record.completedEpisode >= total,
       vid_index: record.vid_index, currentTime: record.currentTime, updatedAt: record.updatedAt,
       unreadEpisodes: record.unreadEpisodes || 0, sequels,
       hasUpdates: record.unreadEpisodes > 0 || sequels.some(candidate => !seen.has(candidate.series_id)),
@@ -23,10 +24,15 @@ function listHistory(series, playback, showSequels = true) {
   }).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-function recordPlayback(previous, series, index, time, now = Date.now()) {
+function recordPlayback(previous, series, index, time, now = Date.now(), metadata = {}) {
   if (!Number.isInteger(index) || index < 1 || !Number.isFinite(time) || time < 0) throw new Error('无效的播放进度');
   const baseline = previous?.knownTotal ?? totalEpisodes(series);
+  const duration = metadata?.duration;
+  const completed = metadata?.ended === true && Number.isFinite(duration) && duration > 0
+    && time >= duration - Math.min(1, duration * 0.01) && time <= duration + 1
+    && index === Math.max(totalEpisodes(series), baseline);
   return { ...previous, vid_index: index, currentTime: time, updatedAt: now, watched: true,
+    ...(completed ? { completedEpisode: Math.max(Number.isInteger(previous?.completedEpisode) ? previous.completedEpisode : 0, index) } : {}),
     knownTotal: baseline, acknowledgedTotal: previous?.acknowledgedTotal ?? baseline };
 }
 

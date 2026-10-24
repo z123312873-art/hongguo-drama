@@ -50,14 +50,16 @@ function blockedAddress() {
 }
 
 // The local VPN's Fake-IP route can return a different CDN result. Resolve only this
-// exact official TLS origin through a fixed HTTPS resolver; never connect to Fake-IP.
+// exact official TLS origin through fixed HTTPS resolvers; never connect to Fake-IP.
 let officialDnsCache;
 let officialDnsPending;
 function resolveOfficialAddress() {
   if (officialDnsCache?.expires > Date.now()) return Promise.resolve(officialDnsCache.addresses);
   if (officialDnsPending) return officialDnsPending;
-  officialDnsPending = new Promise((resolve, reject) => {
-    const request = https.get('https://1.1.1.1/dns-query?name=hongguoduanju.com&type=A', {
+  const requests = [];
+  // Race trusted resolvers so a blocked regional route cannot delay the usable one.
+  officialDnsPending = Promise.any(['https://1.1.1.1/dns-query', 'https://223.5.5.5/resolve'].map(endpoint => new Promise((resolve, reject) => {
+    const request = https.get(`${endpoint}?name=hongguoduanju.com&type=A`, {
       agent: new https.Agent({ keepAlive: false }), headers: { Accept: 'application/dns-json' },
     }, response => {
       let body = '';
@@ -75,15 +77,23 @@ function resolveOfficialAddress() {
               rows.some(item => isIP(item.data) !== 4 || !isPublicAddress(item.data))) throw blockedAddress();
           const addresses = rows.map(item => ({ address: item.data, family: 4 }));
           const ttl = Math.max(0, Math.min(60, ...rows.map(item => Number(item.TTL) || 0)));
-          officialDnsCache = { addresses, expires: Date.now() + ttl * 1000 };
-          resolve(addresses);
+          resolve({ addresses, expires: Date.now() + ttl * 1000 });
         } catch (_) { reject(blockedAddress()); }
       });
     });
+    requests.push(request);
     const timer = setTimeout(() => request.destroy(Object.assign(new Error('官网安全 DNS 解析超时'), { code: 'ETIMEDOUT' })), 4000);
     request.on('close', () => clearTimeout(timer));
     request.on('error', reject);
-  }).finally(() => { officialDnsPending = null; });
+  }))).then(result => {
+    officialDnsCache = result;
+    return result.addresses;
+  }).catch(error => {
+    throw error.errors?.find(item => item.code === 'ERR_WEB_MEDIA_ADDRESS') || error.errors?.[0] || error;
+  }).finally(() => {
+    requests.forEach(request => request.destroy());
+    officialDnsPending = null;
+  });
   return officialDnsPending;
 }
 

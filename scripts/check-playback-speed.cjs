@@ -10,6 +10,17 @@ const { mount } = require('./check-player-resume.cjs');
   assert.ok(controls(), 'player must connect its video controls');
   controls().props.onRateChange(4); ui.render();
   assert.equal(ui.media.playbackRate, 4); assert.equal(ui.media.defaultPlaybackRate, 4);
+  const notice = () => ui.find(n => n.props.className === 'player-rate-notice');
+  assert.ok(notice(), 'button speed changes must show a dedicated in-video notice');
+  assert.ok(notice().children.join('').includes('4'), 'notice reports the applied speed');
+  assert.equal(ui.find(n => n.props.className === 'dm-toast dm-toast-success'), undefined, 'speed feedback must not use the page-bottom toast');
+  const oldTimer = [...ui.timers].find(([, timer]) => timer.delay === 1800)?.[0];
+  key('s'); ui.render(); assert.ok(notice().children.join('').includes('3.75'), 'keyboard changes update the same notice');
+  assert.equal(ui.timers.has(oldTimer), false, 'repeated speed changes restart the notice expiry');
+  const expiry = [...ui.timers].find(([, timer]) => timer.delay === 1800); assert.ok(expiry);
+  ui.timers.delete(expiry[0]); expiry[1].fn(); ui.render(); assert.equal(notice(), undefined, 'notice clears without changing playback');
+  controls().props.onRateChange(4); ui.render();
+
   key('d'); assert.equal(ui.media.playbackRate, 4);
   key('s'); assert.equal(ui.media.playbackRate, 3.75);
   for (let i = 0; i < 20; i++) key('s');

@@ -1,13 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { publicDateKey, readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
+import { publicDateKey, readLocalLibrary, removeLocalSeries, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import './ReleaseCalendar.css';
 
 export default function ReleaseCalendar({ onPlay }) {
   const [library, setLibrary] = useState(readLocalLibrary);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [chosenMonth, setChosenMonth] = useState('');
+  const [catalogCovers, setCatalogCovers] = useState(() => new Map());
   useEffect(() => subscribeLocalLibrary(setLibrary), []);
-  const rows = useMemo(() => library.items.map(item => ({ ...item, date: publicDateKey(item.published_at) })), [library.items]);
+  useEffect(() => {
+    if (!library.items.some(item => !item.cover) || !window.electronAPI?.getSeriesList) return;
+    let cancelled = false;
+    window.electronAPI.getSeriesList().then(items => {
+      if (!cancelled && Array.isArray(items)) setCatalogCovers(new Map(items.map(item => [String(item.series_id), item.cover || ''])));
+    }).catch(() => {}); // Missing local metadata leaves the poster placeholder available.
+    return () => { cancelled = true; };
+  }, []);
+  const rows = useMemo(() => library.items.map(item => ({ ...item, cover: item.cover || catalogCovers.get(item.id) || '', date: publicDateKey(item.published_at) })), [library.items, catalogCovers]);
   const dated = rows.filter(item => item.date).sort((a, b) => b.date.localeCompare(a.date));
   const filtered = rows.filter(item => !favoritesOnly || item.favorite);
   const months = [...new Set(filtered.filter(item => item.date).map(item => item.date.slice(0, 7)))].sort().reverse();
@@ -17,9 +26,11 @@ export default function ReleaseCalendar({ onPlay }) {
   const undated = filtered.filter(item => !item.date);
   const favoritesCount = rows.filter(item => item.favorite).length;
   const row = item => <li key={item.id} className="release-row">
+    <div className="release-poster" aria-hidden="true"><span>暂无海报</span>{item.cover && <img key={item.cover} src={item.cover} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }} />}</div>
     <div className="release-title"><strong>{item.title}</strong><span>{item.date ? `首次公开 ${item.date}` : '暂无首次公开时间'}</span></div>
     <div className="release-row-actions">
       <button type="button" className="btn btn-sm btn-outline" aria-label={`${item.favorite ? '取消收藏' : '收藏'}《${item.title}》`} aria-pressed={item.favorite} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: !item.favorite }))}>{item.favorite ? '已收藏' : '收藏'}</button>
+      <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title="仅移除本机收藏与日历记录，不删除视频文件" onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
       <button type="button" className="btn btn-sm" disabled={!onPlay} aria-label={`播放《${item.title}》`} onClick={() => onPlay?.({ seriesId: item.id, title: item.title })}>播放</button>
     </div>
   </li>;

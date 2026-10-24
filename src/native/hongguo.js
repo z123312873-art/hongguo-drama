@@ -264,6 +264,8 @@ async function fetchPlayUrlFromWeb(vid, sid, onFailure) {
           (sid && actualSid !== String(sid)) || String(data.seriesDetail?.series_id) !== actualSid ||
           data.publicVideoSeo?.available !== true || String(data.publicVideoSeo.itemId) !== String(vid) ||
           String(data.publicVideoSeo.seriesId) !== actualSid) continue;
+      // Protected pages expose a short SEO preview even when metadata claims the full duration.
+      if (data.protectedPlayback === true) { lastErr = { code: 'PREVIEW_ONLY' }; break; }
       // Bind media to the current player, never a recommended video's URL elsewhere in the page.
       const matchesPlayer = (value, videoUrl) => {
         try {
@@ -536,6 +538,7 @@ function sourceFailure(source, error) {
   if (code === 'SECURITY_BLOCKED' || code.startsWith('ERR_WEB_MEDIA_')) return { source, code: 'SECURITY_BLOCKED', message: '片源地址被安全校验阻止' };
   if (['ECONNABORTED', 'ETIMEDOUT', 'TIMEOUT'].includes(code) || /超时|timeout/i.test(message)) return { source, code: 'TIMEOUT', message: '请求超时' };
   if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ERR_NETWORK', 'ERR_CANCELED'].includes(code)) return { source, code: 'NETWORK_ERROR', message: '网络连接失败，请稍后重试' };
+  if (code === 'PREVIEW_ONLY') return { source, code, message: '网页仅提供预览，未作为完整片源' };
   if (code === 'BUSINESS_REJECTED') return { source, code, message: '接口暂时拒绝本次请求' };
   if (code === 'MISSING_MODEL' || /未返回目录数据/.test(message)) return { source, code: 'MISSING_MODEL', message: '接口未返回本集片源模型' };
   if (code === 'INVALID_RESPONSE' || /空响应|有效数据|目录数据不完整|JSON/.test(message)) return { source, code: 'INVALID_RESPONSE', message: '片源数据无法解析' };

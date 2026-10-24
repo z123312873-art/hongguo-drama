@@ -1,4 +1,4 @@
-# 红果短剧 2.8：公开源码排除依赖、构建产物与本地运行资料。
+# 红果短剧 2.9：公开源码排除依赖、构建产物与本地运行资料。
 
 # 依赖
 node_modules/
@@ -53,6 +53,7 @@ settings.json
 *.sqlite*
 *.session*
 data.json
+danmaku-client.json
 downloads/
 logs/
 outputs/

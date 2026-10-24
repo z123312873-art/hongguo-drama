@@ -1,4 +1,4 @@
-// 红果短剧 2.8：前端构建配置，运行版本由 package.json 提供。
+// 红果短剧 2.9：前端构建配置，运行版本由 package.json 提供。
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';

@@ -202,7 +202,14 @@ async function runInstallerCheck() {
     await launch();
     assert.equal((await evaluate('window.electronAPI.getSettings()')).download_quality, '1080p');
     assert.equal(await evaluate('localStorage.getItem("hongguo-upgrade-smoke")'), 'from-1.80');
-    assert.deepEqual((await evaluate('window.electronAPI.getWatchHistory()')).results, oldHistory);
+    const upgradedHistory = (await evaluate('window.electronAPI.getWatchHistory()')).results;
+    assert.equal(upgradedHistory.length, oldHistory.length, 'Upgrade must retain every history row');
+    for (const oldRecord of oldHistory) {
+      const current = upgradedHistory.find(item => item.series_id === oldRecord.series_id);
+      assert.ok(current, 'Upgrade must retain the same history series');
+      for (const [key, value] of Object.entries(oldRecord)) assert.deepEqual(current[key], value, `Upgrade must retain history ${key}`);
+      assert.equal(current.completed, false, 'Legacy history has no end-of-episode evidence');
+    }
     assert.equal(fs.readFileSync(retainedFile, 'utf8'), 'Existing download must survive installation');
     await quitAppNormally();
     result.crossVersionUpgradeTested = true;
