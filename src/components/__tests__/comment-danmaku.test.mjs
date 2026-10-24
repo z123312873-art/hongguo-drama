@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as model from '../danmakuModel.mjs';
-import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, advanceDanmaku } from '../danmakuModel.mjs';
+import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, advanceDanmaku, danmakuSeed } from '../danmakuModel.mjs';
+import { presentDanmakuText } from '../danmakuEmoji.mjs';
 
 test('settings reject malformed storage and clamp supported numeric values', () => {
   assert.deepEqual(normalizeDanmakuSettings(null), DEFAULT_DANMAKU_SETTINGS);
@@ -11,16 +12,44 @@ test('settings reject malformed storage and clamp supported numeric values', () 
   assert.equal(normalizeDanmakuSettings({ opacity: null }).opacity, 80);
 });
 
-test('本集评论从画面右侧外逐条进入', () => {
+test('表情代码显示成 emoji，不认识的方括号保留', () => {
+  assert.equal(presentDanmakuText('为剧组点赞[赞][赞][贊]更新真快[送花][送花]'), '为剧组点赞👍👍👍更新真快🌹🌹');
+  assert.equal(presentDanmakuText('保留[不存在]和普通文字'), '保留[不存在]和普通文字');
+  assert.equal(presentDanmakuText('已经是🌹'), '已经是🌹');
+});
+
+test('本集评论从画面外进入，开播时不会整排铺满', () => {
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
-  const options = { width: 800, height: 450, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', area: 'full' }, reducedMotion: false };
-  const comments = Array.from({ length: 12 }, (_, index) => `这是一条很长的本集评论${index}`.repeat(3));
-  advanceDanmaku(state, comments, 0.016, options);
-  assert.equal(state.items.length, 1);
-  assert.equal(state.items[0].x, options.width);
-  for (let frame = 0; frame < 30; frame++) advanceDanmaku(state, comments, 0.016, options);
-  assert.equal(state.items.length, 1);
-  assert.ok(state.items[0].x < options.width);
+  const options = { width: 800, height: 450, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', area: 'full' }, reducedMotion: false, seed: 9 };
+  const comments = Array.from({ length: 15 }, (_, index) => `这是一条很长的本集评论${index}`.repeat(2));
+  for (let frame = 0; frame < 20; frame++) advanceDanmaku(state, comments, 0.05, options);
+  assert.ok(state.items.length >= 1 && state.items.length <= 4);
+  assert.ok(state.items.every(item => item.x > options.width - 120));
+  assert.ok(state.items.some(item => item.text.includes('👍') || !item.text.includes('[赞]')));
+});
+
+test('十五则本集评论会在这一集里分散飞完，换集节奏不同', () => {
+  const comments = Array.from({ length: 15 }, (_, index) => `评论${index}[送花]`);
+  const run = seed => {
+    const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
+    const options = { width: 960, height: 540, settings: { ...DEFAULT_DANMAKU_SETTINGS, area: 'full' }, reducedMotion: false, seed };
+    let busiest = 0;
+    const trace = [];
+    for (let frame = 0; frame < 900; frame++) {
+      advanceDanmaku(state, comments, 0.1, options);
+      busiest = Math.max(busiest, state.items.length);
+      if (state.items[0] && trace.length < 6) trace.push(`${state.items[0].lane}:${state.items[0].speed}`);
+    }
+    return { cursor: state.cursor, busiest, trace: trace.join('|'), shown: state.nextId };
+  };
+  const first = run(danmakuSeed('1000001', '2000001'));
+  const same = run(danmakuSeed('1000001', '2000001'));
+  const other = run(danmakuSeed('1000001', '2000002'));
+  assert.equal(first.cursor, 15);
+  assert.ok(first.shown >= 15);
+  assert.ok(first.busiest >= 2 && first.busiest < 15);
+  assert.equal(first.trace, same.trace);
+  assert.notEqual(first.trace, other.trace);
 });
 
 test('scheduler bounds lanes, avoids overlaps, pauses and clamps long frame gaps', () => {
@@ -28,8 +57,11 @@ test('scheduler bounds lanes, avoids overlaps, pauses and clamps long frame gaps
   const options = { width: 500, height: 300, settings: DEFAULT_DANMAKU_SETTINGS, reducedMotion: false };
   for (let i = 0; i < 600; i++) {
     advanceDanmaku(state, ['短评论', '长'.repeat(79)], 0.1, options);
-    assert.ok(state.items.length <= 3);
-    assert.equal(new Set(state.items.map(item => item.lane)).size, state.items.length);
+    assert.ok(state.items.length <= 8);
+    for (let left = 0; left < state.items.length; left++) for (let right = left + 1; right < state.items.length; right++) {
+      const a = state.items[left], b = state.items[right];
+      if (a.lane === b.lane) assert.ok(a.x >= b.x + b.width + 24 || b.x >= a.x + a.width + 24);
+    }
   }
   const fresh = Array.from({ length: 100 }, (_, index) => String(index));
   advanceDanmaku(state, fresh, 0.1, options);
@@ -58,7 +90,7 @@ test('缩小播放器保留可见弹幕并重排，不能压行或重播已消�
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
   for (let i = 0; i < 200; i++) advanceDanmaku(state, Array(40).fill('长'.repeat(60)), 0.1, large);
   const cursor = state.cursor;
-  assert.ok(state.items.length >= 1 && state.items.length <= 3, '本集评论同时在屏上的条数受轨道上限约束');
+  assert.ok(state.items.length >= 1 && state.items.length <= 16);
   assert.equal(model.resizeDanmaku(state, large, { ...small, width: 0 }), false);
   model.resizeDanmaku(state, large, small);
   assert.ok(state.items.length > 0);
@@ -167,14 +199,18 @@ test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停�
   const runtime = { width: 500, height: 300, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', speed: 2 }, reducedMotion: false };
   for (let frame = 0; frame < 1800; frame++) {
     advanceDanmaku(state, comments, 1 / 60, runtime);
-    assert.ok(state.items.length <= 3, `不能一次铺满: ${frame}`);
+    assert.ok(state.items.length <= 8, `不能一次铺满: ${frame}`);
     assert.equal(new Set(state.items.map(item => item.content)).size, state.items.length);
   }
   assert.ok(state.nextId > comments.length);
   comments.push('新内容');
-  for (let frame = 0; frame < 60; frame++) advanceDanmaku(state, comments, 1 / 60, runtime);
+  let sawNew = false;
+  for (let frame = 0; frame < 300; frame++) {
+    advanceDanmaku(state, comments, 1 / 60, runtime);
+    if (state.items.some(item => item.content === '新内容')) sawNew = true;
+  }
   assert.equal(state.cursor, 4);
-  assert.ok(state.items.some(item => item.content === '新内容'));
+  assert.ok(sawNew);
   const before = JSON.stringify(state);
   advanceDanmaku(state, comments, 0, runtime);
   assert.equal(JSON.stringify(state), before);
