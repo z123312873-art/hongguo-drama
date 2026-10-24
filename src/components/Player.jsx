@@ -1257,19 +1257,19 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <span className="player-series-name" title={detail ? detail.series_title : ''}>
             {detail ? detail.series_title : '—'}
           </span>
+          <button
+            aria-expanded={pickerOpen}
+            className={`btn btn-outline series-picker-btn ${pickerOpen ? 'open' : ''}`}
+            onClick={() => setPickerOpen((v) => !v)}
+          >
+            切换短剧
+            <span className="series-count">{seriesList.length}</span>
+            <ChevronDown size={16} />
+          </button>
         </div>
         <div className="player-series-actions">
         <button className="btn btn-outline player-management-toggle" aria-expanded={managementOpen}
           aria-controls="player-management" onClick={() => setManagementOpen((open) => !open)}>管理</button>
-        <button
-          aria-expanded={pickerOpen}
-          className={`btn btn-outline series-picker-btn ${pickerOpen ? 'open' : ''}`}
-          onClick={() => setPickerOpen((v) => !v)}
-        >
-          切换剧集
-          <span className="series-count">{seriesList.length}</span>
-          <ChevronDown size={15} />
-        </button>
         </div>
       </div>
 

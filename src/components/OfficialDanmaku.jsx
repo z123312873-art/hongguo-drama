@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { commentIsBlocked, resizeDanmaku } from './danmakuModel.mjs';
 import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus } from './danmakuOfficial.mjs';
+import DanmakuLine from './DanmakuLine';
 import './CommentDanmaku.css';
 
 /**
@@ -149,7 +150,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8) });
     const paint = () => state.items.forEach(item => {
       const node = nodes.current.get(item.id);
-      if (node) node.style.transform = `translate(${item.x}px, ${item.y}px)`;
+      if (node) node.style.transform = `translate3d(${Math.round(item.x)}px, ${Math.round(item.y)}px, 0)`;
     });
     const canAnimate = () => !video.paused && !video.ended && !document.hidden;
     let lastFrame;
@@ -191,7 +192,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
   return <div ref={layerRef} className={`comment-danmaku ${reducedMotion ? 'comment-danmaku-static' : ''}`}>
     <div aria-hidden="true" style={{ opacity: settings.opacity / 100, fontSize: settings.fontSize }}>
       {((list.length ? items : [])).map(item => <span className="comment-danmaku-item" key={item.id} ref={node => { if (node) nodes.current.set(item.id, node); else nodes.current.delete(item.id); }}
-        style={{ transform: `translate(${item.x}px, ${item.y}px)`, color: item.color || '#FFFFFF' }}>{item.text}</span>)}
+        style={{ transform: `translate3d(${Math.round(item.x)}px, ${Math.round(item.y)}px, 0)`, color: item.color || '#FFFFFF' }}><DanmakuLine text={item.text} /></span>)}
     </div>
     {((loading && !items.length) || error || !list.length) && <span className="comment-danmaku-status" role="status">{status}</span>}
   </div>;

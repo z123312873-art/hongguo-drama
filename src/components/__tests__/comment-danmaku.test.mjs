@@ -52,6 +52,30 @@ test('十五则本集评论会在这一集里分散飞完，换集节奏不同',
   assert.notEqual(first.trace, other.trace);
 });
 
+test('较快的后发弹幕不会盖住同道上的前一条', () => {
+  const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
+  const options = { width: 900, height: 520, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', area: 'full', speed: 2 }, reducedMotion: false, seed: 11 };
+  const comments = Array.from({ length: 24 }, (_, index) => `第${index}条评论`);
+  for (let frame = 0; frame < 500; frame++) {
+    advanceDanmaku(state, comments, 0.05, options);
+    const lanes = new Map();
+    for (const item of state.items) {
+      const list = lanes.get(item.lane) || [];
+      list.push(item);
+      lanes.set(item.lane, list);
+    }
+    for (const list of lanes.values()) {
+      list.sort((a, b) => a.x - b.x);
+      for (let index = 1; index < list.length; index++) {
+        const ahead = list[index - 1];
+        const behind = list[index];
+        assert.ok(behind.x + 1 >= ahead.x + ahead.width + 24, `${behind.text} 盖住了 ${ahead.text}`);
+        assert.ok((behind.speed || 1) <= (ahead.speed || 1) + 0.001);
+      }
+    }
+  }
+});
+
 test('scheduler bounds lanes, avoids overlaps, pauses and clamps long frame gaps', () => {
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
   const options = { width: 500, height: 300, settings: DEFAULT_DANMAKU_SETTINGS, reducedMotion: false };

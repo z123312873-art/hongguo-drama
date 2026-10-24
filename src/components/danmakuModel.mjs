@@ -1,4 +1,4 @@
-import { clipDanmakuText } from './danmakuEmoji.mjs';
+import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
 
 export const DEFAULT_DANMAKU_SETTINGS = Object.freeze({ opacity: 80, fontSize: 22, speed: 1, area: 'half', density: 'normal', sensitiveFilter: true, blockedWords: '' });
 
@@ -146,6 +146,34 @@ function commentLaneOpen(state, lane, y, lineHeight, x, textWidth) {
   });
 }
 
+// 后发的可以更慢，但不能比同道上已经在飞的更快，否则会从后面追上并盖住。
+function laneSpeedCap(state, lane) {
+  let cap = 1.18;
+  for (const item of state.items) if (item.lane === lane) cap = Math.min(cap, item.speed || 1);
+  return cap;
+}
+
+export function keepDanmakuSpacing(state, gap = 24) {
+  const groups = new Map();
+  for (const item of state.items) {
+    const list = groups.get(item.lane);
+    if (list) list.push(item);
+    else groups.set(item.lane, [item]);
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.x - b.x);
+    for (let index = 1; index < list.length; index++) {
+      const ahead = list[index - 1];
+      const behind = list[index];
+      const minX = ahead.x + ahead.width + gap;
+      if (behind.x < minX) {
+        behind.x = minX;
+        if ((behind.speed || 1) > (ahead.speed || 1)) behind.speed = ahead.speed || 1;
+      }
+    }
+  }
+}
+
 export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76, seed = 1 }) {
   if (!(elapsed > 0) || !comments.length || width < 40 || height < 60) return false;
   const delta = Math.min(elapsed, 0.25);
@@ -158,6 +186,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     item.age += delta;
     if (!reducedMotion) item.x -= 85 * settings.speed * (item.speed || 1) * delta;
   }
+  if (!reducedMotion) keepDanmakuSpacing(state);
   retireDanmaku(state, reducedMotion);
   let changed = before !== state.items.length;
   if (reducedMotion) {
@@ -172,7 +201,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
       }
       if (!content) return changed;
       const text = clipDanmakuText(content);
-      state.items.push({ id: state.nextId++, text, content, lane, x: 12, y: top, width: (Array.from(text).length + 1) * settings.fontSize, age: 0, speed: 1 });
+      state.items.push({ id: state.nextId++, text, content, lane, x: 12, y: top, width: measureDanmakuText(text, settings.fontSize), age: 0, speed: 1 });
       state.cooldown = 6;
       changed = true;
     }
@@ -195,7 +224,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     return changed;
   }
   const text = clipDanmakuText(content);
-  const textWidth = (Array.from(text).length + 1) * settings.fontSize;
+  const textWidth = measureDanmakuText(text, settings.fontSize);
   const open = [];
   for (let lane = 0; lane < lanes; lane++) {
     const y = top + lane * lineHeight;
@@ -207,7 +236,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
   }
   state.cursor = nextCursor;
   const lane = open[Math.floor(roll(state) * open.length)];
-  const speed = 0.84 + roll(state) * 0.34;
+  const speed = Math.min(0.84 + roll(state) * 0.34, laneSpeedCap(state, lane));
   // 从画面外进入。开播时不要把整批评论摆进画面。
   state.items.push({ id: state.nextId++, text, content, lane, x: width, y: top + lane * lineHeight, width: textWidth, age: 0, speed });
   state.nextGap = state.clock + commentGap(settings.density, () => roll(state));

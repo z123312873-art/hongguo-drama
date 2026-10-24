@@ -2,8 +2,8 @@
 // https://github.com/dawei233/hongguo-drama
 // 时间轴投放与评论队列分开；两种来源共用视觉设置、轨道布局和窗口重排。
 
-import { clipDanmakuText } from './danmakuEmoji.mjs';
-import { commentIsBlocked, danmakuLayout, retireDanmaku, takeDanmakuReplay } from './danmakuModel.mjs';
+import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
+import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku, takeDanmakuReplay } from './danmakuModel.mjs';
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
@@ -156,6 +156,7 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
     item.age += delta;
     if (!reducedMotion) item.x -= 85 * settings.speed * delta;
   }
+  if (!reducedMotion) keepDanmakuSpacing(state);
   retireDanmaku(state, reducedMotion);
   if (state.items.length !== before) changed = true;
   state.cooldown = Math.max(0, state.cooldown - delta);
@@ -198,7 +199,7 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
     }
 
     const text = clipDanmakuText(entry.text);
-    const textWidth = (Array.from(text).length + 1) * settings.fontSize;
+    const textWidth = measureDanmakuText(text, settings.fontSize);
     state.items.push({
       id: state.nextId++,
       text,
