@@ -20,8 +20,8 @@
  * X-Ladon）。上游随时可能改算法、改参数或封禁，**本模块无法保证长期可用**。
  * 因此：
  *   - 任何失败都返回 `success: false` 加一句人话说明，绝不抛异常；
- *   - 调用方只要拿到内容（含只拿到一部分）就追加本集评论；一条都没有时只显示本集评论；
- *   - 完全失败且一条都没有时不要改用评论，也不要把失败说成没有弹幕；
+ *   - 调用方只要拿到内容（含只拿到一部分）就追加本集评论；一条都没有或整次失败时，
+ *     仍显示本集评论兜底，但失败说明保持原样，不能改口说成没有弹幕；
  *   - 界面上不得把"拿不到"说成"本集没有弹幕"。
  *
  * ## 与参考实现的关系
@@ -61,6 +61,13 @@ const CACHE_MAX = 64;
 
 const cache = new Map();
 const pending = new Map();
+let danmakuLane = Promise.resolve();
+
+function enqueueDanmaku(task) {
+  const run = danmakuLane.then(task, task);
+  danmakuLane = run.then(() => {}, () => {});
+  return run;
+}
 
 // 上游按匿名标识分配弹幕子集，跨重启必须复用同一份本机标识。
 let identity = null;
@@ -424,11 +431,23 @@ async function fetchDanmaku(options = {}) {
   // 只会再拿到同一条缓存失败，看起来像按钮没反应。
   if (hit && hit.expires > Date.now() && options.fresh !== true) return present(hit.result, hit.items, limit);
   if (pending.has(cacheKey)) {
-    const shared = await pending.get(cacheKey);
-    return present(shared.result, shared.items, limit);
+    const existing = pending.get(cacheKey);
+    if (options.prefetch !== true) {
+      existing.prefetch = false;
+      existing.stop = false;
+    }
+    const shared = await existing.promise;
+    if (!shared?.skipped) return present(shared.result, shared.items, limit);
+    if (pending.get(cacheKey) === existing) pending.delete(cacheKey);
   }
 
-  const task = (async () => {
+  const job = { prefetch: options.prefetch === true, stop: false, promise: null };
+  if (!job.prefetch) {
+    for (const [key, other] of pending) if (key !== cacheKey && other.prefetch) other.stop = true;
+  }
+  const task = enqueueDanmaku(async () => {
+    if (job.stop) return { skipped: true };
+    return (async () => {
     const collected = [];
     const seen = new Set();
     let start = 0;
@@ -452,9 +471,12 @@ async function fetchDanmaku(options = {}) {
       return marks.length ? marks[0][0] : null;
     };
 
+    let stopped = false;
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
+        if (job.stop) { stopped = true; break; }
         if (page > 0) await new Promise(resolve => setTimeout(resolve, PAGE_GAP_MS));
+        if (job.stop) { stopped = true; break; }
 
         let payload;
         try {
@@ -509,6 +531,9 @@ async function fetchDanmaku(options = {}) {
           if (collected.length >= MAX_ITEMS) break;
         }
 
+        // 这一页已经到手。若当前集要插队，就停在这里，别再把空页写成「本集没有弹幕」。
+        if (job.stop) { stopped = true; break; }
+
         if (collected.length >= MAX_ITEMS) {
           truncated = true;
           break;
@@ -544,23 +569,29 @@ async function fetchDanmaku(options = {}) {
 
     collected.sort((a, b) => a.time - b.time);
 
+    // 预载被当前集打断、而且一条都还没有时，不写入缓存，避免把让路记成「这一集没有弹幕」。
+    if (stopped && !failure && !collected.length) return { skipped: true };
     // 缓存完整结果与完整列表；limit 只在呈现时裁剪，避免缓存被"半截"结果污染。
-    const result = finalize({ seriesId, vid, items: collected, truncated, error: failure });
+    const result = finalize({ seriesId, vid, items: collected, truncated: stopped ? false : truncated, error: stopped && !failure ? '' : failure });
     cache.set(cacheKey, {
-      expires: Date.now() + (failure ? CACHE_TTL_FAIL : CACHE_TTL_OK),
+      expires: Date.now() + (failure && !stopped ? CACHE_TTL_FAIL : CACHE_TTL_OK),
       items: collected,
       result,
     });
     while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
     return { result, items: collected };
-  })();
-
-  pending.set(cacheKey, task);
+    })();
+  });
+  job.promise = task;
+  pending.set(cacheKey, job);
   try {
-    const { result, items } = await task;
-    return present(result, items, limit);
+    const shared = await task;
+    if (shared?.skipped) {
+      return { success: false, source: 'official', series_id: seriesId, episode_id: vid, items: [], total: 0, truncated: false, partial: false, error: '', notice: '', skipped: true };
+    }
+    return present(shared.result, shared.items, limit);
   } finally {
-    pending.delete(cacheKey);
+    if (pending.get(cacheKey) === job) pending.delete(cacheKey);
   }
 }
 

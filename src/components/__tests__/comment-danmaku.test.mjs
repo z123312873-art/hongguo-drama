@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as model from '../danmakuModel.mjs';
+import { planDanmakuWarmup } from '../danmakuWarmup.mjs';
 import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, advanceDanmaku, danmakuSeed } from '../danmakuModel.mjs';
 import { presentDanmakuText } from '../danmakuEmoji.mjs';
 
@@ -284,4 +285,39 @@ test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停�
   runtime.settings = { ...runtime.settings, blockedWords: comments.join(',') };
   for (let frame = 0; frame < 600; frame++) advanceDanmaku(state, comments, 1 / 60, runtime);
   assert.equal(state.items.length, 0);
+});
+
+test('评论超时会再试，空页面只再确认一次，永久错误立即停下', () => {
+  const feed = model.createCommentFeed('123456', '654321');
+  const settings = model.DEFAULT_DANMAKU_SETTINGS;
+  assert.equal(model.commentFetchBlocked(feed, 10000, false), false);
+  assert.equal(model.acceptCommentPage(feed, { success: false, retryable: true, error: '公开评论加载超时，请重试' }, settings, 10000), 'retry');
+  assert.equal(feed.error, '');
+  assert.equal(model.commentFetchBlocked(feed, 10000, false), true);
+  assert.equal(model.commentFetchBlocked(feed, feed.nextTryAt, false), false);
+  assert.equal(model.acceptCommentPage(feed, { success: true, series_id: '123456', episode_id: '654321', items: [] }, settings, feed.nextTryAt), 'retry');
+  assert.equal(feed.comments.length, 0);
+  assert.equal(model.acceptCommentPage(feed, { success: true, series_id: '123456', episode_id: '654321', items: [], has_more: false }, settings, feed.nextTryAt), 'done');
+  assert.equal(feed.loaded, true);
+  const fatal = model.createCommentFeed('123456', '654321');
+  assert.equal(model.acceptCommentPage(fatal, { success: false, retryable: false, error: '评论请求编号或条数无效' }, settings, 1), 'stop');
+  assert.equal(fatal.error, '评论请求编号或条数无效');
+  const flaky = model.createCommentFeed('123456', '654322');
+  for (let attempt = 0; attempt < 3; attempt++) model.commentFailureAction(flaky, { retryable: true, error: '公开评论加载超时，请重试' }, attempt);
+  assert.equal(flaky.error, '');
+  model.commentFailureAction(flaky, { retryable: true, error: '公开评论加载超时，请重试' }, 10);
+  assert.match(flaky.error, /超时/);
+});
+
+test('下一集弹幕只在当前集读完后预载一次', () => {
+  const warmed = new Set();
+  const ready = { enabled: true, timelineReady: true, seriesId: '7503745441910017049', nextEpisodeId: '7503780574541122622', warmed };
+  const plan = planDanmakuWarmup(ready);
+  assert.equal(plan.episodeId, '7503780574541122622');
+  warmed.add(plan.key);
+  assert.equal(planDanmakuWarmup(ready), null);
+  assert.equal(planDanmakuWarmup({ ...ready, timelineReady: false, nextEpisodeId: '7503780574541122623' }), null);
+  assert.equal(planDanmakuWarmup({ ...ready, enabled: false, nextEpisodeId: '7503780574541122623' }), null);
+  assert.equal(planDanmakuWarmup({ ...ready, seriesId: 'custom:example', nextEpisodeId: '7503780574541122623' }), null);
+  assert.ok(planDanmakuWarmup({ ...ready, nextEpisodeId: '7503780574541122623' }));
 });

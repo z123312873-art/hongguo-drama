@@ -445,13 +445,73 @@ test('颜色与时间严格过滤，不将非法值变成合法时间轴数据',
   for (const time of [[], {}, '  ', '0x10']) assert.equal(danmaku.toSeconds(time), null);
 });
 
+test('预载遇到当前集时停止翻页，已拿到的内容可留给回看，空让路不写成没有弹幕', async () => {
+  const other = '7503780577347128382';
+  let release;
+  let prefetchCalls = 0;
+  const prefetchPromise = danmaku.fetchDanmaku({
+    seriesId: SERIES, vid: VID, prefetch: true, ...fixedOptions(async () => {
+      prefetchCalls += 1;
+      if (prefetchCalls === 1) await new Promise(resolve => { release = resolve; });
+      return { data: JSON.stringify(page({ rows: [comment()], extra: { next_query_danmaku_list_time: 9000 } })) };
+    }),
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const playPromise = danmaku.fetchDanmaku({
+    seriesId: SERIES, vid: other, ...fixedOptions(async () => ({
+      data: JSON.stringify(page({ rows: [comment({ common: { group_id: other, content: { text: '当前集' } } })] })),
+    })),
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(typeof release, 'function');
+  release();
+  const [prefetched, played] = await Promise.all([prefetchPromise, playPromise]);
+  assert.equal(prefetchCalls, 1, '预载被当前集打断后不再翻下一页');
+  assert.equal(played.success, true);
+  assert.equal(played.items[0].text, '当前集');
+  assert.equal(prefetched.skipped, undefined);
+  assert.equal(prefetched.items.length, 1);
+  assert.equal(prefetched.success, true);
+  assert.doesNotMatch(prefetched.notice || '', /暂无弹幕/);
+  danmaku.resetDanmakuCache();
+  let emptyRelease;
+  let emptyHeld = false;
+  const emptyPrefetch = danmaku.fetchDanmaku({
+    seriesId: SERIES, vid: VID, prefetch: true, ...fixedOptions(async () => {
+      if (!emptyHeld) {
+        emptyHeld = true;
+        await new Promise(resolve => { emptyRelease = resolve; });
+      }
+      return { data: JSON.stringify(page({ rows: [] })) };
+    }),
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const nextPlay = danmaku.fetchDanmaku({
+    seriesId: SERIES, vid: other, ...fixedOptions(async () => ({
+      data: JSON.stringify(page({ rows: [comment({ common: { group_id: other, content: { text: '另一集' } } })] })),
+    })),
+  });
+  emptyRelease();
+  const [emptied, next] = await Promise.all([emptyPrefetch, nextPlay]);
+  assert.equal(emptied.skipped, true);
+  assert.doesNotMatch(emptied.notice || '', /暂无弹幕/);
+  assert.equal(next.items[0].text, '另一集');
+  const revisited = await danmaku.fetchDanmaku({
+    seriesId: SERIES, vid: VID, ...fixedOptions(async () => {
+      throw new Error('空让路不应命中缓存');
+    }),
+  });
+  assert.notEqual(revisited.notice, '本集暂无弹幕');
+  assert.equal(revisited.success, false);
+});
+
 test('主进程与预加载桥接接入受信任 IPC，且不接受测试注入', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const main = fs.readFileSync(path.join(__dirname, '../../main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(__dirname, '../../preload.js'), 'utf8');
   assert.match(main, /ipcMain\.handle\('get-episode-danmaku'/);
-  assert.match(main, /fetchDanmaku\(\{ seriesId, vid, fresh, limit \}\)/);
+  assert.match(main, /fetchDanmaku\(\{ seriesId, vid, fresh, limit, prefetch: prefetch === true \}\)/);
   assert.match(main, /rendererSecurity\.isTrustedSender\(event, mainWindow\)/);
   assert.match(preload, /getEpisodeDanmaku: options => ipcRenderer\.invoke\('get-episode-danmaku', options\)/);
 });

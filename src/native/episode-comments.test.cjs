@@ -42,5 +42,28 @@ axios.get = async (url, options) => {
   assert.equal(calls, 1, 'reuse the existing bounded public-details cache');
   assert.equal((await fetchEpisodeComments({ seriesId, episodeId: '7503780577347128382' })).success, false,
     'a mismatched episode cannot leak the old comments');
+  let started = 0;
+  let releaseFirst;
+  const episodeHtml = id => `window._ROUTER_DATA=${JSON.stringify({ loaderData: { player: {
+    seriesDetail: { series_id: seriesId }, vid: id, episodeSocialInfo: { reviews: { total_count: '1', reviews: [{ content: id, user_name: '甲', create_time: '9' }] } },
+  } } })};`;
+  axios.get = async url => {
+    started += 1;
+    const id = url.split('/').pop();
+    if (started === 1) await new Promise(resolve => { releaseFirst = resolve; });
+    return { data: episodeHtml(id) };
+  };
+  const firstId = '7503780574541122991';
+  const secondId = '7503780574541122992';
+  const first = fetchEpisodeComments({ seriesId, episodeId: firstId, cursor: null, limit: 30 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const second = fetchEpisodeComments({ seriesId, episodeId: secondId, cursor: null, limit: 30 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(started, 1, 'the next episode comment page waits until the current page finishes');
+  releaseFirst();
+  const [firstPage, secondPage] = await Promise.all([first, second]);
+  assert.equal(started, 2);
+  assert.equal(firstPage.items[0].content, firstId);
+  assert.equal(secondPage.items[0].content, secondId);
   console.log('episode comments: validation, stable IDs, dedupe, source limits, cache and episode isolation passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

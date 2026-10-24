@@ -7,7 +7,7 @@ import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku, tak
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
-/** 默认走时间轴弹幕。播放器只要读到内容就追加本集评论；完全失败且一条都没有时不改用评论。 */
+/** 默认走时间轴弹幕。播放器同时读本集评论；时间轴很少、没有或失败时，评论仍留在画面上。 */
 export const DEFAULT_DANMAKU_SOURCE = 'official';
 
 export function normalizeDanmakuSource(value) {

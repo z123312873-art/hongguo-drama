@@ -4,12 +4,12 @@ const { fetchPublicDetails } = require('./public-details');
 const NOTICE = '官网仅提供本集部分评论，暂未提供可用的公开翻页接口；更多评论请到红果短剧 App 查看。';
 
 async function fetchEpisodeComments(options) {
-  if (!options || typeof options !== 'object' || Array.isArray(options)) return { success: false, error: '评论请求无效' };
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return { success: false, retryable: false, error: '评论请求无效' };
   const { seriesId, episodeId, cursor = null, limit = 30 } = options;
   if (typeof seriesId !== 'string' || !/^\d{6,30}$/.test(seriesId) ||
       typeof episodeId !== 'string' || !/^\d{6,30}$/.test(episodeId) ||
-      !Number.isInteger(limit) || limit < 1 || limit > 30) return { success: false, error: '评论请求编号或条数无效' };
-  if (cursor !== null) return { success: false, source_limited: true, error: NOTICE };
+      !Number.isInteger(limit) || limit < 1 || limit > 30) return { success: false, retryable: false, error: '评论请求编号或条数无效' };
+  if (cursor !== null) return { success: false, retryable: false, source_limited: true, error: NOTICE };
   const details = await fetchPublicDetails(seriesId, episodeId);
   if (!details.success) return details;
   const seen = new Set();

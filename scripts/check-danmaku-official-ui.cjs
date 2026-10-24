@@ -86,6 +86,7 @@ function mount({ response, enabled = true } = {}) {
   await failed.flush();
   assert.equal(failed.tree.danmaku.sourceKind, 'official');
   assert.equal(failed.tree.danmaku.status, '模拟接口异常');
+  assert.equal(failed.requests.filter(item => item.source === 'comments').length, 1, 'timeline failure keeps fallback episode comments');
   failed.unmount();
 
   const partial = mount({ response: args => ({ success: false, partial: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 1, text: '只有一条' }], error: '后续弹幕加载中断，已保留已获取的部分', notice: '后续弹幕加载中断，已保留已获取的部分' }) });

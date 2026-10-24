@@ -31,7 +31,51 @@ export function commentIsBlocked(content, settings) {
 export function createCommentFeed(seriesId, episodeId) {
   return { seriesId: String(seriesId), episodeId: String(episodeId), comments: [], seen: new Set(), cursors: new Set(), cursor: null,
     hasMore: true, emptyPages: 0, pages: 0, loading: false, loaded: false, error: '', notice: '', lastRequest: 0,
+    attempts: 0, emptyTries: 0, nextTryAt: 0,
     animation: { items: [], cursor: 0, nextId: 0, cooldown: 0 } };
+}
+
+const COMMENT_RETRY_DELAYS = [3000, 7000, 15000];
+
+export function commentFetchBlocked(feed, now, hidden) {
+  if (hidden || feed.loading || !feed.hasMore || feed.error) return true;
+  if (feed.nextTryAt && now < feed.nextTryAt) return true;
+  if (feed.comments.length - (feed.animation?.cursor || 0) >= 15) return true;
+  if (now - feed.lastRequest < 1500) return true;
+  return false;
+}
+
+// 超时、限流和空页面都先再试。确认过仍然没有，才停下来给用户重试。
+export function commentFailureAction(feed, data, now) {
+  const message = typeof data?.error === 'string' ? data.error : '';
+  const retryable = data == null || data.retryable === true;
+  feed.attempts = (feed.attempts || 0) + 1;
+  if (retryable && feed.attempts < 4) {
+    feed.nextTryAt = now + (COMMENT_RETRY_DELAYS[feed.attempts - 1] || 15000);
+    feed.notice = '本集评论暂时没有载入，稍后会再试';
+    feed.error = '';
+    return 'retry';
+  }
+  feed.nextTryAt = 0;
+  feed.error = message || '本集评论加载失败，可重试继续加载';
+  return 'stop';
+}
+
+export function acceptCommentPage(feed, data, settings, now) {
+  if (!data?.success || !Array.isArray(data.items) || String(data.series_id) !== feed.seriesId || String(data.episode_id) !== feed.episodeId) {
+    return commentFailureAction(feed, data, now);
+  }
+  if (!data.items.length && (feed.emptyTries || 0) < 1) {
+    feed.emptyTries = (feed.emptyTries || 0) + 1;
+    feed.nextTryAt = now + 4000;
+    feed.notice = '正在再确认一次本集评论';
+    feed.error = '';
+    return 'retry';
+  }
+  appendCommentPage(feed, data, settings);
+  feed.attempts = 0;
+  feed.nextTryAt = 0;
+  return 'done';
 }
 
 export function appendCommentPage(feed, data, settings) {

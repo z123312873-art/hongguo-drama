@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DanmakuLine from './DanmakuLine';
 import { foreignDanmaku } from './danmakuSpace.mjs';
-import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, appendCommentPage, commentIsBlocked, advanceDanmaku, danmakuSeed, resizeDanmaku } from './danmakuModel.mjs';
+import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, commentIsBlocked, commentFetchBlocked, commentFailureAction, acceptCommentPage, advanceDanmaku, danmakuSeed, resizeDanmaku } from './danmakuModel.mjs';
 import './CommentDanmaku.css';
 
 const STORAGE_KEY = 'hongguo:comment-danmaku:v1';
@@ -34,16 +34,16 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
   useEffect(() => {
     if (!running) return;
     const fetchNext = async () => {
-      if (document.hidden || feed.loading || !feed.hasMore || feed.error || feed.comments.length - feed.animation.cursor >= 15 || Date.now() - feed.lastRequest < 1500) return;
+      if (commentFetchBlocked(feed, Date.now(), document.hidden)) return;
       feed.loading = true;
       feed.lastRequest = Date.now();
       refresh(value => value + 1);
       try {
         const data = await window.electronAPI?.getEpisodeComments?.({ seriesId: feed.seriesId, episodeId: feed.episodeId, cursor: feed.cursor, limit: 30 });
         if (currentFeed.current !== feed) return;
-        appendCommentPage(feed, data, preferencesRef.current);
+        acceptCommentPage(feed, data, preferencesRef.current, Date.now());
       } catch {
-        if (currentFeed.current === feed) feed.error = '本集评论加载失败，可重试继续加载';
+        if (currentFeed.current === feed) commentFailureAction(feed, null, Date.now());
       } finally {
         feed.loading = false;
         if (currentFeed.current === feed) refresh(value => value + 1);
@@ -67,7 +67,11 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
       : feed.comments.length ? `已读取本集 ${feed.comments.length} 条评论${feed.hasMore ? '，播放时继续加载' : '，当前可用评论已读取'}` : '本集暂无可显示的公开评论');
   return { enabled, supported, running, settings, feed, comments: feed.comments, status, saveError, error: feed.error,
     loading: running && feed.loading, toggle: () => update({ enabled: !preferences.enabled }), update,
-    reset: () => update(DEFAULT_DANMAKU_SETTINGS), retry: () => { feed.error = ''; feed.emptyPages = 0; refresh(value => value + 1); } };
+    reset: () => update(DEFAULT_DANMAKU_SETTINGS), retry: () => {
+      feed.error = ''; feed.emptyPages = 0; feed.attempts = 0; feed.emptyTries = 0; feed.nextTryAt = 0;
+      if (!feed.comments.length) feed.hasMore = true;
+      refresh(value => value + 1);
+    } };
 }
 
 export default function CommentDanmaku({ videoRef, source, available, danmaku }) {
@@ -160,7 +164,7 @@ export function DanmakuSettings({ danmaku, onClose, panelRef, maxHeight }) {
     <div className="danmaku-settings-heading"><strong>{danmaku.sourceKind === 'both' ? '时间轴弹幕和本集评论' : danmaku.sourceKind === 'comments' ? '本集评论' : '时间轴弹幕'}</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </button></div>
-    <p>{danmaku.sourceKind === 'both' ? '时间轴弹幕仍按视频时间出现。本集评论会另外分散飞过；同一行速度对齐，快的不会追上、慢的也不会被盖住。同一集的节奏固定，换集会换一套。表情代码会显示成 emoji。' : danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已改用本集公开评论。评论按这一集打散飞过，不会在开播时排成一列。表情代码会显示成 emoji。' : danmaku.error ? '时间轴弹幕没有载入，可重试。这一集先不改用本集评论，避免把读取失败说成本集没有弹幕。' : '正在读取时间轴弹幕。只要读到内容，无论多少条，都会再补上本集评论；一条都没有时，改为展示本集评论。'}</p>
+    <p>{danmaku.sourceKind === 'both' ? '时间轴弹幕仍按视频时间出现。本集评论会另外分散飞过；同一行速度对齐，快的不会追上、慢的也不会被盖住。同一集的节奏固定，换集会换一套。表情代码会显示成 emoji。' : danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已改用本集公开评论。评论按这一集打散飞过，不会在开播时排成一列。表情代码会显示成 emoji。' : danmaku.error ? '时间轴弹幕没有载入，可重试。本集评论会继续兜底，不会把读取失败说成本集没有弹幕。' : '正在读取时间轴弹幕。只要读到内容，无论多少条，都会再补上本集评论；一条都没有或暂时没读到时，仍展示本集评论。'}</p>
     <label>不透明度 <output>{settings.opacity}%</output><input autoFocus aria-label="弹幕不透明度" type="range" min="20" max="100" step="5" value={settings.opacity} onChange={event => update({ opacity: Number(event.target.value) })} /></label>
     <label>字号 <output>{settings.fontSize}px</output><input aria-label="弹幕字号" type="range" min="16" max="32" step="2" value={settings.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} /></label>
     <label>滚动速度 <output>{settings.speed}×</output><input aria-label="弹幕滚动速度" type="range" min="0.5" max="2" step="0.25" value={settings.speed} onChange={event => update({ speed: Number(event.target.value) })} /></label>
