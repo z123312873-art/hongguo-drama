@@ -4,7 +4,8 @@ import PlayerControls from './PlayerControls';
 import CommentDanmaku, { useCommentDanmaku } from './CommentDanmaku';
 import OfficialDanmaku, { useOfficialDanmaku } from './OfficialDanmaku';
 // 时间轴弹幕在 danmaku.js / OfficialDanmaku；本集评论在 episode-comments.js / CommentDanmaku。
-// 两条通路不要并成同一次请求。时间轴成功后追加本集评论；没有时间轴内容时只显示本集评论。
+// 两条通路不要并成同一次请求。只要时间轴读到内容就追加本集评论；一条都没有才只显示评论。
+// 时间轴完全失败且一条都没有时停在时间轴，方便重试，不能说成本集没有弹幕。
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
@@ -502,19 +503,22 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const videoSrc = !playbackRequested || compatProgress ? '' : lastVideoSrcRef.current;
   // 换清晰度会短暂卸下当前地址。弹幕跟这一集走，不跟这一次片源地址走。
   const danmakuActive = active && showDanmakuControls && playbackRequested && Boolean(current?.vid) && !current.locked;
-  const [showEpisodeComments, setShowEpisodeComments] = useState(false);
+  const [allowComments, setAllowComments] = useState(true);
   // 时间轴弹幕：OfficialDanmaku / getEpisodeDanmaku，带 offset_time。时间到了才出现，这里不改它的投放。
   // 本集评论：CommentDanmaku / getEpisodeComments，公开页评论，没有视频时间点。
-  // 两条通路不要并成同一次请求。时间轴成功之后再追加本集评论；一条时间轴都没有时，只显示本集评论。
-  // 时间轴接口失败仍停在时间轴，方便重试；不能把失败当成“这一集没有弹幕”。
+  // 两条通路不要并成同一次请求。播放一开始就同时读取本集评论，少数时间轴也不会空等。
+  // 时间轴完全失败且一条都没有时，关掉评论，错误仍留在时间轴上以便重试。
+  const showEpisodeComments = danmakuActive && allowComments;
   const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: showEpisodeComments });
   const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive, preferences: commentDanmaku });
   useEffect(() => {
-    const ready = Boolean(officialDanmaku.feed?.loaded) && !officialDanmaku.loading && !officialDanmaku.error;
-    const next = Boolean(danmakuActive && officialDanmaku.supported && ready);
-    setShowEpisodeComments(current => current === next ? current : next);
-  }, [danmakuActive, officialDanmaku.supported, officialDanmaku.loading, officialDanmaku.error, officialDanmaku.feed]);
-  const danmaku = !showEpisodeComments
+    const feed = officialDanmaku.feed;
+    const hardFail = Boolean(feed?.loaded) && !officialDanmaku.loading && Boolean(feed?.error) && officialDanmaku.comments.length === 0;
+    setAllowComments(current => current === !hardFail ? current : !hardFail);
+  }, [officialDanmaku.loading, officialDanmaku.feed, officialDanmaku.comments.length]);
+  // 时间轴还在读、而且一条都还没有时，设置面板仍表示时间轴。评论可以同时在读，但不能先说成「这一集没有时间轴」。
+  const timelineSettled = Boolean(officialDanmaku.feed?.loaded) && !officialDanmaku.loading;
+  const danmaku = !showEpisodeComments || (!timelineSettled && officialDanmaku.comments.length === 0)
     ? { ...officialDanmaku, sourceKind: 'official' }
     : officialDanmaku.comments.length
       ? { ...officialDanmaku, sourceKind: 'both' }

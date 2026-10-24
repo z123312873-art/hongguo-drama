@@ -84,31 +84,47 @@ function mount({ response, enabled = true } = {}) {
 
   const failed = mount({ response: args => ({ success: false, series_id: args.seriesId, episode_id: args.vid, items: [], error: '模拟接口异常' }) });
   await failed.flush();
-  assert.equal(failed.requests.filter(item => item.source === 'comments').length, 0, 'a failed timeline request must not be treated as an empty episode');
   assert.equal(failed.tree.danmaku.sourceKind, 'official');
-  assert.equal(failed.tree.danmaku.status, '模拟接口异常'); failed.unmount();
+  assert.equal(failed.tree.danmaku.status, '模拟接口异常');
+  failed.unmount();
+
+  const partial = mount({ response: args => ({ success: false, partial: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 1, text: '只有一条' }], error: '后续弹幕加载中断，已保留已获取的部分', notice: '后续弹幕加载中断，已保留已获取的部分' }) });
+  await partial.flush();
+  assert.equal(partial.tree.officialDanmaku.comments.length, 1);
+  assert.equal(partial.requests.filter(item => item.source === 'comments').length, 1, 'a few timeline items must still add episode comments');
+  assert.equal(partial.tree.danmaku.sourceKind, 'both');
+  partial.unmount();
 
   const off = mount({ enabled: false }); await off.flush(); assert.equal(off.requests.length, 0); off.unmount();
   const hidden = mount({ enabled: false }); hidden.props.showDanmakuControls = false;
   hidden.tree.danmaku.toggle(); await hidden.flush(); assert.equal(hidden.requests.length, 0); hidden.unmount();
 
-  const retry = mount({ response: (args, count) => count === 1
-    ? { success: false, series_id: args.seriesId, episode_id: args.vid, items: [], error: '模拟接口异常' }
-    : { success: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 5, text: '恢复' }] } });
+  let officialCalls = 0;
+  const retry = mount({ response: (args) => {
+    if (!args.vid) return { success: true, series_id: args.seriesId, episode_id: args.episodeId, items: [{ id: 'c', content: '评论' }], has_more: false };
+    officialCalls += 1;
+    return officialCalls === 1
+      ? { success: false, series_id: args.seriesId, episode_id: args.vid, items: [], error: '模拟接口异常' }
+      : { success: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 5, text: '恢复' }] };
+  } });
   await retry.flush(); assert.equal(retry.tree.danmaku.status, '模拟接口异常');
   retry.tree.danmaku.retry(); await retry.flush();
   assert.equal(retry.requests.filter(item => item.source === 'official').length, 2);
   assert.equal(retry.requests.filter(item => item.source === 'official')[1].fresh, true);
   assert.equal(retry.tree.danmaku.comments.length, 1); assert.equal(retry.tree.danmaku.error, ''); retry.unmount();
 
-  let settleOld;
-  const pending = mount({ response: (args, count) => count === 1 ? new Promise(resolve => { settleOld = resolve; })
-    : { success: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 8, text: '当前请求' }] } });
+  let settleOld; let pendingOfficialCalls = 0;
+  const pending = mount({ response: (args) => {
+    if (!args.vid) return { success: true, series_id: args.seriesId, episode_id: args.episodeId, items: [{ id: 'c', content: '评论' }], has_more: false };
+    pendingOfficialCalls += 1;
+    return pendingOfficialCalls === 1 ? new Promise(resolve => { settleOld = resolve; })
+      : { success: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 8, text: '当前请求' }] };
+  } });
   await pending.flush();
   const previousVid = pending.props.current.vid;
   pending.props.current = { vid: '7503780574541122623' }; await pending.flush();
   assert.equal(pending.requests.filter(r => r.source === 'official').length, 2, 'episode change must request timeline danmaku again');
-  assert.ok(pending.requests.filter(r => r.source === 'comments').every(item => item.episodeId === pending.props.current.vid));
+  assert.equal(pending.requests.filter(r => r.source === 'comments').at(-1)?.episodeId, pending.props.current.vid);
   settleOld({ success: false, series_id: pending.props.activeSeriesId, episode_id: previousVid, items: [], error: '迟到的旧请求' });
   await pending.flush();
   assert.equal(pending.tree.danmaku.sourceKind, 'both');

@@ -7,7 +7,7 @@ import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku, tak
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
-/** 默认走时间轴弹幕。播放器在时间轴成功后再追加本集评论；时间轴失败时不改用评论。 */
+/** 默认走时间轴弹幕。播放器只要读到内容就追加本集评论；完全失败且一条都没有时不改用评论。 */
 export const DEFAULT_DANMAKU_SOURCE = 'official';
 
 export function normalizeDanmakuSource(value) {
@@ -212,6 +212,7 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
       y: top + lane * lineHeight,
       width: textWidth,
       age: 0,
+      speed: 1,
     });
     state.cooldown = reducedMotion ? REDUCED_MOTION_READ_SECONDS : (EMIT_INTERVAL[settings.density] ?? EMIT_INTERVAL.normal);
     if (timed) state.cursor++;

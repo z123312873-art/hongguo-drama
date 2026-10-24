@@ -153,6 +153,47 @@ function laneSpeedCap(state, lane) {
   return cap;
 }
 
+// 时间轴弹幕没有自己的随机速度，缺省就是 1。同一行只要有它，评论就改成这个速度。
+function foreignSpeed(obstacles, y, lineHeight) {
+  let speed = null;
+  for (const other of obstacles || []) {
+    if (!other || Math.abs((Number(other.y) || 0) - y) >= lineHeight) continue;
+    const value = Number.isFinite(other.speed) && other.speed > 0 ? other.speed : 1;
+    speed = speed == null ? value : Math.min(speed, value);
+  }
+  return speed;
+}
+
+function foreignClear(obstacles, y, lineHeight, x, textWidth) {
+  return !(obstacles || []).some(other => Math.abs(other.y - y) < lineHeight
+    && x < other.x + other.width + 24 && x + textWidth + 24 > other.x);
+}
+
+// 本集评论让路。时间轴仍按自己的速度走，不改它的位置。
+// 同一行的评论改成和时间轴一样的速度：更快会追上它，更慢则会被它从后面盖住。
+// 已经叠在一起时，把评论推到时间轴后面，间距沿用同一条 24px。
+export function yieldToForeignDanmaku(state, obstacles, lineHeight, gap = 24) {
+  if (!obstacles?.length) return;
+  for (const item of state.items) {
+    const matched = foreignSpeed(obstacles, item.y, lineHeight);
+    if (matched == null) continue;
+    item.speed = matched;
+    for (let guard = 0; guard <= obstacles.length; guard++) {
+      let pushed = false;
+      for (const other of obstacles) {
+        if (!other || Math.abs((Number(other.y) || 0) - item.y) >= lineHeight) continue;
+        const overlaps = item.x < other.x + other.width + gap && item.x + item.width + gap > other.x;
+        const behind = other.x + other.width + gap;
+        if (overlaps && item.x < behind) {
+          item.x = behind;
+          pushed = true;
+        }
+      }
+      if (!pushed) break;
+    }
+  }
+}
+
 export function keepDanmakuSpacing(state, gap = 24) {
   const groups = new Map();
   for (const item of state.items) {
@@ -174,7 +215,7 @@ export function keepDanmakuSpacing(state, gap = 24) {
   }
 }
 
-export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76, seed = 1 }) {
+export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76, seed = 1, obstacles = [] }) {
   if (!(elapsed > 0) || !comments.length || width < 40 || height < 60) return false;
   const delta = Math.min(elapsed, 0.25);
   const layout = danmakuLayout({ height, settings, reducedMotion, bottomInset });
@@ -186,7 +227,10 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     item.age += delta;
     if (!reducedMotion) item.x -= 85 * settings.speed * (item.speed || 1) * delta;
   }
-  if (!reducedMotion) keepDanmakuSpacing(state);
+  if (!reducedMotion) {
+    yieldToForeignDanmaku(state, obstacles, lineHeight);
+    keepDanmakuSpacing(state);
+  }
   retireDanmaku(state, reducedMotion);
   let changed = before !== state.items.length;
   if (reducedMotion) {
@@ -228,7 +272,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
   const open = [];
   for (let lane = 0; lane < lanes; lane++) {
     const y = top + lane * lineHeight;
-    if (commentLaneOpen(state, lane, y, lineHeight, width, textWidth)) open.push(lane);
+    if (commentLaneOpen(state, lane, y, lineHeight, width, textWidth) && foreignClear(obstacles, y, lineHeight, width, textWidth)) open.push(lane);
   }
   if (!open.length) {
     if (fromReplay) state.replayQueue?.unshift({ content });
@@ -236,9 +280,13 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
   }
   state.cursor = nextCursor;
   const lane = open[Math.floor(roll(state) * open.length)];
-  const speed = Math.min(0.84 + roll(state) * 0.34, laneSpeedCap(state, lane));
+  const y = top + lane * lineHeight;
+  const matched = foreignSpeed(obstacles, y, lineHeight);
+  const speed = matched == null
+    ? Math.min(0.84 + roll(state) * 0.34, laneSpeedCap(state, lane))
+    : Math.min(matched, laneSpeedCap(state, lane));
   // 从画面外进入。开播时不要把整批评论摆进画面。
-  state.items.push({ id: state.nextId++, text, content, lane, x: width, y: top + lane * lineHeight, width: textWidth, age: 0, speed });
+  state.items.push({ id: state.nextId++, text, content, lane, x: width, y, width: textWidth, age: 0, speed });
   state.nextGap = state.clock + commentGap(settings.density, () => roll(state));
   return true;
 }

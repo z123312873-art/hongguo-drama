@@ -76,6 +76,48 @@ test('较快的后发弹幕不会盖住同道上的前一条', () => {
   }
 });
 
+test('本集评论让开时间轴弹幕，并且不会比它更快', () => {
+  const obstacle = { x: 300, y: 12, width: 100, speed: 1 };
+  const state = {
+    items: [{ id: 1, text: '评论', content: '评论', lane: 0, x: 360, y: 12, width: 80, age: 0, speed: 1.2 }],
+    cursor: 1, nextId: 2, cooldown: 0, scheduleSeed: 9, randState: 9, clock: 5, nextGap: 100,
+  };
+  advanceDanmaku(state, ['评论'], 0.05, {
+    width: 800, height: 400, settings: DEFAULT_DANMAKU_SETTINGS, reducedMotion: false, seed: 9, obstacles: [obstacle],
+  });
+  assert.ok(state.items[0].x >= obstacle.x + obstacle.width + 24 - 1);
+  assert.ok(state.items[0].speed <= 1);
+});
+
+test('较慢的评论改成和时间轴同速，后面的时间轴不会盖上来', () => {
+  const obstacle = { x: 420, y: 12, width: 90, speed: 1 };
+  const state = {
+    items: [{ id: 1, text: '评论', content: '评论', lane: 0, x: 200, y: 12, width: 80, age: 0, speed: 0.84 }],
+    cursor: 1, nextId: 2, cooldown: 0, scheduleSeed: 3, randState: 3, clock: 5, nextGap: 100,
+  };
+  const options = { width: 800, height: 400, settings: DEFAULT_DANMAKU_SETTINGS, reducedMotion: false, seed: 3, obstacles: [obstacle] };
+  for (let frame = 0; frame < 180; frame++) {
+    advanceDanmaku(state, ['评论'], 1 / 60, options);
+    obstacle.x -= 85 * (1 / 60);
+    const item = state.items[0];
+    const separated = item.x + 0.01 >= obstacle.x + obstacle.width + 24 || obstacle.x + 0.01 >= item.x + item.width + 24;
+    assert.ok(separated, `第 ${frame} 帧互相覆盖 item=${item.x} obstacle=${obstacle.x}`);
+    assert.ok(Math.abs(item.speed - 1) < 0.001);
+  }
+});
+
+test('同一行已有时间轴时，新评论用相同速度，不从后面追上', () => {
+  const obstacle = { x: 120, y: 12, width: 80, speed: 1 };
+  const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
+  const options = { width: 800, height: 140, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', area: 'full' }, reducedMotion: false, seed: 9, obstacles: [obstacle] };
+  for (let frame = 0; frame < 30; frame++) advanceDanmaku(state, ['新评论'], 0.05, options);
+  assert.ok(state.items.length >= 1);
+  assert.ok(state.items.every(item => item.y !== 12 || Math.abs(item.speed - 1) < 0.001));
+  const shared = state.items.filter(item => item.y === 12);
+  assert.ok(shared.length >= 1);
+  assert.ok(shared.every(item => item.x >= obstacle.x + obstacle.width + 24 - 1 || obstacle.x >= item.x + item.width + 24 - 1));
+});
+
 test('scheduler bounds lanes, avoids overlaps, pauses and clamps long frame gaps', () => {
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
   const options = { width: 500, height: 300, settings: DEFAULT_DANMAKU_SETTINGS, reducedMotion: false };
