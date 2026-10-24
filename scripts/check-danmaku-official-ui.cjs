@@ -20,7 +20,7 @@ function mount({ response, enabled = true } = {}) {
   const slots = [], effects = [], cleanups = [], requests = [], intervals = new Map();
   const storage = new Map([['hongguo:comment-danmaku:v1', JSON.stringify({ enabled, fontSize: 26, opacity: 65, blockedWords: '屏蔽' })]]);
   let cursor = 0, tree;
-  const props = { activeSeriesId: '7503745441910017049', current: { vid: '7503780574541122622' }, active: true, canPlay: true, showDanmakuControls: true };
+  const props = { activeSeriesId: '7503745441910017049', current: { vid: '7503780574541122622' }, active: true, canPlay: true, showDanmakuControls: true, playbackRequested: true };
   const changed = (old, deps) => !old || deps.some((v, i) => !Object.is(v, old[i]));
   const react = {
     useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
@@ -53,7 +53,7 @@ function mount({ response, enabled = true } = {}) {
   }
   const source = load(path.join(root, 'danmakuSource.mjs'));
   const context = vm.createContext({ ...source, ...load(path.join(root, 'CommentDanmaku.jsx')), ...load(path.join(root, 'OfficialDanmaku.jsx')), props });
-  vm.runInContext(`function renderWiring() { const {activeSeriesId,current,active,canPlay,showDanmakuControls} = props; ${wiring}\nreturn {danmaku,commentDanmaku,officialDanmaku}; }`, context);
+  vm.runInContext(`function renderWiring() { const {activeSeriesId,current,active,canPlay,showDanmakuControls,playbackRequested} = props; ${wiring}\nreturn {danmaku,commentDanmaku,officialDanmaku}; }`, context);
   const render = () => { cursor = 0; tree = context.renderWiring(); effects.splice(0).forEach(fn => fn()); return tree; };
   const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } return tree; };
   render();

@@ -124,7 +124,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     };
     const start = () => { if (!frame && canAdvance()) { previous = 0; frame = requestAnimationFrame(tick); } };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; previous = 0; };
-    const emptied = () => { stop(); reset(); };
+    const emptied = () => { stop(); };
     const resize = () => {
       const nextWidth = layer.clientWidth;
       const nextHeight = layer.clientHeight;
@@ -142,7 +142,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
   }, [running, available, comments, settings, reducedMotion, source, videoRef, feed]);
 
-  if (!running || !available) return null;
+  if (!running) return null;
   return <div ref={layerRef} className={`comment-danmaku ${reducedMotion ? 'comment-danmaku-static' : ''}`}>
     <div aria-hidden="true" style={{ opacity: settings.opacity / 100, fontSize: settings.fontSize }}>
       {(comments.length ? items : EMPTY).map(item => <span className="comment-danmaku-item" key={item.id} ref={node => { if (node) nodes.current.set(item.id, node); else nodes.current.delete(item.id); }}

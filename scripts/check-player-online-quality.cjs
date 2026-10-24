@@ -33,6 +33,20 @@ if (process.argv[2] !== 'main') {
     ui.metadata(); ui.error(3); await ui.flush(); assert.equal(ui.transcodes.at(-1).quality,'1080p'); assert.equal(ui.transcodes.at(-1).filePath,null);
     ui.episode(2); await ui.flush(); assert.equal(ui.prepares.at(-1).quality,'1080p'); ui.unmount();
   });
+  await check('a lower picture on one episode does not replace 1080p for the next episode', async () => {
+    const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: async () => ({ success: true, url: 'hongguo-stream://mock', notice: '本集没有可确认的 1080P 片源，实际为 720P（1280×720），已改用该清晰度' }) });
+    await ui.flush();
+    select(ui).props.onChange({ target: { value: '1080p' } });
+    await ui.flush();
+    ui.metadata();
+    assert.equal(select(ui).props.value, '1080p');
+    ui.episode(2);
+    await ui.flush();
+    assert.equal(select(ui).props.value, '1080p');
+    assert.equal(ui.prepares.at(-1).quality, '1080p');
+    assert.equal(ui.prepares.at(-1).vidIndex, 2);
+    ui.unmount();
+  });
   await check('online fallback keeps explicit quality independent of download selection',async()=>{
     const downloads=[];
     const ui=mount({props:{target:{seriesId:'A',vidIndex:1,ts:1}},prepare:async()=>({success:false,error:'取源失败'}),settings:{download_quality:'720p'},

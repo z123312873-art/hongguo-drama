@@ -299,7 +299,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
                 <span>{quality === 'auto' ? (supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定') : quality.toUpperCase()}</span><span aria-hidden="true">{onlineQuality === quality ? '✓' : ''}</span>
               </button>)}
             </div>
-            <p className="player-quality-hint">{supportsOnlineQuality ? '网页片源清晰度上限由上游决定，自动模式可能仅有低清画面。720P / 1080P 使用 App/API 片源；不可用会提示，不会自动降级。切换后保留播放进度。' : '此来源的清晰度由片源决定，暂不支持指定画质。当前画面分辨率不代表来源的最高画质。'}</p>
+            <p className="player-quality-hint">{supportsOnlineQuality ? '所选清晰度会保留。某一集没有对应片源时，只临时播放该集的实际画面；自动播放或手动切到下一集，会重新按自动、720P 或 1080P 取源。切换后保留播放进度和弹幕。' : '此来源的清晰度由片源决定，暂不支持指定画质。当前画面分辨率不代表来源的最高画质。'}</p>
           </div>}
         </div>
         <div className="player-controls-volume">

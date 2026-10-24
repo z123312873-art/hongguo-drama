@@ -125,17 +125,21 @@ test('forward and backward seeks preserve and animate visible comments without e
     } finally { ui.unmount(); }
   }
   const ui = mount();
-  try { ui.props.source = 'another-video'; ui.render(); assert.equal(ui.feed.animation.items.length, 0); }
+  try {
+    const before = ids(ui);
+    ui.props.source = 'another-video'; ui.render();
+    assert.deepEqual(ids(ui), before, 'a new media address for the same episode must keep visible danmaku');
+  }
   finally { ui.unmount(); }
 });
 
-test('brief buffering keeps comments moving and emptied clears the old source', () => {
+test('brief buffering keeps comments moving and a quality reload does not clear them', () => {
   const ui = mount();
   try {
     const before = ids(ui), x = ui.feed.animation.items[0].x;
     ui.media.readyState = 1; ui.event('waiting'); ui.tick(0.2, 500);
     assert.deepEqual(ids(ui), before); assert.ok(ui.feed.animation.items[0].x < x);
-    ui.event('emptied'); assert.equal(ui.feed.animation.items.length, 0);
+    ui.event('emptied'); assert.deepEqual(ids(ui), before, 'replacing the media element must not remove on-screen danmaku');
   } finally { ui.unmount(); }
 });
 
@@ -162,7 +166,7 @@ test('hidden resize restore immediately keeps an originally visible item inside 
 });
 
 test('explicit disable or inactive player restore realigns instead of reviving old time overlays', () => {
-  for (const mode of ['enabled', 'available', 'active']) {
+  for (const mode of ['enabled', 'active']) {
     const ui = mount();
     try {
       ui.media.paused = true; ui.event('pause');
@@ -196,7 +200,11 @@ test('temporary hidden state keeps overlay mounted and frozen; explicit disable 
     ui.document.hidden = false; ui.props.danmaku.running = true; ui.render();
     assert.ok(ui.tree); assert.deepEqual(ids(ui), before);
     ui.tick(1.8, 1950); assert.deepEqual(ids(ui), before);
-    for (const mode of ['enabled', 'active', 'supported', 'available']) {
+    ui.props.available = false; ui.render();
+    assert.ok(ui.tree, 'a brief unavailable picture must not remove the danmaku layer');
+    ui.props.available = true; ui.render();
+    assert.deepEqual(ids(ui), before);
+    for (const mode of ['enabled', 'active', 'supported']) {
       if (mode === 'available') ui.props.available = false;
       else ui.props.danmaku[mode] = false;
       ui.props.danmaku.running = false; ui.render();
@@ -218,6 +226,7 @@ test('comment-source overlays also keep moving through forward/backward seek and
    ui.tick(time, time === 30 ? 500 : 900); assert.ok(ui.feed.animation.items[0].x < x);
    ui.media.seeking = false; ui.media.readyState = 4; ui.event('seeked');
   }
-  ui.event('emptied'); assert.equal(ui.feed.animation.items.length, 0);
+  const kept = ids(ui);
+  ui.event('emptied'); assert.deepEqual(ids(ui), kept, 'comment overlay also stays through a quality reload');
  } finally { ui.unmount(); }
 });

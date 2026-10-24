@@ -90,8 +90,8 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   assert.match(nodeText(find('当前播放信息')), /第 2 集/);
   find('清晰度').props.onClick(); render();
   assert.match(nodeText(find('清晰度面板')), /360P.*640.*360/);
-  assert.match(nodeText(find('清晰度面板')), /网页.*上限.*上游/);
-  assert.match(nodeText(find('清晰度面板')), /未自动降级|不会自动降级/);
+  assert.match(nodeText(find('清晰度面板')), /所选清晰度会保留/);
+  assert.match(nodeText(find('清晰度面板')), /下一集/);
   find('选择 1080P').props.onClick(); render(); assert.equal(props.onlineQuality, '1080p');
   find('清晰度').props.onClick(); render();
   assert.equal(find('选择 1080P').props['aria-pressed'], true);

@@ -126,7 +126,7 @@
 
 .btn-sm {
   padding: 6px 11px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   flex-shrink: 0;
 }
 

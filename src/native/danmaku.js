@@ -266,17 +266,6 @@ function parsePage(payload, vid) {
   return { items, nextMs, hasMore, cursor, cursorText };
 }
 
-// 时间窗计数写在游标里。当前窗是空的，不代表后面的窗也是空的。
-function laterWindows(cursor, start) {
-  const counts = cursor?.danmaku_window_count;
-  if (!counts || typeof counts !== 'object') return false;
-  return Object.entries(counts).some(([mark, count]) => {
-    const at = Number(mark);
-    const amount = Number(count);
-    return Number.isFinite(at) && at > start && Number.isFinite(amount) && amount > 0;
-  });
-}
-
 // ── 请求 ──────────────────────────────────────────────────────────────────
 
 function buildBody(vid, bookId, start, duration, cursor = '') {
@@ -447,6 +436,20 @@ async function fetchDanmaku(options = {}) {
     let truncated = false;
     let failure = '';
     let cursorText = '';
+    let knownWindows = null;
+    let retriedSparse = false;
+    const rememberWindows = cursor => {
+      const counts = cursor?.danmaku_window_count;
+      if (counts && typeof counts === 'object') knownWindows = counts;
+    };
+    const laterWindow = from => {
+      if (!knownWindows) return null;
+      const marks = Object.entries(knownWindows)
+        .map(([mark, count]) => [Number(mark), Number(count)])
+        .filter(([mark, count]) => Number.isFinite(mark) && mark > from && Number.isFinite(count) && count > 0)
+        .sort((a, b) => a[0] - b[0]);
+      return marks.length ? marks[0][0] : null;
+    };
 
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
@@ -471,7 +474,24 @@ async function fetchDanmaku(options = {}) {
           break;
         }
 
-        const { items: pageItems, nextMs, hasMore, cursor, cursorText: nextCursor } = parsePage(payload, vid);
+        let parsed = parsePage(payload, vid);
+        rememberWindows(parsed.cursor);
+        const rows = Array.isArray(payload?.data?.data_list) ? payload.data.data_list : [];
+        const foreign = rows.some(row => {
+          const groupId = row?.comment?.common?.group_id;
+          return groupId !== undefined && groupId !== null && String(groupId) !== vid;
+        });
+        // 一小时窗口有时只回引导或空页。没有后续时间窗可走时，用短窗口再要一次。
+        if (!parsed.items.length && !foreign && !retriedSparse && !collected.length && !laterWindow(start)) {
+          retriedSparse = true;
+          try {
+            const retryPayload = await requestWindow({ vid, bookId: seriesId, start, duration: 30000, cursor: '', transport, now, random });
+            const retry = parsePage(retryPayload, vid);
+            if (retry.items.length || retry.hasMore === false) parsed = retry;
+            rememberWindows(parsed.cursor);
+          } catch { /* 保留第一次的分页信号。 */ }
+        }
+        let { items: pageItems, nextMs, hasMore, cursor, cursorText: nextCursor } = parsed;
         cursorText = nextCursor || '';
         if (pageItems.length) emptyPages = 0;
         else emptyPages++;
@@ -492,19 +512,24 @@ async function fetchDanmaku(options = {}) {
           truncated = true;
           break;
         }
-        if (nextMs === null) {
-          if (hasMore === true) {
-            truncated = true;
-            if (!collected.length) failure = '弹幕接口未返回有效分页，请稍后重试';
+        if (nextMs === null || nextMs <= start) {
+          const jump = laterWindow(start);
+          if (jump && page < MAX_PAGES - 1) {
+            start = jump;
+            cursorText = '';
+            duration = Math.min(Math.max(duration, start + EFFECTIVE_DURATION_MS), MAX_DURATION_MS);
+            continue;
           }
+          if (hasMore === true) truncated = true;
+          if (hasMore === true && !collected.length) failure = '弹幕接口未返回有效分页，请稍后重试';
           break;
         }
         // 游标还标着后面的时间窗有弹幕时，空窗只是这一段没有，不能当成分页坏了。
         // 没有这种计数时仍按连续空页停止，避免上游一直 has_more 却不给内容。
-        if (nextMs <= start || nextMs > MAX_TIME_SECONDS * 1000 || page === MAX_PAGES - 1
-          || (emptyPages >= MAX_EMPTY_PAGES && !laterWindows(cursor, start))) {
+        if (nextMs > MAX_TIME_SECONDS * 1000 || page === MAX_PAGES - 1
+          || (emptyPages >= MAX_EMPTY_PAGES && !laterWindow(start))) {
           truncated = true;
-          if (!collected.length) failure = '弹幕接口未返回有效分页，请稍后重试';
+          if (!collected.length && hasMore === true && !laterWindow(start)) failure = '弹幕接口未返回有效分页，请稍后重试';
           break;
         }
         start = nextMs;

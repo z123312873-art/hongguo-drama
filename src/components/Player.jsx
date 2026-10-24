@@ -500,7 +500,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   if (canPlay) lastVideoSrcRef.current = playableSource;
   const videoSrc = !playbackRequested || compatProgress ? '' : lastVideoSrcRef.current;
   const danmakuSource = useDanmakuSource();
-  const danmakuActive = active && canPlay && showDanmakuControls;
+  // 换清晰度会短暂卸下当前地址。弹幕跟这一集走，不跟这一次片源地址走。
+  const danmakuActive = active && showDanmakuControls && playbackRequested && Boolean(current?.vid) && !current.locked;
   const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: danmakuActive && danmakuSource === 'comments' });
   const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive && danmakuSource === 'official', preferences: commentDanmaku });
   const danmaku = { ...(danmakuSource === 'official' ? officialDanmaku : commentDanmaku), sourceKind: danmakuSource, setSource: writeDanmakuSource };
@@ -1209,7 +1210,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <h2>我的剧库</h2>
         </div>
         <div className="player-header-right">
-          <p className="player-download-quality-hint" id="player-online-quality-hint">自动优先兼容；指定画质不可用时会提示，不会自动降级。</p>
+          <p className="player-download-quality-hint" id="player-online-quality-hint">自动、720P、1080P 都会保留。某一集片源不够时只临时播放该集的实际画面，自动播放下一集仍按所选清晰度重新取源。</p>
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
 
           <button

@@ -131,7 +131,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     feed.animation.items = [];
     feed.animation.replayQueue = [];
     setItems([]);
-  }, [source, feed, enabled, active, supported, available, settings.fontSize, settings.area, settings.density, reducedMotion]);
+  }, [feed, enabled, active, supported, settings.fontSize, settings.area, settings.density, reducedMotion]);
 
   // 布局改变时重对齐；透明度、速度与屏蔽词调整保留当前轨迹。
   useEffect(() => {
@@ -167,7 +167,8 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     const start = () => { if (!frame && canAnimate()) frame = requestAnimationFrame(tick); };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; lastFrame = undefined; };
     const seek = () => { state.lastTime = undefined; start(); };
-    const emptied = () => { stop(); state.lastTime = undefined; state.items = []; state.replayQueue = []; setItems([]); };
+    // 换清晰度会触发 emptied。已在屏上的弹幕留着，等新地址按同一进度重新对齐。
+    const emptied = () => { stop(); state.lastTime = undefined; };
     const resize = () => {
       const nextWidth = layer.clientWidth;
       const nextHeight = layer.clientHeight;
@@ -186,7 +187,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
   }, [running, available, list, settings, reducedMotion, source, videoRef, feed]);
 
-  if (!enabled || !active || !supported || !available) return null;
+  if (!enabled || !active || !supported) return null;
   return <div ref={layerRef} className={`comment-danmaku ${reducedMotion ? 'comment-danmaku-static' : ''}`}>
     <div aria-hidden="true" style={{ opacity: settings.opacity / 100, fontSize: settings.fontSize }}>
       {((list.length ? items : [])).map(item => <span className="comment-danmaku-item" key={item.id} ref={node => { if (node) nodes.current.set(item.id, node); else nodes.current.delete(item.id); }}

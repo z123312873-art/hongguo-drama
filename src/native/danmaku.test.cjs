@@ -152,6 +152,47 @@ test('has_more=false 时即便带 cursor 也必须停止（避免把"没有了"�
   assert.equal(calls, 1);
 });
 
+test('卡住的游标若已标明后续时间窗，改从那个时间窗继续', async () => {
+  let calls = 0;
+  const transport = async (_url, body) => {
+    calls++;
+    const start = JSON.parse(body).business_param.start_offset_time;
+    if (start === 0) return { data: JSON.stringify(page({
+      rows: [],
+      info: { has_more: true, cursor: JSON.stringify({ end_offset_time: 0, danmaku_window_count: { 0: 0, 60000: 2 } }) },
+    })) };
+    return { data: JSON.stringify(page({
+      rows: [comment({ expand: { offset_time: 61000 }, common: { content: { text: '后面还有' } } })],
+      info: { has_more: false },
+    })) };
+  };
+  const result = await danmaku.fetchDanmaku({ seriesId: SERIES, vid: VID, ...fixedOptions(transport) });
+  assert.equal(result.success, true, result.notice);
+  assert.deepEqual(result.items.map(item => item.text), ['后面还有']);
+  assert.ok(calls >= 2);
+});
+
+test('长窗口只有引导时改用短窗口，不把本集报成分页失败', async () => {
+  const transport = async (_url, body) => {
+    const parsed = JSON.parse(body);
+    const start = parsed.business_param.start_offset_time;
+    const duration = parsed.business_param.playlet_item_duration;
+    if (start === 0 && duration > 30000) return { data: JSON.stringify(page({
+      rows: [comment({ common: { status: '0', content: { text: '引导' } } })],
+      extra: { next_query_danmaku_list_time: 30000 },
+      info: { has_more: true },
+    })) };
+    if (start === 0) return { data: JSON.stringify(page({
+      rows: [comment({ expand: { offset_time: 4000 }, common: { content: { text: '真正的弹幕' } } })],
+      info: { has_more: false },
+    })) };
+    return { data: JSON.stringify(page({ rows: [], info: { has_more: false } })) };
+  };
+  const result = await danmaku.fetchDanmaku({ seriesId: SERIES, vid: VID, ...fixedOptions(transport) });
+  assert.equal(result.success, true, result.notice);
+  assert.deepEqual(result.items.map(item => item.text), ['真正的弹幕']);
+});
+
 test('空时间窗后面仍有弹幕时继续翻页，不把有效游标当成无效分页', async () => {
   let calls = 0;
   const windows = { 0: 1, 30000: 0, 60000: 3 };
