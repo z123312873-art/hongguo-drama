@@ -1,7 +1,7 @@
 {
   "name": "hongguo-downloader",
   "version": "2.9.0",
-  "description": "红果短剧播放与下载",
+  "description": "紅果短劇繁體桌面版 · Windows x64 · 三來源搜尋、播放、下載與追劇 · GPL-3.0",
   "main": "main.js",
   "license": "GPL-3.0",
   "scripts": {
