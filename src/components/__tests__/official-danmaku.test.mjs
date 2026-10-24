@@ -24,6 +24,15 @@ function playTo(state, list, from, to, optionsFor) {
   }
 }
 
+test('时间轴弹幕保留时间点，并把表情代码显示成 emoji', () => {
+  const state = { items: [], nextId: 0, cursor: 0, cooldown: 0, lastTime: undefined, replayQueue: [] };
+  const list = [at(0, '点赞[赞][送花]'), at(2, '稍后')];
+  advanceTimedDanmaku(state, list, 0.1, 0.016, options());
+  assert.equal(state.items[0].text, '点赞👍🌹');
+  assert.equal(state.items[0].content, '点赞[赞][送花]');
+  assert.equal(state.items.length, 1);
+});
+
 test('弹幕源只接受已知取值，其余一律回落官方弹幕', () => {
   assert.equal(normalizeDanmakuSource('comments'), 'comments');
   assert.equal(normalizeDanmakuSource('official'), 'official');

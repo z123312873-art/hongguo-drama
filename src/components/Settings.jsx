@@ -205,7 +205,7 @@ function SettingsPage({ active = true, preview = false }) {
           </div>
         </div>
         <div className="settings-group">
-          <p className="settings-hint">播放时先使用带时间点的时间轴弹幕。这一集没有可用时间轴弹幕时，自动改用本集评论，并逐条飞过，不再提供手动切换。</p>
+          <p className="settings-hint">播放时先读取时间轴弹幕，并按视频时间展示。读到时间轴后会再补上本集评论；这一集没有时间轴时，改为展示本集评论。评论按每一集打散飞过，不再手动选择来源。</p>
           <button type="button" className="btn btn-outline btn-sm" onClick={async () => {
             try {
               const result = await window.electronAPI.openExternalUrl('https://github.com/dawei233/hongguo-drama');

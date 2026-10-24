@@ -1,3 +1,5 @@
+import { clipDanmakuText } from './danmakuEmoji.mjs';
+
 export const DEFAULT_DANMAKU_SETTINGS = Object.freeze({ opacity: 80, fontSize: 22, speed: 1, area: 'half', density: 'normal', sensitiveFilter: true, blockedWords: '' });
 
 export function normalizeDanmakuSettings(value) {
@@ -104,39 +106,110 @@ export function takeDanmakuReplay(state, options, pending = 0, currentTime = Inf
   return index < 0 ? undefined : state.replayQueue.splice(index, 1)[0];
 }
 
-// 本集评论弹幕：公开页评论没有视频时间点，只能依次飞过。
-// 不要在开播时把整批评论铺满画面；时间轴弹幕走 advanceTimedDanmaku，不经过这里。
-export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76 }) {
+// 本集评论没有视频时间点。节奏按这一集的种子打散，换集就换一套间隔、轨道和速度。
+// 时间轴弹幕走 advanceTimedDanmaku，不经过这里。
+export function danmakuSeed(seriesId, episodeId) {
+  let hash = 2166136261;
+  for (const char of `${seriesId}\0${episodeId}`) hash = Math.imul(hash ^ char.codePointAt(0), 16777619);
+  return (hash >>> 0) || 1;
+}
+
+function roll(state) {
+  let value = state.randState | 0;
+  value = (value + 0x6D2B79F5) | 0;
+  let mixed = Math.imul(value ^ (value >>> 15), 1 | value);
+  mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+  state.randState = value >>> 0;
+  return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+}
+
+function armCommentSchedule(state, seed) {
+  const next = (seed >>> 0) || 1;
+  if (state.scheduleSeed === next) return;
+  state.scheduleSeed = next;
+  state.randState = next;
+  state.clock = 0;
+  state.nextGap = 0.02 + roll(state) * 0.05;
+}
+
+function commentGap(density, draw) {
+  const base = density === 'sparse' ? 2.3 : density === 'dense' ? 0.45 : 1.15;
+  const spread = density === 'sparse' ? 2.1 : density === 'dense' ? 0.95 : 1.45;
+  const pause = draw() < 0.16 ? 0.7 + draw() * 1.6 : 0;
+  return base + draw() * spread + pause;
+}
+
+function commentLaneOpen(state, lane, y, lineHeight, x, textWidth) {
+  return !state.items.some(item => {
+    const sameLane = item.lane === lane || Math.abs(item.y - y) < lineHeight;
+    return sameLane && x < item.x + item.width + 24 && x + textWidth + 24 > item.x;
+  });
+}
+
+export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76, seed = 1 }) {
   if (!(elapsed > 0) || !comments.length || width < 40 || height < 60) return false;
   const delta = Math.min(elapsed, 0.25);
   const layout = danmakuLayout({ height, settings, reducedMotion, bottomInset });
   const { lineHeight, top } = layout;
-  const lanes = reducedMotion ? 1 : Math.min(layout.lanes, { sparse: 1, normal: 2, dense: 3 }[settings.density] ?? 2);
+  const laneCap = reducedMotion ? 1 : ({ sparse: 3, normal: 5, dense: 7 }[settings.density] ?? 5);
+  const lanes = Math.min(layout.lanes, laneCap);
   const before = state.items.length;
-  for (const item of state.items) { item.age += delta; if (!reducedMotion) item.x -= 85 * settings.speed * delta; }
+  for (const item of state.items) {
+    item.age += delta;
+    if (!reducedMotion) item.x -= 85 * settings.speed * (item.speed || 1) * delta;
+  }
   retireDanmaku(state, reducedMotion);
   let changed = before !== state.items.length;
-  state.cooldown = Math.max(0, state.cooldown - delta);
-  const lane = Array.from({ length: lanes }, (_, index) => index).find(index =>
-    !state.items.some(item => item.lane === index || Math.abs(item.y - (top + index * lineHeight)) < lineHeight));
-  if (state.cooldown === 0 && lane !== undefined) {
-    let content = '';
-    while (state.cursor < comments.length) {
-      const comment = comments[state.cursor++];
-      const full = typeof comment === 'string' ? comment : comment.content;
-      if (!commentIsBlocked(full, settings)) { content = full; break; }
+  if (reducedMotion) {
+    state.cooldown = Math.max(0, (state.cooldown || 0) - delta);
+    const lane = state.items.length ? undefined : 0;
+    if (state.cooldown === 0 && lane !== undefined) {
+      let content = '';
+      while (state.cursor < comments.length) {
+        const comment = comments[state.cursor++];
+        const full = typeof comment === 'string' ? comment : comment.content;
+        if (!commentIsBlocked(full, settings)) { content = full; break; }
+      }
+      if (!content) return changed;
+      const text = clipDanmakuText(content);
+      state.items.push({ id: state.nextId++, text, content, lane, x: 12, y: top, width: (Array.from(text).length + 1) * settings.fontSize, age: 0, speed: 1 });
+      state.cooldown = 6;
+      changed = true;
     }
-    if (!content) content = takeDanmakuReplay(state, { width, height, settings, reducedMotion, bottomInset })?.content;
-    if (!content) return changed;
-    const chars = Array.from(content);
-    const text = chars.length > 80 ? chars.slice(0, 79).join('') + '…' : content;
-    const textWidth = (Array.from(text).length + 1) * settings.fontSize;
-    // 从画面右侧外进入。第一条若直接摆在屏内，长评论会在开播时叠成一整排。
-    const x = reducedMotion ? 12 : width;
-    state.items.push({ id: state.nextId++, text, content, lane, x, y: top + lane * lineHeight, width: textWidth, age: 0 });
-    const travel = textWidth / Math.max(40, 85 * settings.speed);
-    state.cooldown = reducedMotion ? 6 : Math.max({ sparse: 2.4, normal: 1.8, dense: 1.1 }[settings.density] ?? 1.8, travel * 0.55);
-    changed = true;
+    return changed;
   }
-  return changed;
+  armCommentSchedule(state, seed);
+  state.clock += delta;
+  if (state.clock < state.nextGap) return changed;
+  let content = '';
+  let nextCursor = state.cursor;
+  while (nextCursor < comments.length) {
+    const comment = comments[nextCursor++];
+    const full = typeof comment === 'string' ? comment : comment.content;
+    if (!commentIsBlocked(full, settings)) { content = full; break; }
+  }
+  const fromReplay = !content;
+  if (fromReplay) content = takeDanmakuReplay(state, { width, height, settings, reducedMotion, bottomInset })?.content;
+  if (!content) {
+    state.cursor = nextCursor;
+    return changed;
+  }
+  const text = clipDanmakuText(content);
+  const textWidth = (Array.from(text).length + 1) * settings.fontSize;
+  const open = [];
+  for (let lane = 0; lane < lanes; lane++) {
+    const y = top + lane * lineHeight;
+    if (commentLaneOpen(state, lane, y, lineHeight, width, textWidth)) open.push(lane);
+  }
+  if (!open.length) {
+    if (fromReplay) state.replayQueue?.unshift({ content });
+    return changed;
+  }
+  state.cursor = nextCursor;
+  const lane = open[Math.floor(roll(state) * open.length)];
+  const speed = 0.84 + roll(state) * 0.34;
+  // 从画面外进入。开播时不要把整批评论摆进画面。
+  state.items.push({ id: state.nextId++, text, content, lane, x: width, y: top + lane * lineHeight, width: textWidth, age: 0, speed });
+  state.nextGap = state.clock + commentGap(settings.density, () => roll(state));
+  return true;
 }
