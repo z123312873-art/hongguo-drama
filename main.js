@@ -798,7 +798,7 @@ async function executeHongguoDownload(task) {
         finally { cached.disk.readers--; disposeOnlineDisk(cached); }
       } else await fsp.writeFile(tmpPath, cached.buffer, { mode: 0o600 });
       source.token.throwIfRequested();
-      try { task.actualQuality = await verifyDownloadQuality(tmpPath, quality); reusedCache = true; }
+      try { task.actualQuality = await verifyDownloadQuality(tmpPath, qualityForDeliveredFile(quality, cached)); reusedCache = true; }
       catch (_) { fs.unlinkSync(tmpPath); }
       source.token.throwIfRequested();
       checkCustomAccess(vid);
@@ -809,10 +809,11 @@ async function executeHongguoDownload(task) {
       }
     }
     if (!reusedCache) await withMediaRecovery(vid, hongguoInfo?.series_id, { playInfo: checkedPlayInfo, quality, force: true, cancelToken: source.token }, async playInfo => {
+      const acceptedQuality = qualityForDeliveredFile(quality, playInfo);
       source.token.throwIfRequested();
       if (playInfo.format === 'hls') {
         await prepareHlsFile(playInfo,tmpPath,{cancelToken:source.token,onProgress:received => { task.receivedBytes = received; sendToRenderer('download-progress',{id,progress:0,receivedBytes:received,totalBytes:0}); }});
-        task.actualQuality = await verifyDownloadQuality(tmpPath,quality);
+        task.actualQuality = await verifyDownloadQuality(tmpPath,acceptedQuality);
         source.token.throwIfRequested(); checkCustomAccess(vid);
         publishDownloadFile(tmpPath,finalPath);
         return;
@@ -839,7 +840,7 @@ async function executeHongguoDownload(task) {
         const decodedPath = tmpPath + '.decoded';
         try {
           await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
-          task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
+          task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           source.token.throwIfRequested();
           publishDownloadFile(decodedPath, finalPath);
         } finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
@@ -851,14 +852,14 @@ async function executeHongguoDownload(task) {
         const decodedPath = tmpPath + '.decoded';
         try {
           await decryptInWorker({ srcPath: tmpPath, dstPath: decodedPath, key }, { cancelToken: source.token });
-          task.actualQuality = await verifyDownloadQuality(decodedPath, quality);
+          task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           source.token.throwIfRequested();
           publishDownloadFile(decodedPath, finalPath);
         }
         finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
         fs.unlinkSync(tmpPath);
       } else {
-        task.actualQuality = await verifyDownloadQuality(tmpPath, quality);
+        task.actualQuality = await verifyDownloadQuality(tmpPath, acceptedQuality);
         source.token.throwIfRequested();
         publishDownloadFile(tmpPath, finalPath);
       }
@@ -1934,6 +1935,12 @@ function playbackQuality(value = 'auto', vid = '') {
   return value;
 }
 
+function qualityForDeliveredFile(requested, info) {
+  const delivered = info?.deliveredQuality || info?.quality;
+  if (info?.qualityLimited === true && ['auto', '720p', '1080p'].includes(delivered)) return delivered;
+  return requested;
+}
+
 function onlineCacheKey(vid, quality = 'auto') {
   return quality === 'auto' ? String(vid) : `${vid}:${quality}`;
 }
@@ -2427,7 +2434,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
             }
           };
           const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,force,signal:controller.signal},async playInfo => {
-            const entry = {quality,size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
+            const entry = {quality,deliveredQuality:playInfo.quality,qualityLimited:playInfo.qualityLimited===true,notice:playInfo.notice||'',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
             else {
@@ -2452,7 +2459,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
     session.entry = { ...entry }; entry.lastUsed = Date.now();
     return { success: true, url: `${STREAM_SCHEME}://play/${streamId}`, streamId, size: entry.size,
-      cached, streaming: !!entry.playInfo };
+      cached, streaming: !!entry.playInfo, notice: entry.notice || '' };
   } catch (error) {
     releaseOnlineSession(streamId);
     return { success: false, error: error.message, code: error.code };

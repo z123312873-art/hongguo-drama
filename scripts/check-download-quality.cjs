@@ -38,8 +38,15 @@ function routeFixture(appError = false) {
   return { ...native, calls };
 }
 const checks = [
-  ['1080 rejects a fake label with only 720 pixels', async () => {
-    await assert.rejects(appFixture({ fake: stream('fake', 720, 1280) }).fetchAppPlayUrl('11', { quality: '1080p' }), /1080p/);
+  ['1080 plays the measured 720 picture when the 1080 label is only 720 pixels', async () => {
+    const result = await appFixture({ fake: stream('fake', 720, 1280) }).fetchAppPlayUrl('11', { quality: '1080p' });
+    assert.equal(result.url, mediaUrl('fake'));
+    assert.equal(result.quality, '720p');
+    assert.equal(result.qualityLimited, true);
+    assert.equal(result.width, 720);
+    assert.equal(result.height, 1280);
+    assert.match(result.notice, /720P/);
+    assert.doesNotMatch(result.quality, /1080/);
   }],
   ['1080 chooses real dimensions before codec and returns measured metadata', async () => {
     const result = await appFixture({ fake: stream('fake', 720, 1280), true: stream('true', 1080, 1920, 'hevc') }).fetchAppPlayUrl('11', { quality: '1080p' });
@@ -119,6 +126,9 @@ const checks = [
     assert.equal(normalizeDownloadQuality(), 'auto');
     for (const quality of ['auto', '720p', '1080p']) assert.equal(normalizeDownloadQuality(quality), quality);
     for (const quality of [null, '', '1080', '4k']) assert.throws(() => normalizeDownloadQuality(quality), /清晰度/);
+    assert.equal(require(file).measuredDownloadQuality(1280, 720), '720p');
+    assert.equal(require(file).measuredDownloadQuality(1920, 1080), '1080p');
+    assert.equal(require(file).measuredDownloadQuality(960, 540), 'auto');
     assert.ok(meetsDownloadQuality({}, 'auto'));
     for (const dimensions of [{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }, { width: 1440, height: 2560 }]) assert.ok(meetsDownloadQuality(dimensions, '1080p'));
     for (const dimensions of [{}, { width: 720, height: 1920 }, { width: Infinity, height: 1080 }]) assert.equal(meetsDownloadQuality(dimensions, '1080p'), false);

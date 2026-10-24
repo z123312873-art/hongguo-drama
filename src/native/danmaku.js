@@ -254,12 +254,32 @@ function parsePage(payload, vid) {
   }
 
   if (nextMs !== null && nextMs <= 0) nextMs = null;
-  return { items, nextMs, hasMore };
+  let cursor = null;
+  let cursorText = '';
+  if (info && typeof info === 'object') {
+    if (typeof info.cursor === 'string') cursorText = info.cursor;
+    else if (info.cursor && typeof info.cursor === 'object') cursor = info.cursor;
+    if (!cursor && cursorText.trim().startsWith('{')) {
+      try { cursor = JSON.parse(cursorText); } catch { cursor = null; }
+    }
+  }
+  return { items, nextMs, hasMore, cursor, cursorText };
+}
+
+// 时间窗计数写在游标里。当前窗是空的，不代表后面的窗也是空的。
+function laterWindows(cursor, start) {
+  const counts = cursor?.danmaku_window_count;
+  if (!counts || typeof counts !== 'object') return false;
+  return Object.entries(counts).some(([mark, count]) => {
+    const at = Number(mark);
+    const amount = Number(count);
+    return Number.isFinite(at) && at > start && Number.isFinite(amount) && amount > 0;
+  });
 }
 
 // ── 请求 ──────────────────────────────────────────────────────────────────
 
-function buildBody(vid, bookId, start, duration) {
+function buildBody(vid, bookId, start, duration, cursor = '') {
   return {
     comment_source: 601,
     server_channel: 1000,
@@ -268,7 +288,7 @@ function buildBody(vid, bookId, start, duration) {
     comment_type: 20,
     sort: 1,
     count: PAGE_COUNT,
-    cursor: '',
+    cursor: typeof cursor === 'string' ? cursor : '',
     aid: 8662,
     compliance_status: 0,
     business_param: {
@@ -286,7 +306,7 @@ function buildBody(vid, bookId, start, duration) {
  * 时间戳与 nonce 在**同一个函数里**生成并共用：签名是对 query 字符串算的，
  * query 里含 `_rticket`，而 `X-Khronos` 用的是秒。三者不一致就是无效签名。
  */
-async function requestWindow({ vid, bookId, start, duration, transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes }) {
+async function requestWindow({ vid, bookId, start, duration, cursor = '', transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes }) {
   const stampMs = now();
   const stamp = Math.floor(stampMs / 1000);
   const nonce = random(sign.NONCE_BYTES);
@@ -305,7 +325,7 @@ async function requestWindow({ vid, bookId, start, duration, transport = axios.p
     ...sign.signCommentHeaders({ rawQuery, stamp, nonce }),
   };
 
-  const response = await transport(url, JSON.stringify(buildBody(vid, bookId, start, duration)), {
+  const response = await transport(url, JSON.stringify(buildBody(vid, bookId, start, duration, cursor)), {
     headers,
     timeout: REQUEST_TIMEOUT,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT),
@@ -426,6 +446,7 @@ async function fetchDanmaku(options = {}) {
     let emptyPages = 0;
     let truncated = false;
     let failure = '';
+    let cursorText = '';
 
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
@@ -433,7 +454,7 @@ async function fetchDanmaku(options = {}) {
 
         let payload;
         try {
-          payload = await requestWindow({ vid, bookId: seriesId, start, duration, transport, now, random });
+          payload = await requestWindow({ vid, bookId: seriesId, start, duration, cursor: cursorText, transport, now, random });
         } catch (error) {
           // 错误说明要能让用户自己判断：发生了什么、已经试过什么、还能做什么。
           // 首页失败说明源不可用；后续页失败则保留已拿到的部分，不把整集判死。
@@ -450,7 +471,8 @@ async function fetchDanmaku(options = {}) {
           break;
         }
 
-        const { items: pageItems, nextMs, hasMore } = parsePage(payload, vid);
+        const { items: pageItems, nextMs, hasMore, cursor, cursorText: nextCursor } = parsePage(payload, vid);
+        cursorText = nextCursor || '';
         if (pageItems.length) emptyPages = 0;
         else emptyPages++;
 
@@ -477,7 +499,10 @@ async function fetchDanmaku(options = {}) {
           }
           break;
         }
-        if (nextMs <= start || nextMs > MAX_TIME_SECONDS * 1000 || emptyPages >= MAX_EMPTY_PAGES || page === MAX_PAGES - 1) {
+        // 游标还标着后面的时间窗有弹幕时，空窗只是这一段没有，不能当成分页坏了。
+        // 没有这种计数时仍按连续空页停止，避免上游一直 has_more 却不给内容。
+        if (nextMs <= start || nextMs > MAX_TIME_SECONDS * 1000 || page === MAX_PAGES - 1
+          || (emptyPages >= MAX_EMPTY_PAGES && !laterWindows(cursor, start))) {
           truncated = true;
           if (!collected.length) failure = '弹幕接口未返回有效分页，请稍后重试';
           break;

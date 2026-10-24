@@ -7,7 +7,7 @@
 // Crypto tables and SDK protocol constants below are not user credentials.
 const crypto = require('node:crypto');
 const sm3 = require('./sm3');
-const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
+const { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
 const PROCESS_STARTED = Date.now();
@@ -258,17 +258,26 @@ async function fetchAppPlayUrl(vid, options = {}) {
         const [width, height] = [[item.vwidth, item.vheight], [item.width, item.height], [meta.vwidth, meta.vheight], [meta.width, meta.height]]
             .map(pair => pair.map(Number)).find(pair => pair.every(value => Number.isFinite(value) && value > 0)) || [0, 0];
         const pixels = width && height ? Math.min(width, height) : Number(quality.match(/\d+/)?.[0] || 0);
-        return { item, codec, codecRank, quality, pixels, width, height };
-    }).filter(row => row.codecRank < 2 && meetsDownloadQuality(row, requestedQuality)).sort((a, b) => requestedQuality === 'auto'
-        ? a.codecRank - b.codecRank || b.pixels - a.pixels
-        : Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank);
-    if (!rows.length) throw new Error(requestedQuality === 'auto'
+        const bitrate = Number(item.real_bitrate || item.bitrate || meta.real_bitrate || meta.bitrate) || 0;
+        return { item, codec, codecRank, quality, pixels, width, height, bitrate };
+    }).filter(row => row.codecRank < 2);
+    const matched = rows.filter(row => meetsDownloadQuality(row, requestedQuality));
+    // A label such as 1080p can describe a 1280×720 encode. Keep the measured picture
+    // instead of failing the episode, and never report that file as the higher tier.
+    const limited = requestedQuality !== 'auto' && !matched.length;
+    const pool = limited ? rows.filter(row => row.width > 0 && row.height > 0) : matched;
+    const selectedRows = pool.sort((a, b) => {
+        if (limited) return b.pixels - a.pixels || b.bitrate - a.bitrate || a.codecRank - b.codecRank;
+        if (requestedQuality === 'auto') return a.codecRank - b.codecRank || b.pixels - a.pixels;
+        return Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank;
+    });
+    if (!selectedRows.length) throw new Error(requestedQuality === 'auto'
         ? '本集暂未提供兼容的 H.264/HEVC 片源'
         : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`);
     let lastError;
     const variants = [];
     const seen = new Set();
-    for (const selected of rows) {
+    for (const selected of selectedRows) {
         try {
             const spade = selected.item.spade_a || selected.item.encrypt_info?.spade_a;
             const key = spade ? deriveContentKey(spade) : null;
@@ -283,8 +292,11 @@ async function fetchAppPlayUrl(vid, options = {}) {
                     const identity = `${url}:${contentKey || ''}`;
                     if (seen.has(identity)) continue;
                     seen.add(identity);
+                    const deliveredQuality = requestedQuality === 'auto' ? selected.quality : limited ? measuredDownloadQuality(selected.width, selected.height) : requestedQuality;
+                    const shortSide = Math.min(selected.width, selected.height);
                     variants.push({ url, contentKey, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', vid,
-                        userAgent: VIDEO_UA, quality: requestedQuality === 'auto' ? selected.quality : requestedQuality,
+                        userAgent: VIDEO_UA, quality: deliveredQuality,
+                        ...(limited ? { qualityLimited: true, notice: `本集没有可确认的 ${requestedQuality.toUpperCase()} 片源，实际为 ${shortSide}P（${selected.width}×${selected.height}），已改用该清晰度` } : {}),
                         ...(requestedQuality === 'auto' ? {} : { width: selected.width, height: selected.height }) });
                 } catch (error) { lastError = error; }
             }

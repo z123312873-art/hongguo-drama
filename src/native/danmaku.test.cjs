@@ -152,6 +152,29 @@ test('has_more=false 时即便带 cursor 也必须停止（避免把"没有了"�
   assert.equal(calls, 1);
 });
 
+test('空时间窗后面仍有弹幕时继续翻页，不把有效游标当成无效分页', async () => {
+  let calls = 0;
+  const windows = { 0: 1, 30000: 0, 60000: 3 };
+  const cursorFor = end => JSON.stringify({ end_offset_time: end, danmaku_window_count: windows, danmaku_count: 4 });
+  const transport = async (_url, body) => {
+    calls++;
+    const start = JSON.parse(body).business_param.start_offset_time;
+    if (start < 60000) return { data: JSON.stringify(page({
+      rows: start === 0 ? [comment({ common: { status: '0', content: { text: '引导' } } })] : [],
+      extra: { next_query_danmaku_list_time: start + 30000 },
+      info: { has_more: true, cursor: cursorFor(start + 30000) },
+    })) };
+    return { data: JSON.stringify(page({
+      rows: [comment({ expand: { offset_time: 61000 }, common: { content: { text: '后面还有' } } })],
+      info: { has_more: false },
+    })) };
+  };
+  const result = await danmaku.fetchDanmaku({ seriesId: SERIES, vid: VID, ...fixedOptions(transport) });
+  assert.equal(result.success, true, result.notice);
+  assert.deepEqual(result.items.map(item => item.text), ['后面还有']);
+  assert.equal(calls, 3);
+});
+
 test('连续空页提前停止，不会把整集翻满', async () => {
   let calls = 0;
   const transport = async () => {

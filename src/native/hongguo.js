@@ -542,6 +542,7 @@ function sourceFailure(source, error) {
   if (code === 'BUSINESS_REJECTED') return { source, code, message: '接口暂时拒绝本次请求' };
   if (code === 'MISSING_MODEL' || /未返回目录数据/.test(message)) return { source, code: 'MISSING_MODEL', message: '接口未返回本集片源模型' };
   if (code === 'INVALID_RESPONSE' || /空响应|有效数据|目录数据不完整|JSON/.test(message)) return { source, code: 'INVALID_RESPONSE', message: '片源数据无法解析' };
+  if (/未降级|尺寸可确认|H\.264\/HEVC/.test(message)) return { source, code: 'NO_PLAYABLE_SOURCE', message };
   return { source, code: 'NO_PLAYABLE_SOURCE', message: '暂未取得有效片源' };
 }
 

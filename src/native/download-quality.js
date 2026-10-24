@@ -13,4 +13,14 @@ function meetsDownloadQuality({ width, height } = {}, quality = 'auto') {
     && Math.min(...dimensions) >= Number.parseInt(quality, 10);
 }
 
-module.exports = { normalizeDownloadQuality, meetsDownloadQuality };
+// The short side decides the tier. A 1280×720 file labeled 1080p is 720p.
+function measuredDownloadQuality(width, height) {
+  const dimensions = [Number(width), Number(height)];
+  if (!dimensions.every(value => Number.isFinite(value) && value > 0)) return 'auto';
+  const shortSide = Math.min(...dimensions);
+  if (shortSide >= 1080) return '1080p';
+  if (shortSide >= 720) return '720p';
+  return 'auto';
+}
+
+module.exports = { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality };

@@ -675,6 +675,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         setOnlineUrl(res.url);
         setOnlineProgress(null);
         refreshOnlineCacheInfo();
+        if (res.notice) showToast(res.notice);
         queueNextPrefetchRef.current(vidIndex);
       };
       // A finished prefetch swaps the source in this same update, so the next episode does not drop to the preparing screen.
