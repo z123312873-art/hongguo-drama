@@ -64,15 +64,16 @@ function mount({ response, enabled = true } = {}) {
 (async () => {
   const ui = mount();
   await ui.flush();
-  assert.equal(ui.requests.length, 1); assert.equal(ui.requests[0].source, 'official');
-  assert.equal(ui.tree.danmaku.sourceKind, 'official');
+  assert.equal(ui.requests.filter(item => item.source === 'official').length, 1);
+  assert.equal(ui.requests.filter(item => item.source === 'comments').length, 1, 'timeline content still gets episode comments added');
+  assert.equal(ui.tree.danmaku.sourceKind, 'both');
   assert.equal(ui.tree.danmaku.settings.fontSize, 26); assert.equal(ui.tree.danmaku.settings.opacity, 65);
   ui.tree.danmaku.update({ fontSize: 30 }); await ui.flush();
-  assert.equal(ui.requests.length, 1, 'timeline content must not also fetch episode comments');
+  assert.equal(ui.requests.filter(item => item.source === 'official').length, 1);
   assert.equal(ui.tree.danmaku.settings.fontSize, 30); assert.equal(ui.tree.danmaku.settings.blockedWords, '屏蔽');
-  assert.equal(ui.intervals.size, 0, 'episode comments stay idle while timeline danmaku exists');
+  assert.ok(ui.intervals.size > 0, 'episode comments keep loading beside timeline danmaku');
   ui.props.activeSeriesId = 'custom:example'; await ui.flush();
-  assert.equal(ui.requests.length, 1); assert.match(ui.tree.danmaku.status, /仅红果来源/); ui.unmount();
+  assert.equal(ui.requests.filter(item => item.source === 'official').length, 1); assert.match(ui.tree.danmaku.status, /仅红果来源/); ui.unmount();
 
   const empty = mount({ response: args => ({ success: true, series_id: args.seriesId, episode_id: args.vid, items: [] }) });
   await empty.flush();
@@ -96,7 +97,8 @@ function mount({ response, enabled = true } = {}) {
     : { success: true, series_id: args.seriesId, episode_id: args.vid, items: [{ time: 5, text: '恢复' }] } });
   await retry.flush(); assert.equal(retry.tree.danmaku.status, '模拟接口异常');
   retry.tree.danmaku.retry(); await retry.flush();
-  assert.equal(retry.requests.length, 2); assert.equal(retry.requests[1].fresh, true);
+  assert.equal(retry.requests.filter(item => item.source === 'official').length, 2);
+  assert.equal(retry.requests.filter(item => item.source === 'official')[1].fresh, true);
   assert.equal(retry.tree.danmaku.comments.length, 1); assert.equal(retry.tree.danmaku.error, ''); retry.unmount();
 
   let settleOld;
@@ -106,13 +108,13 @@ function mount({ response, enabled = true } = {}) {
   const previousVid = pending.props.current.vid;
   pending.props.current = { vid: '7503780574541122623' }; await pending.flush();
   assert.equal(pending.requests.filter(r => r.source === 'official').length, 2, 'episode change must request timeline danmaku again');
-  assert.equal(pending.requests.filter(r => r.source === 'comments').length, 0);
+  assert.ok(pending.requests.filter(r => r.source === 'comments').every(item => item.episodeId === pending.props.current.vid));
   settleOld({ success: false, series_id: pending.props.activeSeriesId, episode_id: previousVid, items: [], error: '迟到的旧请求' });
   await pending.flush();
-  assert.equal(pending.tree.danmaku.sourceKind, 'official');
+  assert.equal(pending.tree.danmaku.sourceKind, 'both');
   assert.equal(pending.tree.danmaku.error, '');
   assert.equal(pending.tree.danmaku.comments[0].text, '当前请求');
-  assert.equal(pending.requests.at(-1).vid, pending.props.current.vid); pending.unmount();
+  assert.equal(pending.requests.filter(item => item.source === 'official').at(-1).vid, pending.props.current.vid); pending.unmount();
 
   const overlay = fs.readFileSync(path.join(root, 'OfficialDanmaku.jsx'), 'utf8');
   assert.match(overlay, /querySelector\('\.player-controls-bar'\)/);
@@ -122,5 +124,5 @@ function mount({ response, enabled = true } = {}) {
   assert.match(settings, /openExternalUrl\('https:\/\/github.com\/dawei233\/hongguo-drama'\)/);
   // check-player-controls.cjs verifies the 2.9 one-second pointer idle deadline,
   // including playback keys and fullscreen/source changes that must not renew it.
-  console.log('PASS frontend danmaku wiring: timeline first, comments only when timeline is empty, shared preferences, retry, stale response, episode switch');
+  console.log('PASS frontend danmaku wiring: timeline first, comments added after a successful timeline read, shared preferences, retry, stale response, episode switch');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -2,11 +2,12 @@
 // https://github.com/dawei233/hongguo-drama
 // 时间轴投放与评论队列分开；两种来源共用视觉设置、轨道布局和窗口重排。
 
+import { clipDanmakuText } from './danmakuEmoji.mjs';
 import { commentIsBlocked, danmakuLayout, retireDanmaku, takeDanmakuReplay } from './danmakuModel.mjs';
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
-/** 默认走时间轴弹幕。播放器不再按这个存储值切换，只在时间轴为空时自动改用本集评论。 */
+/** 默认走时间轴弹幕。播放器在时间轴成功后再追加本集评论；时间轴失败时不改用评论。 */
 export const DEFAULT_DANMAKU_SOURCE = 'official';
 
 export function normalizeDanmakuSource(value) {
@@ -196,8 +197,7 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
       if (!entry) break;
     }
 
-    const chars = Array.from(entry.text);
-    const text = chars.length > 80 ? `${chars.slice(0, 79).join('')}…` : entry.text;
+    const text = clipDanmakuText(entry.text);
     const textWidth = (Array.from(text).length + 1) * settings.fontSize;
     state.items.push({
       id: state.nextId++,
