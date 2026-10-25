@@ -209,7 +209,7 @@ function SettingsPage({ active = true, preview = false }) {
           </div>
         </div>
         <div className="settings-group">
-          <p className="settings-hint">播放时同时读取时间轴弹幕和本集评论。时间轴很少、没有或暂时没读到时，本集评论仍会兜底。当前集读完后，会错开预载下一集的两种弹幕，避免连着请求被来源挡住。同一行速度对齐，避免互相盖住。</p>
+          <p className="settings-hint">播放时先读取时间轴弹幕。这一集大约 25 条：时间轴不够的部分用本集评论补上，超过 60 条就不再取本集评论。本集评论的间隔和速度会变动，同一行与时间轴对齐，避免互相盖住。下一集在当前集读完后先预载时间轴。</p>
           <button type="button" className="btn btn-outline btn-sm" onClick={async () => {
             try {
               const result = await window.electronAPI.openExternalUrl('https://github.com/dawei233/hongguo-drama');

@@ -505,6 +505,68 @@ test('预载遇到当前集时停止翻页，已拿到的内容可留给回看�
   assert.equal(revisited.success, false);
 });
 
+test('本集评论列表使用评论参数，翻到上限后停，并复用缓存', async () => {
+  const bodies = [];
+  let pageNo = 0;
+  const transport = async (_url, raw, config) => {
+    const body = JSON.parse(raw);
+    bodies.push({ body, source: config.headers['Comment-Source'], channel: config.headers['Server-Channel'] });
+    pageNo += 1;
+    const rows = Array.from({ length: body.count }, (_, index) => comment({
+      common: { content: { text: `评论${pageNo}-${index}` } },
+    }));
+    return { data: JSON.stringify(page({ rows, info: { total: 80, has_more: true, cursor: `page-${pageNo}` } })) };
+  };
+  const result = await danmaku.fetchEpisodeCommentList({ seriesId: SERIES, episodeId: VID, limit: 25, ...fixedOptions(transport) });
+  assert.equal(result.success, true);
+  assert.equal(result.items.length, 25);
+  assert.equal(result.total, 80);
+  assert.equal(result.has_more, false);
+  assert.equal(result.next_cursor, null);
+  assert.equal(new Set(result.items.map(item => item.content)).size, 25);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].body.comment_source, 4);
+  assert.equal(bodies[0].body.comment_type, 4);
+  assert.equal(bodies[0].body.server_channel, 18);
+  assert.equal(bodies[0].body.group_id, VID);
+  assert.equal(bodies[0].body.business_param.book_id, SERIES);
+  assert.equal(bodies[0].body.business_param.need_count, true);
+  assert.equal(bodies[0].body.cursor, '');
+  assert.equal(bodies[0].body.count, 20);
+  assert.equal(bodies[0].body.business_param.start_offset_time, undefined);
+  assert.equal(bodies[0].source, '4');
+  assert.equal(bodies[0].channel, '18');
+  assert.equal(bodies[1].body.cursor, 'page-1');
+  assert.equal(bodies[1].body.business_param.need_count, false);
+  assert.equal(bodies[1].body.count, 5);
+  const again = await danmaku.fetchEpisodeCommentList({ seriesId: SERIES, episodeId: VID, limit: 25, ...fixedOptions(transport) });
+  assert.equal(again.items.length, 25);
+  assert.equal(bodies.length, 2);
+  assert.equal((await danmaku.fetchEpisodeCommentList({ seriesId: 'bad', episodeId: VID, limit: 5 })).success, false);
+});
+
+test('本集评论丢掉未通过的状态，失败说明不带签名', async () => {
+  const hidden = await danmaku.fetchEpisodeCommentList({
+    seriesId: SERIES, episodeId: VID, limit: 5,
+    ...fixedOptions(async () => ({ data: JSON.stringify(page({
+      rows: [
+        comment({ common: { status: '0', content: { text: '引导' } } }),
+        comment({ common: { content: { text: '留下' } } }),
+      ],
+      info: { total: 2, has_more: false, cursor: '' },
+    })) })),
+  });
+  assert.deepEqual(hidden.items.map(item => item.content), ['留下']);
+  danmaku.resetDanmakuCache();
+  const failed = await danmaku.fetchEpisodeCommentList({
+    seriesId: SERIES, episodeId: VID, limit: 5,
+    ...fixedOptions(async () => { throw new Error('https://private?device_id=secret&signature=secret'); }),
+  });
+  assert.equal(failed.success, false);
+  assert.match(failed.error, /暂时不可用/);
+  assert.doesNotMatch(failed.error, /device_id|signature|secret/);
+});
+
 test('主进程与预加载桥接接入受信任 IPC，且不接受测试注入', () => {
   const fs = require('node:fs');
   const path = require('node:path');

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { commentIsBlocked, resizeDanmaku } from './danmakuModel.mjs';
 import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus } from './danmakuOfficial.mjs';
 import DanmakuLine from './DanmakuLine';
-import { syncDanmakuLayer, clearDanmakuLayer, foreignDanmaku } from './danmakuSpace.mjs';
+import { syncDanmakuLayer, clearDanmakuLayer, foreignDanmaku, publishTimeline } from './danmakuSpace.mjs';
 import './CommentDanmaku.css';
 
 /**
@@ -27,6 +27,7 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
 
   const supported = /^\d{6,30}$/.test(String(seriesId || '')) && /^\d{6,30}$/.test(String(vid || ''));
   const running = enabled && supported && active && visible;
+  publishTimeline(seriesId, vid, { count: feed.danmaku.length, ready: Boolean(feed.loaded) && !feed.loading });
 
   useEffect(() => {
     const update = () => setVisible(!document.hidden);

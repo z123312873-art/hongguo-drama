@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DanmakuLine from './DanmakuLine';
-import { foreignDanmaku, syncDanmakuLayer, clearDanmakuLayer } from './danmakuSpace.mjs';
-import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, commentIsBlocked, commentFetchBlocked, commentFailureAction, acceptCommentPage, advanceDanmaku, danmakuSeed, resizeDanmaku } from './danmakuModel.mjs';
+import { foreignDanmaku, syncDanmakuLayer, clearDanmakuLayer, currentTimeline, subscribeTimeline } from './danmakuSpace.mjs';
+import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, commentIsBlocked, commentFetchBlocked, commentFailureAction, acceptCommentPage, advanceDanmaku, danmakuSeed, resizeDanmaku, commentFillCount } from './danmakuModel.mjs';
 import { measureDanmakuText } from './danmakuEmoji.mjs';
 import './CommentDanmaku.css';
 
@@ -12,19 +12,40 @@ const readPreferences = () => {
   catch { return { enabled: false, ...DEFAULT_DANMAKU_SETTINGS }; }
 };
 
-export function useCommentDanmaku({ seriesId, episodeId, active }) {
+function useDanmakuPreferences() {
   const [preferences, setPreferences] = useState(readPreferences);
   const [saveError, setSaveError] = useState('');
+  const update = patch => {
+    const next = { enabled: preferences.enabled, ...preferences, ...patch };
+    const validated = { enabled: next.enabled === true, ...normalizeDanmakuSettings(next) };
+    setPreferences(validated);
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(validated)); setSaveError(''); }
+    catch { setSaveError('设置已生效，但本机保存失败'); }
+  };
+  const settings = useMemo(() => normalizeDanmakuSettings(preferences), [preferences]);
+  return {
+    enabled: preferences.enabled === true, settings, saveError, update,
+    toggle: () => update({ enabled: !preferences.enabled }),
+    reset: () => update(DEFAULT_DANMAKU_SETTINGS),
+  };
+}
+
+export function useCommentDanmaku({ seriesId, episodeId, active }) {
+  const preferences = useDanmakuPreferences();
   const [visible, setVisible] = useState(() => !document.hidden);
   const [, refresh] = useState(0);
+  const [, bumpTimeline] = useState(0);
+  useEffect(() => subscribeTimeline(() => bumpTimeline(value => value + 1)), []);
+  const timeline = currentTimeline(seriesId, episodeId);
   const feed = useMemo(() => createCommentFeed(seriesId, episodeId), [seriesId, episodeId]);
   const currentFeed = useRef(feed);
   currentFeed.current = feed;
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
   const supported = /^\d{6,30}$/.test(String(seriesId || '')) && /^\d{6,30}$/.test(String(episodeId || ''));
+  const quota = timeline.ready ? commentFillCount(timeline.count) : 0;
   const enabled = preferences.enabled && supported;
-  const running = enabled && active && visible;
+  const running = enabled && active && visible && quota > 0;
 
   useEffect(() => {
     const update = () => setVisible(!document.hidden);
@@ -33,16 +54,18 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
   }, []);
 
   useEffect(() => {
-    if (!running) return;
+    const live = currentTimeline(feed.seriesId, feed.episodeId);
+    const liveQuota = live.ready ? commentFillCount(live.count) : 0;
+    if (!enabled || !active || !visible || liveQuota < 1) return undefined;
     const fetchNext = async () => {
       if (commentFetchBlocked(feed, Date.now(), document.hidden)) return;
       feed.loading = true;
       feed.lastRequest = Date.now();
       refresh(value => value + 1);
       try {
-        const data = await window.electronAPI?.getEpisodeComments?.({ seriesId: feed.seriesId, episodeId: feed.episodeId, cursor: feed.cursor, limit: 30 });
+        const data = await window.electronAPI?.getEpisodeComments?.({ seriesId: feed.seriesId, episodeId: feed.episodeId, cursor: feed.cursor, limit: liveQuota });
         if (currentFeed.current !== feed) return;
-        acceptCommentPage(feed, data, preferencesRef.current, Date.now());
+        acceptCommentPage(feed, data, preferencesRef.current.settings, Date.now());
       } catch {
         if (currentFeed.current === feed) commentFailureAction(feed, null, Date.now());
       } finally {
@@ -53,22 +76,14 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
     fetchNext();
     const timer = window.setInterval(fetchNext, 1500);
     return () => window.clearInterval(timer);
-  }, [running, feed]);
+  }, [running, feed, quota, enabled, active, visible]);
 
-  const update = patch => {
-    const next = { enabled: preferences.enabled, ...preferences, ...patch };
-    const validated = { enabled: next.enabled === true, ...normalizeDanmakuSettings(next) };
-    setPreferences(validated);
-    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(validated)); setSaveError(''); }
-    catch { setSaveError('设置已生效，但本机保存失败'); }
-  };
-  const settings = useMemo(() => normalizeDanmakuSettings(preferences), [preferences]);
-  const status = !supported ? '仅红果来源的当前集支持评论弹幕' : !enabled ? '开启后展示本集公开评论' : !active ? '播放本集后显示评论弹幕'
-    : !visible ? '' : feed.error || (feed.loading ? '正在加载本集后续评论…' : feed.notice) || (!feed.loaded ? '正在加载本集评论…'
+  const { settings, saveError, toggle, update, reset } = preferences;
+  const status = !supported ? '仅红果来源的当前集支持评论弹幕' : !preferences.enabled ? '开启后展示本集公开评论' : !active ? '播放本集后显示评论弹幕'
+    : !visible ? '' : quota < 1 && timeline.ready ? '' : feed.error || (feed.loading ? '正在加载本集后续评论…' : feed.notice) || (!feed.loaded ? '正在加载本集评论…'
       : feed.comments.length ? `已读取本集 ${feed.comments.length} 条评论${feed.hasMore ? '，播放时继续加载' : '，当前可用评论已读取'}` : '本集暂无可显示的公开评论');
-  return { enabled, supported, running, settings, feed, comments: feed.comments, status, saveError, error: feed.error,
-    loading: running && feed.loading, toggle: () => update({ enabled: !preferences.enabled }), update,
-    reset: () => update(DEFAULT_DANMAKU_SETTINGS), retry: () => {
+  return { enabled, supported, running, settings, feed, comments: feed.comments, status, saveError, error: feed.error, quota,
+    loading: running && feed.loading, toggle, update, reset, retry: () => {
       feed.error = ''; feed.emptyPages = 0; feed.attempts = 0; feed.emptyTries = 0; feed.nextTryAt = 0;
       if (!feed.comments.length) feed.hasMore = true;
       refresh(value => value + 1);
@@ -107,7 +122,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     let width = layer.clientWidth;
     let height = layer.clientHeight;
     const controls = layer.parentElement?.querySelector('.player-controls-bar');
-    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), seed: danmakuSeed(feed.seriesId, feed.episodeId), obstacles: foreignDanmaku('comments') });
+    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), seed: danmakuSeed(feed.seriesId, feed.episodeId), obstacles: foreignDanmaku('comments'), duration: Number.isFinite(video.duration) ? video.duration : 0 });
     const reset = () => {
       state.items = [];
       state.replayQueue = [];
@@ -166,7 +181,7 @@ export function DanmakuSettings({ danmaku, onClose, panelRef, maxHeight }) {
     <div className="danmaku-settings-heading"><strong>{danmaku.sourceKind === 'both' ? '时间轴弹幕和本集评论' : danmaku.sourceKind === 'comments' ? '本集评论' : '时间轴弹幕'}</strong><button type="button" aria-label="关闭弹幕设置" onClick={onClose}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </button></div>
-    <p>{danmaku.sourceKind === 'both' ? '时间轴弹幕仍按视频时间出现。本集评论会另外分散飞过；同一行速度对齐，快的不会追上、慢的也不会被盖住。同一集的节奏固定，换集会换一套。表情代码会显示成 emoji。' : danmaku.sourceKind === 'comments' ? '这一集没有可用的时间轴弹幕，已改用本集公开评论。评论按这一集打散飞过，不会在开播时排成一列。表情代码会显示成 emoji。' : danmaku.error ? '时间轴弹幕没有载入，可重试。本集评论会继续兜底，不会把读取失败说成本集没有弹幕。' : '正在读取时间轴弹幕。只要读到内容，无论多少条，都会再补上本集评论；一条都没有或暂时没读到时，仍展示本集评论。'}</p>
+    <p>{danmaku.sourceKind === 'both' ? '时间轴弹幕仍按视频时间出现。本集评论只补到这一集大约 25 条，出场间隔和速度都会变动；同一行改成和时间轴一样的速度，避免互相盖住。表情代码会显示成 emoji。' : danmaku.sourceKind === 'comments' ? '这一集时间轴不足，已用本集评论补上。评论分散飞过，速度会变动，不会在开播时排成一列。表情代码会显示成 emoji。' : danmaku.error ? '时间轴弹幕没有载入，可重试。时间轴不足约 25 条时，本集评论会补上，不会把读取失败说成本集没有弹幕。' : '正在读取时间轴弹幕。读完后若不足约 25 条，再补本集评论；超过 60 条则只显示时间轴。'}</p>
     <label>不透明度 <output>{settings.opacity}%</output><input autoFocus aria-label="弹幕不透明度" type="range" min="20" max="100" step="5" value={settings.opacity} onChange={event => update({ opacity: Number(event.target.value) })} /></label>
     <label>字号 <output>{settings.fontSize}px</output><input aria-label="弹幕字号" type="range" min="16" max="32" step="2" value={settings.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} /></label>
     <label>滚动速度 <output>{settings.speed}×</output><input aria-label="弹幕滚动速度" type="range" min="0.5" max="2" step="0.25" value={settings.speed} onChange={event => update({ speed: Number(event.target.value) })} /></label>

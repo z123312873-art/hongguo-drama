@@ -65,7 +65,8 @@ function mount({ response, enabled = true } = {}) {
   const ui = mount();
   await ui.flush();
   assert.equal(ui.requests.filter(item => item.source === 'official').length, 1);
-  assert.equal(ui.requests.filter(item => item.source === 'comments').length, 1, 'timeline content still gets episode comments added');
+  assert.equal(ui.requests.filter(item => item.source === 'comments').length, 1, 'a short timeline still gets episode comments added');
+  assert.equal(ui.requests.find(item => item.source === 'comments').limit, 24);
   assert.equal(ui.tree.danmaku.sourceKind, 'both');
   assert.equal(ui.tree.danmaku.settings.fontSize, 26); assert.equal(ui.tree.danmaku.settings.opacity, 65);
   ui.tree.danmaku.update({ fontSize: 30 }); await ui.flush();
@@ -93,8 +94,15 @@ function mount({ response, enabled = true } = {}) {
   await partial.flush();
   assert.equal(partial.tree.officialDanmaku.comments.length, 1);
   assert.equal(partial.requests.filter(item => item.source === 'comments').length, 1, 'a few timeline items must still add episode comments');
+  assert.equal(partial.requests.find(item => item.source === 'comments').limit, 24);
   assert.equal(partial.tree.danmaku.sourceKind, 'both');
   partial.unmount();
+
+  const rich = mount({ response: args => ({ success: true, series_id: args.seriesId, episode_id: args.vid, items: Array.from({ length: 61 }, (_, index) => ({ time: index, text: `弹幕${index}` })) }) });
+  await rich.flush();
+  assert.equal(rich.requests.filter(item => item.source === 'comments').length, 0, 'more than 60 timeline items skip episode comments');
+  assert.equal(rich.tree.danmaku.sourceKind, 'official');
+  rich.unmount();
 
   const off = mount({ enabled: false }); await off.flush(); assert.equal(off.requests.length, 0); off.unmount();
   const hidden = mount({ enabled: false }); hidden.props.showDanmakuControls = false;
