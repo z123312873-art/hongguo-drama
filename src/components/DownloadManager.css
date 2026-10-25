@@ -206,7 +206,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.merge-note {
+.merge-note, .dm-quality-notice {
   margin-top: 5px;
   color: var(--text-secondary);
   font-size: 12px;

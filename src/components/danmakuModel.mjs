@@ -2,6 +2,16 @@ import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
 
 export const DEFAULT_DANMAKU_SETTINGS = Object.freeze({ opacity: 80, fontSize: 22, speed: 1, area: 'half', density: 'normal', sensitiveFilter: true, blockedWords: '' });
 
+// 时间轴不够 25 条时，用本集评论补到大约 25 条。
+// 时间轴已经够 25 条就不再补；播放最多 35 条，避免一集里时间轴太密。
+export const DANMAKU_MIX_TARGET = 25;
+export const TIMELINE_PLAYBACK_CAP = 35;
+
+export function commentFillCount(timelineCount) {
+  const count = Number.isFinite(timelineCount) ? Math.max(0, Math.floor(timelineCount)) : 0;
+  return Math.max(0, DANMAKU_MIX_TARGET - count);
+}
+
 export function normalizeDanmakuSettings(value) {
   const number = (key, min, max) => typeof value?.[key] === 'number' && Number.isFinite(value[key])
     ? Math.max(min, Math.min(max, value[key])) : DEFAULT_DANMAKU_SETTINGS[key];
@@ -128,26 +138,9 @@ export function resizeDanmaku(state, before, after) {
   return true;
 }
 
-// Only fully departed comments enter the replay queue; active comments are never cloned.
+// 飞出画面就结束。不再放回复用队列，避免同一条在时间轴走完或评论很少时不停重播。
 export function retireDanmaku(state, reducedMotion) {
-  state.replayQueue ??= [];
-  state.items = state.items.filter(item => {
-    if (reducedMotion ? item.age < 6 : item.x + item.width > 0) return true;
-    if (!reducedMotion && !state.replayQueue.some(old => old.content === item.content)) state.replayQueue.push(item);
-    return false;
-  });
-}
-
-export function takeDanmakuReplay(state, options, pending = 0, currentTime = Infinity) {
-  const { settings, reducedMotion } = options;
-  if (reducedMotion) return undefined;
-  const { lanes } = danmakuLayout(options);
-  const target = { sparse: 1, normal: 3, dense: Math.max(6, lanes * 2) }[settings.density];
-  if (state.items.length + pending >= target) return undefined;
-  const index = state.replayQueue.findIndex(item =>
-    (!item.entry || item.entry.time <= currentTime) && !commentIsBlocked(item.content, settings) &&
-    !state.items.some(active => active.content === item.content));
-  return index < 0 ? undefined : state.replayQueue.splice(index, 1)[0];
+  state.items = state.items.filter(item => (reducedMotion ? item.age < 6 : item.x + item.width > 0));
 }
 
 // 本集评论没有视频时间点。节奏按这一集的种子打散，换集就换一套间隔、轨道和速度。
@@ -176,7 +169,14 @@ function armCommentSchedule(state, seed) {
   state.nextGap = 0.02 + roll(state) * 0.05;
 }
 
-function commentGap(density, draw) {
+function commentGap(density, draw, duration, total) {
+  if (Number.isFinite(duration) && duration >= 8 && total > 0) {
+    const pace = density === 'sparse' ? 1.45 : density === 'dense' ? 0.72 : 1;
+    const slot = Math.min(duration * 0.9, 180) / total;
+    const jitter = 0.62 + draw() * 0.7;
+    const pause = draw() < 0.18 ? draw() * slot * pace : 0;
+    return Math.max(0.45, slot * pace * jitter + pause);
+  }
   const base = density === 'sparse' ? 2.3 : density === 'dense' ? 0.45 : 1.15;
   const spread = density === 'sparse' ? 2.1 : density === 'dense' ? 0.95 : 1.45;
   const pause = draw() < 0.16 ? 0.7 + draw() * 1.6 : 0;
@@ -259,7 +259,7 @@ export function keepDanmakuSpacing(state, gap = 24) {
   }
 }
 
-export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76, seed = 1, obstacles = [] }) {
+export function advanceDanmaku(state, comments, elapsed, { width, height, settings, reducedMotion, bottomInset = 76, seed = 1, obstacles = [], duration = 0 }) {
   if (!(elapsed > 0) || !comments.length || width < 40 || height < 60) return false;
   const delta = Math.min(elapsed, 0.25);
   const layout = danmakuLayout({ height, settings, reducedMotion, bottomInset });
@@ -296,6 +296,9 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     return changed;
   }
   armCommentSchedule(state, seed);
+  if (state.clock === 0 && Number.isFinite(duration) && duration >= 8) {
+    state.nextGap = commentGap(settings.density, () => roll(state), duration, comments.length);
+  }
   state.clock += delta;
   if (state.clock < state.nextGap) return changed;
   let content = '';
@@ -305,8 +308,6 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     const full = typeof comment === 'string' ? comment : comment.content;
     if (!commentIsBlocked(full, settings)) { content = full; break; }
   }
-  const fromReplay = !content;
-  if (fromReplay) content = takeDanmakuReplay(state, { width, height, settings, reducedMotion, bottomInset })?.content;
   if (!content) {
     state.cursor = nextCursor;
     return changed;
@@ -318,19 +319,19 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     const y = top + lane * lineHeight;
     if (commentLaneOpen(state, lane, y, lineHeight, width, textWidth) && foreignClear(obstacles, y, lineHeight, width, textWidth)) open.push(lane);
   }
-  if (!open.length) {
-    if (fromReplay) state.replayQueue?.unshift({ content });
-    return changed;
-  }
+  if (!open.length) return changed;
   state.cursor = nextCursor;
-  const lane = open[Math.floor(roll(state) * open.length)];
+  // 有空行时不要跟时间轴挤在同一行，评论才能用自己的速度。只有行都被占住才共行，并改成相同速度。
+  const quiet = open.filter(lane => foreignSpeed(obstacles, top + lane * lineHeight, lineHeight) == null);
+  const pool = quiet.length ? quiet : open;
+  const lane = pool[Math.floor(roll(state) * pool.length)];
   const y = top + lane * lineHeight;
   const matched = foreignSpeed(obstacles, y, lineHeight);
   const speed = matched == null
-    ? Math.min(0.84 + roll(state) * 0.34, laneSpeedCap(state, lane))
+    ? Math.min(0.68 + roll(state) * 0.64, laneSpeedCap(state, lane))
     : Math.min(matched, laneSpeedCap(state, lane));
   // 从画面外进入。开播时不要把整批评论摆进画面。
   state.items.push({ id: state.nextId++, text, content, lane, x: width, y, width: textWidth, age: 0, speed });
-  state.nextGap = state.clock + commentGap(settings.density, () => roll(state));
+  state.nextGap = state.clock + commentGap(settings.density, () => roll(state), duration, comments.length);
   return true;
 }

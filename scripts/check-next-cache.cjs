@@ -9,7 +9,7 @@ const tick = (ui, time) => {
   let finish;
   const ui = mount({ prepare: p => p.prefetch ? new Promise(r => { finish = r; }) : { success: true, url: 'hongguo-stream://one' } });
   await ui.flush(); ui.metadata();
-  assert.equal(ui.button('缓存下一集'), undefined, 'cache preference lives in Settings');
+  assert.equal(ui.button('缓存下一集').props['aria-pressed'], true, 'restored playback shortcut reflects the cache preference');
   assert.equal(ui.media.currentTime, 0);
   assert.equal(ui.prepares.length, 2, 'opening episode one must immediately prefetch episode two');
   tick(ui, 1); tick(ui, 2); await ui.flush();

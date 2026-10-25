@@ -87,6 +87,16 @@
   font-size: calc(14px * var(--font-scale, 1));
 }
 
+.sequel-finder { margin: 16px 0 12px; flex-shrink: 0; }
+.sequel-finder-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sequel-finder-results { margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
+.sequel-finder-results p { margin: 4px 0; }
+.sequel-finder-error { color: var(--danger); }
+.sequel-finder-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; max-height: 160px; overflow-y: auto; }
+.sequel-finder-list li { min-width: 0; max-width: 100%; }
+.sequel-finder-list .btn { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.layout-portrait .sequel-finder { max-height: 30%; overflow-y: auto; }
+
 .series-picker-btn.open {
   border-color: var(--accent);
   color: var(--accent);
@@ -606,7 +616,7 @@
 .player-episodes { gap: 8px; }
 .player-header .btn-autonext-on { background: var(--accent-soft); border-color: transparent !important; }
 .player-now-status.status-downloading { background: var(--accent-soft); }
-@media (max-width: 1080px) { .player-header { flex-direction: column; gap: 15px; } .player-header-right { justify-content: flex-start; } .player-stat { flex-basis: auto; text-align: left; margin: 0 8px 0 0; } }
+@media (max-width: 1080px) { .player-header { flex-direction: column; gap: 15px; } .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; } .player-header-right { justify-content: flex-start; } .player-stat { flex-basis: auto; text-align: left; margin: 0 8px 0 0; } }
 
 .ep-chip:disabled { flex-direction: column; gap: 2px; cursor: not-allowed; background: var(--bg-inset); color: var(--text-secondary); }
 .ep-lock-label { display: block; font-size: 10px; line-height: 1.2; font-weight: 400; }
@@ -614,19 +624,16 @@
 .player-episode-panel { min-width: 0; }
 .portrait-episode-heading { display: none; }
 .layout-portrait .player-header { gap: 10px; margin-bottom: 14px; }
-.layout-portrait .player-title h2 { font-size: 23px; }
-.layout-portrait .player-series-row { padding-bottom: 12px; }
-.layout-portrait .player-series-name { font-size: 16px; }
+.layout-portrait .player-series-row { justify-content: flex-start; flex-wrap: wrap; gap: 12px 20px; padding-bottom: 12px; }
 .layout-portrait .player-viewing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 128px; gap: 14px; align-items: start; }
 .layout-portrait .player-stage:not(:fullscreen) { width: 100%; height: 100%; aspect-ratio: auto; max-height: none; margin: 0; min-height: 0; }
 .layout-portrait .player-video { object-fit: contain; }
 .layout-portrait .player-episode-panel { height: 100%; min-height: 0; max-height: none; overflow-y: auto; padding: 0 3px 6px; }
 .layout-portrait .portrait-episode-heading { display: block; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .layout-portrait .player-now { padding: 0 0 12px; gap: 6px; }
-.layout-portrait .player-now-title { font-size: 12px; }
 .layout-portrait .player-now-sub { flex-basis: 100%; }
 .layout-portrait .player-episodes { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; gap: 6px; }
-.layout-portrait .player-tips { font-size: 10px; margin-block: 10px; }
+.layout-portrait .player-tips { margin-block: 10px; }
 .layout-portrait .player-stage:not(:fullscreen) .player-controls-bar { padding: 20px 8px 8px; }
 .layout-portrait .player-stage:not(:fullscreen) .player-controls-row { flex-wrap: wrap; gap: 3px; }
 .layout-portrait .player-stage:not(:fullscreen) .player-controls-volume input { width: 42px; }
@@ -643,6 +650,7 @@
 .layout-portrait .player-container { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .layout-portrait .player-header { position: relative; margin: 0; }
 .layout-portrait .player-title { display: none; }
+.layout-portrait .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; }
 .layout-portrait .player-header-right { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 8px; }
 .layout-portrait .player-header-right .player-stat { display: none; }
 .layout-portrait .player-management { flex-shrink: 0; max-height: 35%; overflow: auto; }
@@ -653,13 +661,13 @@
 .layout-portrait .series-picker { flex-shrink: 0; max-height: 45%; overflow: auto; }
 .layout-portrait .player-viewing-layout { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 108px; gap: 10px; }
 .layout-portrait .player-now { padding-bottom: 8px; }
-.layout-portrait .player-now-status { padding: 2px 5px; font-size: 10px; }
+.layout-portrait .player-now-status { padding: 2px 5px; }
 .layout-portrait .episodes-collapsed .player-viewing-layout { grid-template-columns: minmax(0, 1fr); }
 .layout-portrait .episodes-collapsed .player-episode-panel { display: none; }
 @media (max-width: 480px) {
   .layout-portrait .player-viewing-layout { grid-template-columns: minmax(0, 1fr) 90px; gap: 8px; }
   .layout-portrait .player-series-actions { gap: 4px; }
-  .layout-portrait .player-series-actions .btn { padding-inline: 7px; font-size: 11px; }
+  .layout-portrait .player-series-actions .btn { padding-inline: 7px; }
 }
 
 /* Expanding the native window reserves the right column without shrinking the video. */
@@ -684,7 +692,8 @@
 
 .player-download-quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
 .player-download-quality .input-field { width: auto; max-width: 100%; min-height: 31px; padding: 5px 8px; font-size: 12px; }
-.player-download-quality-hint { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary); font-size: calc(12px * var(--font-scale, 1)); line-height: 1.6; }
+.player-download-quality-hint { color: var(--text-secondary); font-size: calc(12px * var(--font-scale, 1)); line-height: 1.7; }
+.player-header > .player-download-quality-hint { flex: 1 1 320px; max-width: 560px; margin: 0 0 0 auto; }
 
 .player-rate-notice {
   position: absolute;
@@ -699,3 +708,44 @@
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
+
+/* Keep playback close to the picture; download actions follow episode selection. */
+.player-header { margin-bottom: 16px; gap: 8px; }
+.player-header-right { justify-content: flex-start; gap: 8px; }
+.player-series-current { flex-wrap: wrap; gap: 8px 12px; max-width: 100%; }
+.player-series-current .player-stat { flex-basis: auto; margin: 0; text-align: left; white-space: nowrap; }
+.player-series-row { justify-content: flex-start; flex-wrap: wrap; gap: 12px 20px; padding-bottom: 12px; }
+.player-management { padding: 12px 0 0; margin: 12px 0 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.player-footer .community-heading { align-items: flex-start; }
+.player-footer .community-actions { width: 100%; }
+.player-footer .community-actions .sequel-finder,
+.player-footer .community-actions .sequel-finder-actions { display: contents; }
+.player-footer .sequel-finder-results { flex-basis: 100%; order: 1; }
+.player-footer .sequel-finder-actions .btn { font-size: inherit; padding: 8px 14px; }
+.layout-portrait .player-management { max-height: none; overflow: visible; gap: 6px; }
+.layout-portrait .player-management .btn { padding: 6px 8px; }
+.layout-portrait .player-footer { flex-shrink: 0; max-height: 25%; overflow-y: auto; }
+.layout-portrait .player-footer .community-panel { margin-top: 8px; padding-top: 8px; }
+
+.player-series-name { font-size: 26px; font-weight: 650; line-height: 1.3; }
+/* Keep the title actions together when the window changes width. */
+.player-series-actions { flex-wrap: wrap; max-width: 100%; }
+.player-header-right > .btn, .player-header-right > .player-download-quality { flex-shrink: 0; }
+.player-header-right > .player-download-quality { flex-wrap: nowrap; }
+.player-management { display: block; padding-top: 20px; }
+.player-management h3 { margin: 0 0 12px; font-size: 17px; font-weight: 650; }
+.player-management-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.player-management-actions > .input-field { flex: 0 1 auto; width: auto; max-width: 100%; }
+.layout-portrait .player-management-actions { gap: 6px; }
+.player-management { scroll-margin-block: 24px; }
+
+/* Separate quality from the equal-sized playback actions. */
+.player-online-quality-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.player-online-quality-row[hidden] { display: none; }
+.player-online-quality-row .player-download-quality { flex-wrap: nowrap; }
+.layout-landscape .player-online-quality-row { margin-block: 12px 24px; }
+.player-header .player-header-right { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); gap: 8px; }
+.player-header-right .player-series-actions { display: contents; }
+.player-header .player-header-right .btn { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 12px; gap: 7px; justify-content: center; white-space: normal; }
+.player-header-right .btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+.player-header-right .series-count { font-size: inherit; min-width: 0; padding: 0 .35em; }

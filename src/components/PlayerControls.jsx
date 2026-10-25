@@ -11,7 +11,7 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange }) {
+export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings }) {
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -77,7 +77,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
       }
     };
     const reveal = () => { clearTimeout(pauseTimer); idleDeadlineRef.current = Date.now() + 1000; setControlsHidden(false); scheduleHide(); };
-    const onPointerLeave = () => { clearTimeout(timer); hide(); };
+    const onPointerLeave = () => { pointerRef.current = null; clearTimeout(timer); hide(); };
     const onKey = event => {
       const physicalKey = event.code || event.key;
       // Keep the release paired across source/effect changes, even if Shift is released first.
@@ -268,7 +268,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
         <span className="player-controls-time">{formatTime(media.time)} / {formatTime(media.duration)}</span>
         {danmaku && <div className="player-controls-danmaku">
           <button type="button" data-player-menu className={`danmaku-icon-button ${danmaku.enabled ? 'danmaku-enabled' : ''}`} aria-label={`${danmaku.enabled ? '关闭' : '开启'}${danmaku.sourceKind === 'both' ? '时间轴弹幕和本集评论' : danmaku.sourceKind === 'comments' ? '本集评论' : '时间轴弹幕'}`} aria-pressed={danmaku.enabled}
-            title={danmaku.supported ? (danmaku.sourceKind === 'both' ? '时间轴弹幕按视频时间出现，并追加本集评论' : danmaku.sourceKind === 'comments' ? '这一集没有时间轴弹幕，正在分散展示本集评论' : '按视频时间展示时间轴弹幕') : '仅红果来源的当前集支持弹幕'} disabled={!danmaku.supported} onClick={danmaku.toggle}><span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-state-mark" /></span></button>
+            title={danmaku.supported ? (danmaku.sourceKind === 'both' ? '时间轴优先，不足约 25 条时补本集评论' : danmaku.sourceKind === 'comments' ? '这一集时间轴不足，正在用本集评论补上' : '按视频时间展示时间轴弹幕，一集最多 35 条') : '仅红果来源的当前集支持弹幕'} disabled={!danmaku.supported} onClick={danmaku.toggle}><span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-state-mark" /></span></button>
           <button type="button" data-player-menu className="danmaku-icon-button" ref={danmakuButtonRef} aria-label="弹幕设置" title="弹幕显示设置" aria-haspopup="dialog" aria-expanded={danmakuOpen}
             onClick={() => { setMenuOpen(false); setSelectionPanel(null); setDanmakuOpen(open => !open); }}>
             <span className="danmaku-symbol" aria-hidden="true">弹<span className="danmaku-settings-mark"><SettingsIcon size={10} /></span></span>
@@ -326,6 +326,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
             </select></label>
             <span id="picture-mode-hint">{pictureMode === 'width' ? '按宽度显示，上下可能裁剪。按剧单独记忆。' : '完整显示，随窗口缩放。按剧单独记忆。'}</span>
             {enhancement && <VideoEnhancementControls enhancement={enhancement} available={available} />}
+            {onOpenSettings && <button type="button" aria-label="播放设置" onClick={() => { setMenuOpen(false); onOpenSettings(); }}>播放设置</button>}
             {SHORTCUT_ACTIONS.map(action => <span key={action.id}>{formatShortcut(shortcuts[action.id])}：{action.label}</span>)}
           </div>}
         </div>

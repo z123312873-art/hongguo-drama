@@ -52,6 +52,8 @@ function load(ownsLock, preview = false, options = {}) {
   if (!options.tasks) context.enqueuePendingTasks = () => { events.push(['queue']); return 0; };
   const window = {
     isDestroyed: () => false, isMinimized: () => true,
+    getContentSize: () => [1100, 750],
+    webContents: { setZoomFactor: value => { window.zoomFactor = value; } },
     restore: () => events.push(['restore']), show: () => events.push(['show']), focus: () => events.push(['focus']),
   };
   context.fixtureWindow = window;
@@ -75,6 +77,7 @@ test('lock owner starts once; repeated launches restore its existing window', as
     assert.equal(h.events.find(event => event[0] === 'store')[1], path.join(expectedDirectory, 'data.json'));
     h.events.length = 0;
     h.app.emit('second-instance');
+    assert.equal(h.context.fixtureWindow.zoomFactor, 1, 'activation reapplies saved font size');
     assert.deepEqual(h.events.map(event => event[0]), ['restore', 'show', 'focus']);
     vm.runInContext('mainWindow = null', h.context);
     h.events.length = 0;

@@ -88,23 +88,28 @@ function mountApp() {
     ui.episode(2); await ui.flush(); ui.metadata(); assert.equal(ui.media.paused, false, 'active episode selection still autoplays');
     ui.find(n => n.type === 'video').props.onEnded(); await ui.flush(); ui.unmount();
   });
-  await test('feed roundtrip consumes point-play once and restores the latest series/episode/second', async () => {
+  await test('leaving the library keeps playback mounted and a fresh player does not replay the consumed command', async () => {
     const f = fixture(), app = mountApp(); app.request({ seriesId: 'A', vidIndex: 1 });
     let ui = await start(f, app.player().props);
     const initialPrepares = ui.prepares.length;
     app.render(); Object.assign(ui.props, app.player().props); await ui.flush();
     assert.equal(ui.prepares.length, initialPrepares, 'consuming the command must not restart the mounted player');
     ui.episode(2); await ui.flush(); ui.metadata(); ui.media.currentTime = 28;
-    app.render(); app.navigate('feed'); assert.equal(app.player(), undefined); ui.unmount();
+    app.render(); app.navigate('settings');
+    assert.ok(app.player(), 'settings keeps the library player mounted');
+    assert.equal(app.player().props.active, false);
+    ui.unmount();
     app.navigate('player'); ui = await start(f, app.player().props);
-    assert.equal(ui.prepares.length, 0, 'returning to library waits for explicit playback');
+    assert.equal(ui.prepares.length, 0, 'a new player waits for explicit playback after the command was consumed');
     ui.button('播放本集').props.onClick(); await ui.flush(); ui.metadata();
     assert.equal(ui.prepares.at(-1).vidIndex, 2, 'consumed initial episode must not replay');
     assert.equal(ui.media.currentTime, 28);
     ui.find(n => n.props.className?.includes('series-picker-btn')).props.onClick(); await ui.flush();
     ui.find(n => n.props.className?.includes('series-row') && n.props.key === 'B').props.onClick();
     await ui.flush(); ui.episode(2); await ui.flush(); ui.metadata(); ui.media.currentTime = 41;
-    app.render(); app.navigate('feed'); ui.unmount(); app.navigate('player');
+    app.render(); app.navigate('browse');
+    assert.ok(app.player(), 'discover keeps the library player mounted');
+    ui.unmount(); app.navigate('player');
     ui = await start(f, app.player().props);
     assert.equal(ui.prepares.length, 0);
     ui.button('播放本集').props.onClick(); await ui.flush(); ui.metadata();

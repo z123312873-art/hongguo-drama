@@ -20,8 +20,8 @@
  * X-Ladon）。上游随时可能改算法、改参数或封禁，**本模块无法保证长期可用**。
  * 因此：
  *   - 任何失败都返回 `success: false` 加一句人话说明，绝不抛异常；
- *   - 调用方只要拿到内容（含只拿到一部分）就追加本集评论；一条都没有或整次失败时，
- *     仍显示本集评论兜底，但失败说明保持原样，不能改口说成没有弹幕；
+ *   - 时间轴优先。一集大约 25 条，不够的部分才补本集评论；超过 60 条不再取评论。
+ *     一条都没有或整次失败时，仍可显示本集评论兜底，但失败说明保持原样，不能改口说成没有弹幕；
  *   - 界面上不得把"拿不到"说成"本集没有弹幕"。
  *
  * ## 与参考实现的关系
@@ -33,6 +33,7 @@
 
 const axios = require('axios');
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const sign = require('./danmaku-sign');
 
 const BASE_URL = 'https://api5-normal-sinfonlineb.fqnovel.com';
@@ -60,6 +61,7 @@ const CACHE_TTL_FAIL = 15 * 1000;
 const CACHE_MAX = 64;
 
 const cache = new Map();
+const reviewCache = new Map();
 const pending = new Map();
 let danmakuLane = Promise.resolve();
 
@@ -303,7 +305,7 @@ function buildBody(vid, bookId, start, duration, cursor = '') {
  * 时间戳与 nonce 在**同一个函数里**生成并共用：签名是对 query 字符串算的，
  * query 里含 `_rticket`，而 `X-Khronos` 用的是秒。三者不一致就是无效签名。
  */
-async function requestWindow({ vid, bookId, start, duration, cursor = '', transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes }) {
+async function postComment({ vid, body, commentSource, serverChannel, transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes }) {
   const stampMs = now();
   const stamp = Math.floor(stampMs / 1000);
   const nonce = random(sign.NONCE_BYTES);
@@ -317,12 +319,12 @@ async function requestWindow({ vid, bookId, start, duration, cursor = '', transp
     'X-XS-From-Web': '0',
     'Sdk-Version': '2',
     'Content-Type': 'application/json; charset=utf-8',
-    'Comment-Source': '601',
-    'Server-Channel': '1000',
+    'Comment-Source': String(commentSource),
+    'Server-Channel': String(serverChannel),
     ...sign.signCommentHeaders({ rawQuery, stamp, nonce }),
   };
 
-  const response = await transport(url, JSON.stringify(buildBody(vid, bookId, start, duration, cursor)), {
+  const response = await transport(url, JSON.stringify(body), {
     headers,
     timeout: REQUEST_TIMEOUT,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT),
@@ -331,11 +333,11 @@ async function requestWindow({ vid, bookId, start, duration, cursor = '', transp
     maxContentLength: MAX_RESPONSE_BYTES,
   });
 
-  const body = typeof response?.data === 'string' ? response.data : JSON.stringify(response?.data ?? null);
-  if (Buffer.byteLength(body) > MAX_RESPONSE_BYTES) throw new Error('弹幕响应过大');
+  const raw = typeof response?.data === 'string' ? response.data : JSON.stringify(response?.data ?? null);
+  if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('弹幕响应过大');
   let payload;
   try {
-    payload = JSON.parse(body);
+    payload = JSON.parse(raw);
   } catch {
     throw new Error('弹幕接口返回了非 JSON 内容');
   }
@@ -344,6 +346,48 @@ async function requestWindow({ vid, bookId, start, duration, cursor = '', transp
     throw new Error('弹幕接口响应无效');
   }
   return payload;
+}
+
+async function requestWindow({ vid, bookId, start, duration, cursor = '', transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes }) {
+  return postComment({
+    vid,
+    body: buildBody(vid, bookId, start, duration, cursor),
+    commentSource: '601',
+    serverChannel: '1000',
+    transport,
+    now,
+    random,
+  });
+}
+
+const REVIEW_PAGE_COUNT = 20;
+
+function buildReviewBody(vid, bookId, cursor, count) {
+  return {
+    aid: 8662,
+    business_param: { book_id: bookId, need_count: cursor === '', req_type: 0 },
+    comment_source: 4,
+    comment_type: 4,
+    compliance_status: 0,
+    count,
+    cursor,
+    group_id: vid,
+    group_type: 30,
+    server_channel: 18,
+    sort: 1,
+  };
+}
+
+function reviewCursor(payload) {
+  const cursor = payload?.data?.common_list_info?.cursor;
+  if (typeof cursor === 'string') return cursor;
+  if (cursor && typeof cursor === 'object') return JSON.stringify(cursor);
+  return '';
+}
+
+function reviewTotal(payload) {
+  const total = Number(payload?.data?.common_list_info?.total);
+  return Number.isFinite(total) && total >= 0 ? total : null;
 }
 
 // ── 对外接口 ──────────────────────────────────────────────────────────────
@@ -405,6 +449,91 @@ function present(result, items, limit) {
  * @returns {Promise<{success:boolean, source:string, items:Array<{time:number,text:string,color:string,mode:string}>, notice:string, error:string}>}
  *          按时间升序；任何异常都转成 `success:false` + 中文说明，不抛出。
  */
+function reviewHasMore(payload) {
+  const flag = payload?.data?.common_list_info?.has_more;
+  if (typeof flag === 'boolean') return flag;
+  if (typeof flag === 'string') return ['1', 'true', 'yes'].includes(flag.trim().toLowerCase());
+  return false;
+}
+
+function reviewResult(seriesId, episodeId, items, total) {
+  return {
+    success: true, series_id: seriesId, episode_id: episodeId, items, total: total ?? items.length,
+    next_cursor: null, has_more: false, source_limited: false, notice: '',
+  };
+}
+
+// 本集评论走评论列表参数，不走时间轴窗口，也不跟随公开页的 302。
+// 调用方按空档传入条数上限；这里只翻到够用为止，不把整份评论拉完。
+async function fetchEpisodeCommentList(options = {}) {
+  const seriesId = typeof options.seriesId === 'string' ? options.seriesId.trim() : '';
+  const episodeId = typeof options.episodeId === 'string' ? options.episodeId.trim() : '';
+  const limit = options.limit === undefined ? 25 : options.limit;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(episodeId) || !Number.isInteger(limit) || limit < 1 || limit > 30) {
+    return { success: false, retryable: false, items: [], error: '评论请求编号或条数无效' };
+  }
+  const cacheKey = `${seriesId}:${episodeId}`;
+  const hit = reviewCache.get(cacheKey);
+  if (hit && hit.expires > Date.now() && (hit.complete || hit.items.length >= limit)) {
+    return reviewResult(seriesId, episodeId, hit.items.slice(0, limit), hit.total);
+  }
+  const transport = options.transport;
+  const now = options.now;
+  const random = options.random;
+  try {
+    return await enqueueDanmaku(async () => {
+      const fresh = reviewCache.get(cacheKey);
+      const reusable = fresh && fresh.expires > Date.now() ? fresh : null;
+      const items = reusable ? reusable.items.slice() : [];
+      let cursor = reusable && !reusable.complete ? reusable.cursor : '';
+      let total = reusable ? reusable.total : null;
+      let complete = false;
+      const seen = new Set(items.map(item => item.content));
+      for (let page = 0; page < 3 && items.length < limit && !complete; page++) {
+        if (page > 0) await new Promise(resolve => setTimeout(resolve, PAGE_GAP_MS));
+        const sent = page === 0 && !items.length ? '' : cursor;
+        const count = Math.min(REVIEW_PAGE_COUNT, limit - items.length);
+        const payload = await postComment({
+          vid: episodeId,
+          body: buildReviewBody(episodeId, seriesId, sent, count),
+          commentSource: '4',
+          serverChannel: '18',
+          transport,
+          now,
+          random,
+        });
+        const parsed = parsePage(payload, episodeId);
+        for (const item of parsed.items) {
+          const content = cleanControl(item.text).replace(/\s+/g, ' ').trim();
+          if (!content || content.length > MAX_TEXT_LEN || seen.has(content)) continue;
+          seen.add(content);
+          items.push({ id: createHash('sha256').update(`${seriesId}\n${episodeId}\n${content}`).digest('hex'), content });
+          if (items.length >= limit) break;
+        }
+        const nextTotal = reviewTotal(payload);
+        if (nextTotal != null) total = nextTotal;
+        const next = reviewCursor(payload);
+        const more = reviewHasMore(payload);
+        if (!more || !next || next === sent) {
+          complete = true;
+          break;
+        }
+        cursor = next;
+      }
+      reviewCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_OK, items: items.slice(), cursor, total, complete });
+      while (reviewCache.size > CACHE_MAX) reviewCache.delete(reviewCache.keys().next().value);
+      return reviewResult(seriesId, episodeId, items.slice(0, limit), total);
+    });
+  } catch (error) {
+    return {
+      success: false, retryable: true, items: [],
+      error: error?.code === 'DANMAKU_IDENTITY_IO'
+        ? '弹幕本机配置读取或保存失败，请检查资料目录权限后重试'
+        : '本集评论接口暂时不可用，请重试',
+    };
+  }
+}
+
 async function fetchDanmaku(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) {
     return finalize({ seriesId: '', vid: '', items: [], error: '弹幕请求无效' });
@@ -598,11 +727,13 @@ async function fetchDanmaku(options = {}) {
 /** 仅供测试：清空缓存与在途状态。 */
 function resetDanmakuCache() {
   cache.clear();
+  reviewCache.clear();
   pending.clear();
 }
 
 module.exports = {
   fetchDanmaku,
+  fetchEpisodeCommentList,
   // 测试与复用需要的内部件
   parsePage,
   normalizeColor,

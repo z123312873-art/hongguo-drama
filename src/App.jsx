@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react';
-import { Film, Download, Settings, Play, Home, Search, Clock } from './components/icons';
+import { Download, Settings, Play, Home, Search, Clock } from './components/icons';
 import HongguoDownload from './components/HongguoDownload';
 import DownloadManager from './components/DownloadManager';
 import SettingsPage from './components/Settings';
@@ -11,13 +11,11 @@ import { initializeTheme } from './theme';
 import { getScriptPreference, setScriptPreference, subscribeScript } from './scriptPreference.js';
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
-import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
 import AppUpdateNotice from './components/AppUpdateNotice';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
-  { id: 'feed', label: '热播推荐', icon: Film },
   { id: 'download', label: '搜索与下载', icon: Search },
   { id: 'player', label: '我的剧库', icon: Play },
   { id: 'history', label: '观看记录', icon: Clock },
@@ -38,6 +36,10 @@ export default function App() {
   const [pinBusy, setPinBusy] = useState(false);
   const layoutLock = useRef(false);
   const [page, setPage] = useState('browse');
+  const pageRef = useRef('browse');
+  const calendarRequest = useRef(0);
+  const calendarOpeningRef = useRef(false);
+  const [calendarOpening, setCalendarOpening] = useState('');
   const [visited, setVisited] = useState(['browse']);
   const [storageError, setStorageError] = useState('');
   const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
@@ -66,14 +68,18 @@ export default function App() {
     return window.electronAPI.onNavigate((data) => {
       if (!data || !data.page) return;
       if (data.payload) setPlayerTarget({ ...data.payload, ts: Date.now() });
-      setVisited((pages) => pages.includes(data.page) ? pages : [...pages, data.page]);
-      if (data.page === 'player' || data.page === 'feed') setPlayerMounted(data.page === 'player');
-      setPage(data.page);
+      navigate(data.page);
     });
   }, []);
 
   const navigate = (nextPage) => {
-    if (nextPage === 'player' || nextPage === 'feed') setPlayerMounted(nextPage === 'player');
+    if (nextPage !== pageRef.current) {
+      calendarRequest.current++;
+      calendarOpeningRef.current = false;
+      setCalendarOpening('');
+      pageRef.current = nextPage;
+    }
+    if (nextPage === 'player') setPlayerMounted(true);
     setVisited((pages) => pages.includes(nextPage) ? pages : [...pages, nextPage]);
     setPage(nextPage);
   };
@@ -84,16 +90,28 @@ export default function App() {
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
         return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onNavigate={navigate} /> : null;
-      case 'feed':
-        return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
       case 'calendar':
-        return <ReleaseCalendar onPlay={async ({ seriesId }) => {
+        return <ReleaseCalendar opening={calendarOpening} active={page === id} onPlay={async ({ seriesId }) => {
+          if (pageRef.current !== 'calendar' || calendarOpeningRef.current) return;
+          const version = ++calendarRequest.current;
+          calendarOpeningRef.current = true;
+          setCalendarOpening(seriesId);
           try {
-            const result = await window.electronAPI.searchResolve(seriesId);
-            if (!result?.success) throw new Error(result?.error || '加载剧集失败，请重试');
-            setPlayerTarget({ seriesId, ts: Date.now() });
-            navigate('player');
-          } catch (error) { setStorageError(error.message); }
+            const payload = { seriesId, resume: true };
+            let result = await window.electronAPI.playSeries(payload);
+            if (version !== calendarRequest.current) return;
+            if (!result?.success && result?.code === 'SERIES_NOT_FOUND') {
+              const resolved = await window.electronAPI.searchResolve(seriesId);
+              if (version !== calendarRequest.current) return;
+              if (!resolved?.success) throw new Error(resolved?.error || '加载剧集失败，请重试');
+              result = await window.electronAPI.playSeries(payload);
+            }
+            if (!result?.success) throw new Error(result?.error || '打开播放失败，请重试');
+          } catch (error) {
+            if (version === calendarRequest.current) setStorageError(error.message);
+          } finally {
+            if (version === calendarRequest.current) { calendarOpeningRef.current = false; setCalendarOpening(''); }
+          }
         }} />;
       case 'history':
         return <WatchHistory active={page === id} onNavigate={navigate} />;

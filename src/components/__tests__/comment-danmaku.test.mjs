@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as model from '../danmakuModel.mjs';
-import { planDanmakuWarmup } from '../danmakuWarmup.mjs';
-import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, advanceDanmaku, danmakuSeed } from '../danmakuModel.mjs';
+import { planDanmakuWarmup, warmupCommentLimit } from '../danmakuWarmup.mjs';
+import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, advanceDanmaku, danmakuSeed, commentFillCount } from '../danmakuModel.mjs';
 import { presentDanmakuText } from '../danmakuEmoji.mjs';
 
 test('settings reject malformed storage and clamp supported numeric values', () => {
@@ -260,7 +260,7 @@ test('all three comment densities emit more distinct comments while keeping thei
 });
 
 
-test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停有效', () => {
+test('少量评论滚出后不轮播，追加的新评论仍会播出，屏蔽和暂停有效', () => {
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
   const comments = ['甲', '乙', '丙'];
   const runtime = { width: 500, height: 300, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', speed: 2 }, reducedMotion: false };
@@ -269,7 +269,8 @@ test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停�
     assert.ok(state.items.length <= 8, `不能一次铺满: ${frame}`);
     assert.equal(new Set(state.items.map(item => item.content)).size, state.items.length);
   }
-  assert.ok(state.nextId > comments.length);
+  assert.equal(state.nextId, comments.length);
+  assert.equal(state.items.length, 0, '三条都飞出后应停住');
   comments.push('新内容');
   let sawNew = false;
   for (let frame = 0; frame < 300; frame++) {
@@ -307,6 +308,42 @@ test('评论超时会再试，空页面只再确认一次，永久错误立即�
   assert.equal(flaky.error, '');
   model.commentFailureAction(flaky, { retryable: true, error: '公开评论加载超时，请重试' }, 10);
   assert.match(flaky.error, /超时/);
+});
+
+test('时间轴不足 25 条才补本集评论，够了就不再补', () => {
+  assert.equal(commentFillCount(0), 25);
+  assert.equal(commentFillCount(2), 23);
+  assert.equal(commentFillCount(24), 1);
+  assert.equal(commentFillCount(25), 0);
+  assert.equal(commentFillCount(30), 0);
+  assert.equal(commentFillCount(35), 0);
+  assert.equal(commentFillCount(40), 0);
+  assert.equal(commentFillCount(80.9), 0);
+  assert.equal(commentFillCount(Number.NaN), 25);
+  assert.equal(warmupCommentLimit({ skipped: true, items: [] }), 0);
+  assert.equal(warmupCommentLimit({ success: true, items: Array.from({ length: 2 }, (_, index) => index) }), 23);
+  assert.equal(warmupCommentLimit({ success: true, items: Array.from({ length: 70 }, (_, index) => index) }), 0);
+  assert.equal(warmupCommentLimit({ success: false, items: [] }), 25);
+  assert.equal(warmupCommentLimit(null), 25);
+});
+
+test('有片长时本集评论拉开间隔并且速度会变动', () => {
+  const comments = Array.from({ length: 23 }, (_, index) => `补位评论${index}`);
+  const options = {
+    width: 960, height: 540, settings: { ...DEFAULT_DANMAKU_SETTINGS, area: 'full' }, reducedMotion: false,
+    seed: danmakuSeed('111111', '222222'), duration: 90,
+  };
+  const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
+  for (let frame = 0; frame < 30; frame++) advanceDanmaku(state, comments, 0.1, options);
+  assert.ok(state.cursor <= 2, `开头不应一次放出很多评论: ${state.cursor}`);
+  const speeds = new Set();
+  for (let frame = 0; frame < 1400; frame++) {
+    const before = state.nextId;
+    advanceDanmaku(state, comments, 0.1, options);
+    if (state.nextId > before) speeds.add(state.items.at(-1)?.speed);
+  }
+  assert.equal(state.cursor, 23);
+  assert.ok(speeds.size >= 2, '本集评论速度应有变化');
 });
 
 test('下一集弹幕只在当前集读完后预载一次', () => {

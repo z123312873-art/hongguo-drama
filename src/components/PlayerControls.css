@@ -36,7 +36,7 @@
 .player-stage:fullscreen { width: 100vw; height: 100vh; max-height: none; margin: 0; border-radius: 0; aspect-ratio: auto; background: #000; }
 .player-stage:fullscreen .player-video { object-fit: contain; }
 .player-stage:fullscreen .player-controls-bar { padding: 28px max(20px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
-@media (max-width: 480px) { .player-controls-bar { padding-inline: 8px; } .player-controls-row { gap: 3px; } .player-controls-volume input { width: 45px; } .player-controls-time { font-size: 11px; } }
+@media (max-width: 480px) { .player-controls-bar { padding-inline: 8px; } .player-controls-row { gap: 3px; } .player-controls-volume input { width: 45px; } }
 
 .player-controls-menu .player-picture-mode { margin-top: 12px; }
 .player-controls-menu .player-picture-mode select { width: 100px; }
@@ -44,7 +44,7 @@
 .player-controls-menu { max-height: min(70vh, 480px); overflow-y: auto; overscroll-behavior: contain; }
 
 .player-now-playing { position: absolute; inset: 0 0 auto; display: flex; align-items: baseline; gap: 14px; padding: 24px; background: linear-gradient(rgba(0, 0, 0, .78), transparent); text-shadow: 0 1px 4px #000; }
-.player-now-playing strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(18px, 2.2vw, 28px); }
+.player-now-playing strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 24px; }
 .player-now-playing > span { flex-shrink: 0; font-size: 16px; }
 .player-controls-selection { display: flex; gap: 6px; margin-left: auto; }
 .player-controls-selection > button { font-size: 13px; padding-inline: 10px; white-space: nowrap; }
@@ -73,7 +73,6 @@
   .player-controls-selection > button { padding-inline: 6px; }
   .player-controls-popover { right: 8px; bottom: calc(100% + 4px); }
   .player-now-playing { padding: 16px; gap: 10px; }
-  .player-now-playing > span { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) { .player-controls { transition: none; } }
 

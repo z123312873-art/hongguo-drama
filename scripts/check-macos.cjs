@@ -40,11 +40,12 @@ function load(platform = 'darwin') {
     constructor(options) {
       super(); this.options = options; this.destroyed = false;
       this.webContents = new EventEmitter();
-      Object.assign(this.webContents, { setWindowOpenHandler() {}, send() {} });
+      Object.assign(this.webContents, { setWindowOpenHandler() {}, send() {}, isDestroyed: () => this.destroyed, setZoomFactor: value => { this.zoomFactor = value; } });
       windows.push(this);
     }
     static getAllWindows() { return windows.filter(w => !w.destroyed); }
     isDestroyed() { return this.destroyed; }
+    getContentSize() { return [this.options.width, this.options.height]; }
     isMinimized() { return false; }
     setMenuBarVisibility() {}
     loadFile() { return Promise.resolve(); }
@@ -110,6 +111,7 @@ function load(platform = 'darwin') {
     const h = load();
     await h.ready();
     const main = h.windows[0];
+    assert.equal(main.zoomFactor, 1);
     h.context.getSearchWindow();
     main.close();
     h.app.emit('activate');
@@ -117,12 +119,42 @@ function load(platform = 'darwin') {
     h.app.emit('activate');
     assert.equal(h.windows.length, 3, 'existing main window must be reused');
     assert.ok(h.windows[2].focused);
+    assert.equal(h.windows[2].zoomFactor, 1, 'reopened main window restores saved font size');
   });
   await check('Mac native menu supplies editing and quit shortcuts', async () => {
     const h = load();
     await h.ready();
     const roles = (h.menu() || []).flatMap(item => item.submenu || []).map(item => item.role);
     for (const role of ['copy', 'paste', 'selectAll', 'quit']) assert.ok(roles.includes(role), role);
+  });
+  await check('Mac zoom persists through activation and window recreation; failed saves preserve it', async () => {
+    const h = load();
+    await h.ready();
+    assert.equal(h.windows[0].options.webPreferences.zoomMode, 'isolated', 'Zoom must render changes without sharing them with other windows');
+    const out = h.menu().find(item => item.label === '视图').submenu.find(item => item.label === '缩小');
+    assert.equal(out.accelerator, 'CmdOrCtrl+-');
+    out.click();
+    const dataFile = path.join(h.root, 'data.json');
+    assert.equal(JSON.parse(fs.readFileSync(dataFile, 'utf8')).settings.ui_zoom, 0.9);
+    h.app.emit('activate');
+    assert.equal(h.windows[0].zoomFactor, 0.9);
+    h.windows[0].webContents.emit('zoom-changed', {}, 'out');
+    assert.equal(h.windows[0].zoomFactor, 0.8);
+    h.windows[0].close();
+    const store = localRequire('./src/store');
+    store.init(dataFile);
+    h.app.emit('activate');
+    const reopened = h.windows[1];
+    assert.equal(reopened.zoomFactor, 0.8, 're-read saved zoom when recreating the main window');
+    const durable = fs.readFileSync(dataFile, 'utf8');
+    const saveSettings = store.saveSettings;
+    const messages = [];
+    reopened.webContents.send = channel => messages.push(channel);
+    store.saveSettings = () => { throw new Error('synthetic disk full'); };
+    try { out.click(); } finally { store.saveSettings = saveSettings; }
+    assert.equal(reopened.zoomFactor, 0.8);
+    assert.equal(fs.readFileSync(dataFile, 'utf8'), durable, 'failed save must preserve all settings');
+    assert.ok(messages.includes('storage-error'), 'failed save must notify the user');
   });
   await check('Mac About panel displays only the public two-part version', async () => {
     const h = load();

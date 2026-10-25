@@ -144,6 +144,19 @@ function mount(api = {}, component = 'AppUpdateNotice', props = {}) {
     assert.ok(ui.text().includes('系统安装器启动失败')); assert.ok(ui.button('前往发布页手动下载')); assert.ok(!ui.text().includes('已是最新版本'));
     await ui.button('前往发布页手动下载').props.onClick(); assert.equal(opened, 1); ui.unmount();
   });
+  await test('formal update notice shows a short bullet list', async () => {
+    const ui = mount({ checkAppUpdate: async () => ({ enabled: true, release: { ...release, highlights: ['橫幅對準上半部', '更新說明改條列'] } }) });
+    await ui.flush();
+    assert.ok(ui.text().includes('发现新版本 v9.0'));
+    const list = ui.find(n => n.props.className === 'app-update-summary');
+    assert.equal(list.type, 'ul');
+    assert.deepEqual(list.children.filter(item => item && item.type === 'li').map(item => item.children.join('')), ['橫幅對準上半部', '更新說明改條列']);
+    ui.unmount();
+    const plain = mount();
+    await plain.flush();
+    assert.equal(plain.find(n => n.props.className === 'app-update-summary'), undefined);
+    plain.unmount();
+  });
   await test('settings checks this repository and leaves the switch on by default', async () => {
     const ui = mount({ checkAppUpdate: async () => ({ enabled: true, release: null }) }, 'Settings'); await ui.flush();
     const box = ui.find(n => n.props['aria-label'] === '自动检测更新');

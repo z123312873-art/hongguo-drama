@@ -13,8 +13,8 @@ const FORMAT_PRESETS = [
 ];
 
 const PROXY_MODES = [
-  { value: 'system', label: '跟随系统', desc: '使用系统 / 环境变量里已有的代理设置' },
-  { value: 'custom', label: '手动指定', desc: '自己填写代理地址与端口（支持 HTTP/HTTPS 代理）' },
+  { value: 'system', label: '跟随系统', desc: '接口与下载读取启动环境代理；发现页等浏览器请求使用系统代理' },
+  { value: 'custom', label: '手动指定', desc: '填写 HTTP/HTTPS 代理地址与端口，忽略环境变量中的绕过规则（NO_PROXY）' },
   { value: 'direct', label: '强制直连', desc: '忽略一切代理，直接连接' },
 ];
 
@@ -41,7 +41,7 @@ function describeProxy(settings) {
     if (!host) return { on: false, text: '已开启，但未填写代理地址' };
     return { on: true, text: `${host}${port ? ':' + port : ''}` };
   }
-  return { on: true, text: '跟随系统 / 环境变量代理' };
+  return { on: true, text: '接口/下载跟随启动环境，浏览器跟随系统' };
 }
 
 function SettingsPage({ active = true, preview = false }) {
@@ -57,6 +57,7 @@ function SettingsPage({ active = true, preview = false }) {
   const [loadError, setLoadError] = useState('');
   const testVersion = useRef(0);
   const savingRef = useRef(false);
+  const editedKeys = useRef(new Set());
   const savedTimer = useRef(null);
 
   const loadSettings = async () => {
@@ -75,6 +76,7 @@ function SettingsPage({ active = true, preview = false }) {
   }, [active]);
 
   const update = (key, value) => {
+    editedKeys.current.add(key);
     setSettings((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
     setDirty(true);
@@ -95,16 +97,18 @@ function SettingsPage({ active = true, preview = false }) {
     setSaved(false);
     setSaveError('');
     try {
-      // Playback options may change while this retained settings page is hidden.
-      const current = await window.electronAPI.getSettings();
-      const editable = ['root', 'name_format', 'download_quality', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'app_updates_enabled', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled'];
-      const submitted = { ...current };
-      for (const key of editable) if (Object.hasOwn(next, key)) submitted[key] = next[key];
+      // Submit only edited fields; the main process merges newer playback options.
+      const editable = ['root', 'name_format', 'download_quality', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'app_updates_enabled'];
+      const submitted = {};
+      for (const key of editable) {
+        if (Object.hasOwn(next, key) && (editedKeys.current.has(key) || isProxy && key.startsWith('proxy_'))) submitted[key] = next[key];
+      }
       if (isProxy) submitted.clear_proxy_password = next.clear_proxy_password === true && !String(next.proxy_password || '');
       const res = await window.electronAPI.saveSettings(submitted);
       if (!res?.success) throw new Error(res?.error || '设置未保存，请重试');
       if (isProxy) closeProxy();
       setSettings(await window.electronAPI.getSettings());
+      editedKeys.current.clear();
       setDirty(false);
       setSaved(true);
       clearTimeout(savedTimer.current);
@@ -205,7 +209,7 @@ function SettingsPage({ active = true, preview = false }) {
           </div>
         </div>
         <div className="settings-group">
-          <p className="settings-hint">播放时同时读取时间轴弹幕和本集评论。时间轴很少、没有或暂时没读到时，本集评论仍会兜底。当前集读完后，会错开预载下一集的两种弹幕，避免连着请求被来源挡住。同一行速度对齐，避免互相盖住。</p>
+          <p className="settings-hint">播放时先读取时间轴弹幕。时间轴不够 25 条时用本集评论补上；时间轴更多时不再补，并且一集最多播放 35 条。本集评论的间隔和速度会变动，同一行与时间轴对齐，避免互相盖住。下一集在当前集读完后先预载时间轴。</p>
           <button type="button" className="btn btn-outline btn-sm" onClick={async () => {
             try {
               const result = await window.electronAPI.openExternalUrl('https://github.com/dawei233/hongguo-drama');
@@ -267,7 +271,7 @@ function SettingsPage({ active = true, preview = false }) {
             <option value="1080p">1080P</option>
             <option value="720p">720P</option>
           </select>
-          <p className="settings-hint" id="default-download-quality-hint">保存后用于新建下载任务，也可在下载时单独选择。所选清晰度不可用时提示，不自动降级；已有文件不自动删除或覆盖。</p>
+          <p className="settings-hint" id="default-download-quality-hint">保存后用于新建下载任务，也可在下载时单独选择。红果片源所选清晰度不可用或下载失败时，自动尝试更低清晰度，并在下载管理中提示；已有文件不自动删除或覆盖。</p>
         </div>
 
         <div className="settings-group">
@@ -301,7 +305,7 @@ function SettingsPage({ active = true, preview = false }) {
             </button>
           </div>
           <p className="settings-hint">
-            本机有代理（Clash / V2rayN 等）时在这里填上，解析剧集与下载视频都会走该代理。保存后立即生效，无需重启。
+            手动代理用于接口、下载和应用内浏览器；跟随系统时，接口与下载读取启动时的环境代理及绕过规则，发现页等浏览器请求使用系统代理。保存后立即生效。
           </p>
         </div>
 
@@ -454,6 +458,7 @@ function SettingsPage({ active = true, preview = false }) {
                 )}
               </div>
 
+              <p className="settings-hint">测试仅检查接口与下载访问百度的连接，不代表发现页等浏览器请求的代理状态。</p>
               {testResult && (
                 <div className={`proxy-test-result ${testResult.success ? 'ok' : 'fail'}`}>
                   {testResult.success ? <Check size={15} /> : <AlertCircle size={15} />}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Play, RefreshCw, Clock, Trash2 } from './icons';
 import './WatchHistory.css';
 
@@ -14,6 +14,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const [filter, setFilter] = useState('all');
   const request = useRef(0);
   const openingRef = useRef(false);
+  const openingRequest = useRef(0);
   const completedCount = rows.filter(row => row.completed === true).length;
   const visibleRows = rows.filter(row => filter === 'all' || (row.completed === true) === (filter === 'completed'));
 
@@ -32,6 +33,10 @@ export default function WatchHistory({ active = true, onNavigate }) {
     } finally { if (version === request.current) setLoading(false); }
   };
 
+  useLayoutEffect(() => {
+    setOpening(''); openingRef.current = false;
+    return () => { openingRequest.current++; openingRef.current = false; };
+  }, [active]);
   useEffect(() => {
     if (active) load();
     return () => { request.current++; };
@@ -67,16 +72,22 @@ export default function WatchHistory({ active = true, onNavigate }) {
   };
 
   const resume = async (row, sequel = null) => {
-    if (openingRef.current) return;
+    if (!active || openingRef.current) return;
+    const version = ++openingRequest.current;
     openingRef.current = true;
     setOpening(row.series_id); setError('');
     try {
       if (sequel) {
-        const detail = await window.electronAPI.searchResolve(sequel.series_id);
-        if (!detail?.success) throw new Error(detail?.error || '续作详情暂不可用');
-        const episode = detail.data?.episodes?.find(item => !item.locked);
-        if (!episode) throw new Error('续作暂时没有可播放的分集');
-        const result = await window.electronAPI.playSeries({ seriesId: sequel.series_id, vidIndex: episode.vid_index });
+        let result = await window.electronAPI.playSeries({ seriesId: sequel.series_id, vidIndex: 1 });
+        if (!result?.success && version !== openingRequest.current) return;
+        if (!result?.success && result?.code === 'SERIES_NOT_FOUND') {
+          const detail = await window.electronAPI.searchResolve(sequel.series_id);
+          if (version !== openingRequest.current) return;
+          if (!detail?.success) throw new Error(detail?.error || '续作详情暂不可用');
+          const episode = detail.data?.episodes?.find(item => !item.locked);
+          if (!episode) throw new Error('续作暂时没有可播放的分集');
+          result = await window.electronAPI.playSeries({ seriesId: sequel.series_id, vidIndex: episode.vid_index });
+        }
         if (!result?.success) throw new Error(result?.error || '打开播放器失败');
       } else {
         const result = await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
@@ -84,9 +95,9 @@ export default function WatchHistory({ active = true, onNavigate }) {
       }
       const acknowledged = await window.electronAPI.acknowledgeWatchUpdates(row.series_id, { total: row.total, sequelIds: (row.sequels || []).map(item => item.series_id) });
       if (!acknowledged?.success) throw new Error(acknowledged?.error || '更新标记保存失败');
-      setRows(current => current.map(item => item.series_id === row.series_id ? { ...item, hasUpdates: false, unreadEpisodes: 0 } : item));
-    } catch (failure) { setError(failure.message || '打开失败，请重试'); }
-    finally { setOpening(''); openingRef.current = false; }
+      if (version === openingRequest.current) setRows(current => current.map(item => item.series_id === row.series_id ? { ...item, hasUpdates: false, unreadEpisodes: 0 } : item));
+    } catch (failure) { if (version === openingRequest.current) setError(failure.message || '打开失败，请重试'); }
+    finally { if (version === openingRequest.current) { setOpening(''); openingRef.current = false; } }
   };
 
   return <section className="history-container" aria-labelledby="history-title">
@@ -115,7 +126,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       <button type="button" className="btn btn-outline" onClick={() => setFilter('all')}>查看全部</button>
     </div> : <ul className="history-list">{visibleRows.map(row => <li className="history-row" key={row.series_id}>
       <div className="history-main">
-      <button className="history-resume" onClick={() => resume(row)} disabled={!!opening || !!removing} aria-label={`继续观看 ${row.series_title} 第${row.vid_index}集${row.hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`}>
+      <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing} aria-label={`继续观看 ${row.series_title} 第${row.vid_index}集${row.hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`}>
         {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
         <span className="history-copy">
           <span className="history-name">{row.hasUpdates && <span className="history-dot" role="img" aria-label="有更新" />}{row.series_title}</span>
@@ -131,7 +142,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
         onClick={() => removeRow(row)}><Trash2 size={14} />{removing === row.series_id ? '移除中…' : pendingRemove === row.series_id ? '确认移除' : '移除'}</button>
       {pendingRemove === row.series_id && <button type="button" className="btn btn-outline btn-sm" onClick={() => setPendingRemove('')}>取消</button>}
       </div>
-      {!!row.sequels?.length && <div className="history-sequels"><span>疑似续作</span>{row.sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!!opening || !!removing} onClick={() => resume(row, sequel)}>{sequel.series_title}</button>)}</div>}
+      {!!row.sequels?.length && <div className="history-sequels"><span>疑似续作</span>{row.sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(row, sequel)}>{sequel.series_title}</button>)}</div>}
       {row.lastCheckError && <p className="history-check-error">更新检查未完成：{row.lastCheckError}</p>}
     </li>)}</ul>}
   </section>;

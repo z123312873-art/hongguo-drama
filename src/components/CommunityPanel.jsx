@@ -9,7 +9,7 @@ const reviewDate = value => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
 };
 
-export default function CommunityPanel({ seriesId, episodeId, title, cover }) {
+export default function CommunityPanel({ seriesId, episodeId, title, cover, children }) {
   const id = String(seriesId || '');
   const panelId = useId();
   const [openedSeries, setOpenedSeries] = useState('');
@@ -59,6 +59,7 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover }) {
     <div className="community-heading">
       <div><h3>剧评与收藏</h3><p>公开评论，只读。收藏仅保存在本机。</p></div>
       <div className="community-actions">
+        {children}
         <button type="button" className="btn btn-outline" onClick={async () => {
           try {
             await navigator.clipboard.writeText(`https://hongguoduanju.com/detail?series_id=${encodeURIComponent(id)}`);

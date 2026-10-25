@@ -3,11 +3,11 @@
 // 时间轴投放与评论队列分开；两种来源共用视觉设置、轨道布局和窗口重排。
 
 import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
-import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku, takeDanmakuReplay } from './danmakuModel.mjs';
+import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku, TIMELINE_PLAYBACK_CAP } from './danmakuModel.mjs';
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
-/** 默认走时间轴弹幕。播放器同时读本集评论；时间轴很少、没有或失败时，评论仍留在画面上。 */
+/** 默认走时间轴弹幕。不足约 25 条才补本集评论；时间轴播放最多 35 条。 */
 export const DEFAULT_DANMAKU_SOURCE = 'official';
 
 export function normalizeDanmakuSource(value) {
@@ -65,6 +65,32 @@ export function lowerBoundTime(list, currentTime) {
     else high = mid;
   }
   return low;
+}
+
+// 超过 35 条时按时间均匀留下 35 条，开头和结尾都保留。不足则原样播放。
+export function selectTimelinePlayback(items) {
+  if (!Array.isArray(items)) return [];
+  const sorted = items.slice().sort((a, b) => (a?.time || 0) - (b?.time || 0));
+  const cap = TIMELINE_PLAYBACK_CAP;
+  if (sorted.length <= cap) return sorted;
+  const last = sorted.length - 1;
+  const used = new Set();
+  const indexes = [];
+  for (let slot = 0; slot < cap; slot++) {
+    let index = Math.round(slot * last / (cap - 1));
+    if (used.has(index)) {
+      let step = 1;
+      while (step <= last) {
+        if (index + step <= last && !used.has(index + step)) { index += step; break; }
+        if (index - step >= 0 && !used.has(index - step)) { index -= step; break; }
+        step += 1;
+      }
+    }
+    used.add(index);
+    indexes.push(index);
+  }
+  indexes.sort((a, b) => a - b);
+  return indexes.map(index => sorted[index]);
 }
 
 export function createOfficialFeed(seriesId, vid) {
@@ -134,20 +160,11 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
   let changed = false;
 
   const emitting = options.emitting !== false;
+  const staleAfter = reducedMotion ? REDUCED_MOTION_READ_SECONDS : STALE_SECONDS;
   if (emitting && isSeek(state.lastTime, currentTime, elapsed)) {
-    // Reposition future comments without erasing comments already crossing the screen.
-    state.cursor = lowerBoundTime(list, currentTime);
+    // 跳转从仍算新鲜的时间点接着发。更早的不再循环补上。
+    state.cursor = lowerBoundTime(list, Math.max(0, currentTime - staleAfter));
     state.cooldown = 0;
-    // A resumed or re-enabled sparse feed has no retired comments from this session.
-    if (!reducedMotion && !state.items.length && !state.replayQueue?.length) {
-      state.replayQueue = [];
-      for (let index = state.cursor - 1; index >= 0 && state.replayQueue.length < 6; index--) {
-        const entry = list[index];
-        if (!commentIsBlocked(entry.text, settings) && !state.replayQueue.some(item => item.content === entry.text)) {
-          state.replayQueue.push({ entry, content: entry.text });
-        }
-      }
-    }
   }
   if (emitting) state.lastTime = currentTime;
 
@@ -163,17 +180,19 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
 
   const { top, lineHeight, lanes } = danmakuLayout(options);
 
+  const obstacles = Array.isArray(options.obstacles) ? options.obstacles : [];
   const laneFree = index => {
-    const occupants = state.items.filter(item => item.lane === index);
-    if (!occupants.length) return true;
-    // 允许同一道里多发：只要最后一条已经走出足够距离，新的一条就不会追尾。
-    // 上游评论滚动条用的是"这道有人就占着"，对真弹幕（一集上百条）会严重丢量。
-    const newest = occupants.reduce((a, b) => (a.x > b.x ? a : b));
-    return newest.x + newest.width + LANE_HEAD_GAP <= width;
+    const y = top + index * lineHeight;
+    const occupants = state.items.filter(item => item.lane === index || Math.abs(item.y - y) < lineHeight);
+    const foreign = obstacles.filter(item => item && Math.abs((Number(item.y) || 0) - y) < lineHeight);
+    const blockers = occupants.concat(foreign);
+    if (!blockers.length) return true;
+    // 同一道可以再发，但本层和评论层最靠右的一条都要先让出间距。
+    const newest = blockers.reduce((a, b) => ((Number(a.x) || 0) > (Number(b.x) || 0) ? a : b));
+    return (Number(newest.x) || 0) + (Number(newest.width) || 0) + LANE_HEAD_GAP <= width;
   };
 
   let emitted = 0;
-  const staleAfter = reducedMotion ? REDUCED_MOTION_READ_SECONDS : STALE_SECONDS;
   while (emitting && emitted < MAX_EMIT_PER_FRAME) {
     let entry = list[state.cursor];
     const timed = entry && entry.time <= currentTime;
@@ -190,13 +209,7 @@ export function advanceTimedDanmaku(state, danmaku, currentTime, elapsed, option
     // 先复用已有行的安全空位，放不下再扩行，避免短弹幕被摊成整屏横向空档。
     const lane = candidates.find(laneFree);
     if (lane === undefined) break; // 保留 cursor，下一帧再试
-    if (!timed) {
-      if (!(delta > 0) || !list.length) break;
-      // Nearby fresh supply takes priority; only quiet stretches need retired comments.
-      const pending = lowerBoundTime(list, currentTime + 2) - state.cursor;
-      entry = takeDanmakuReplay(state, options, Math.max(0, pending), currentTime)?.entry;
-      if (!entry) break;
-    }
+    if (!timed) break;
 
     const text = clipDanmakuText(entry.text);
     const textWidth = measureDanmakuText(text, settings.fontSize);

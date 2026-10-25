@@ -7,6 +7,19 @@ import { readSearchHistory, saveSearchTerm, removeSearchTerm, clearSearchHistory
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 
+export function rankSearchResults(results, keyword) {
+  const normalize = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const query = normalize(keyword), seen = new Set();
+  return results.filter(item => {
+    const key = `${item.source}:${item.series_id}`;
+    if (!item.series_id || !item.series_title || seen.has(key)) return false;
+    seen.add(key); return true;
+  }).map(item => {
+    const title = normalize(item.series_title);
+    return { ...item, relevance: title === query ? 0 : title.includes(query) ? 1 : 2 };
+  }).sort((a, b) => a.relevance - b.relevance);
+}
+
 /**
  * SearchPanel —— 按所选来源搜索短剧
  * 拿到 series_id 后交给父组件走既有的「拉全集 + 选集下载」流程。
@@ -25,6 +38,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null); // null=未搜索, []=无结果
   const [error, setError] = useState('');
+  const [searchWarning, setSearchWarning] = useState('');
   const [pageTitle, setPageTitle] = useState('');
   const [pickingId, setPickingId] = useState('');
 
@@ -39,7 +53,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
 
   useEffect(() => {
     requestVersion.current++; pendingSearch.current = null;
-    setLoading(false); setPickingId(''); setResults(null); setError(''); setPageTitle('');
+    setLoading(false); setPickingId(''); setResults(null); setError(''); setSearchWarning(''); setPageTitle('');
     if (source !== 'all' && !mediaSources.some(item => item.id === source)) setSource('all');
   }, [sourceRevision, mediaSources]);
 
@@ -52,6 +66,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
     setPickingId('');
     setResults(null);
     setError('');
+    setSearchWarning('');
     setPageTitle('');
   };
 
@@ -63,6 +78,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
     setPickingId('');
     setResults(null);
     setError('');
+    setSearchWarning('');
   };
 
   const clearHistory = () => {
@@ -98,6 +114,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
     setPickingId('');
     setLoading(true);
     setError('');
+    setSearchWarning('');
     setResults(null);
     setPageTitle('');
     try {
@@ -108,11 +125,12 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
         return res;
       }));
       if (request !== requestVersion.current) return;
-      const merged = [], failures = [];
+      const merged = [], failures = [], warnings = [];
       responses.forEach((response, index) => {
         const searchSource = sources[index];
         if (response.status === 'fulfilled') {
           merged.push(...(response.value.results || []).map(item => ({ ...item, source: searchSource })));
+          if (response.value.partial) warnings.push(`${mediaSourceLabel(searchSource, mediaSources)}：${response.value.error || '补充搜索未完成，可稍后重试。'}`);
           if (sources.length === 1) setPageTitle(response.value.pageTitle || '');
         } else {
           failures.push(`${mediaSourceLabel(searchSource, mediaSources)}：${response.reason?.message || '搜索失败'}`);
@@ -127,7 +145,8 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
           setHistoryError('搜索结果已显示，但本机搜索历史保存失败。');
         }
       }
-      setResults(merged);
+      setResults(rankSearchResults(merged, kw));
+      setSearchWarning(warnings.join('；'));
       if (failures.length) setError(`${failures.join('；')}。${merged.length ? '已显示其他来源的结果。' : ''}请重试或切换来源。`);
     } catch (e) {
       if (request !== requestVersion.current) return;
@@ -220,6 +239,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
         <div className="search-welcome"><Search size={36} /><h3>好故事，从一个名字开始</h3><p>输入完整剧名或关键词，发现你想看的短剧。</p></div>
       )}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
+      {searchWarning && <p className="settings-hint" role="status">{searchWarning} 已显示本次查到的结果。</p>}
 
       {loading && (
         <div className="search-loading">
@@ -247,7 +267,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
 
       {results && results.length > 0 && (
         <>
-          <div className="search-count">找到 {results.length} 部相关短剧</div>
+          <div className="search-count">找到 {results.filter(item => item.relevance < 2).length} 部标题匹配短剧{results.some(item => item.relevance === 2) ? `，另有 ${results.filter(item => item.relevance === 2).length} 部来源返回的其他结果（排在后面）` : ''}</div>
           <div className="search-grid">
             {results.map((item) => (
               <button
@@ -275,7 +295,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
                         <RefreshCw size={13} className="spin" /> 正在拉取分集…
                       </>
                     ) : (
-                      <><span className="badge">{mediaSourceLabel(item.source, mediaSources)}</span>查看剧集</>
+                      <><span className="badge">{mediaSourceLabel(item.source, mediaSources)}</span>{item.relevance === 2 ? '其他结果 · 查看剧集' : '查看剧集'}</>
                     )}
                   </div>
                 </div>

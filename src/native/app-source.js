@@ -228,6 +228,7 @@ async function requestJson(url, options, deadline, signal) {
 
 async function fetchAppPlayUrl(vid, options = {}) {
     const requestedQuality = normalizeDownloadQuality(options.quality);
+    const allowLowerQuality = options.allowLowerQuality === true && requestedQuality !== 'auto';
     vid = String(vid || '');
     if (!/^\d{1,30}$/.test(vid)) throw new Error('分集编号无效');
     const deadline = Date.now() + 12000;
@@ -262,16 +263,22 @@ async function fetchAppPlayUrl(vid, options = {}) {
         return { item, codec, codecRank, quality, pixels, width, height, bitrate };
     }).filter(row => row.codecRank < 2);
     const matched = rows.filter(row => meetsDownloadQuality(row, requestedQuality));
-    // A label such as 1080p can describe a 1280×720 encode. Keep the measured picture
-    // instead of failing the episode, and never report that file as the higher tier.
-    const limited = requestedQuality !== 'auto' && !matched.length;
-    const pool = limited ? rows.filter(row => row.width > 0 && row.height > 0) : matched;
+    // Playback keeps a measured picture when the label overstates the encode.
+    // Download fallback may walk every lower tier instead of failing the task.
+    const limited = requestedQuality !== 'auto' && !allowLowerQuality && !matched.length;
+    const pool = allowLowerQuality ? rows : limited ? rows.filter(row => row.width > 0 && row.height > 0) : matched;
     const selectedRows = pool.sort((a, b) => {
+        if (allowLowerQuality && requestedQuality !== 'auto') {
+            const aMeets = meetsDownloadQuality(a, requestedQuality), bMeets = meetsDownloadQuality(b, requestedQuality);
+            if (aMeets !== bMeets) return Number(bMeets) - Number(aMeets);
+            const aPixels = Math.min(a.width, a.height), bPixels = Math.min(b.width, b.height);
+            return (aMeets ? aPixels - bPixels : bPixels - aPixels) || a.codecRank - b.codecRank || b.bitrate - a.bitrate;
+        }
         if (limited) return b.pixels - a.pixels || b.bitrate - a.bitrate || a.codecRank - b.codecRank;
-        if (requestedQuality === 'auto') return a.codecRank - b.codecRank || b.pixels - a.pixels;
-        return Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank;
+        if (requestedQuality === 'auto') return a.codecRank - b.codecRank || b.pixels - a.pixels || b.bitrate - a.bitrate;
+        return Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank || b.bitrate - a.bitrate;
     });
-    if (!selectedRows.length) throw new Error(requestedQuality === 'auto'
+    if (!selectedRows.length) throw new Error(requestedQuality === 'auto' || allowLowerQuality
         ? '本集暂未提供兼容的 H.264/HEVC 片源'
         : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`);
     let lastError;
@@ -292,11 +299,15 @@ async function fetchAppPlayUrl(vid, options = {}) {
                     const identity = `${url}:${contentKey || ''}`;
                     if (seen.has(identity)) continue;
                     seen.add(identity);
-                    const deliveredQuality = requestedQuality === 'auto' ? selected.quality : limited ? measuredDownloadQuality(selected.width, selected.height) : requestedQuality;
                     const shortSide = Math.min(selected.width, selected.height);
+                    const measured = selected.width && selected.height ? `${shortSide}p` : '';
+                    const deliveredQuality = requestedQuality === 'auto' ? selected.quality
+                        : allowLowerQuality ? (measured || measuredDownloadQuality(selected.width, selected.height))
+                        : limited ? measuredDownloadQuality(selected.width, selected.height) : requestedQuality;
+                    const downgraded = (limited || allowLowerQuality) && requestedQuality !== 'auto' && shortSide > 0 && shortSide < Number.parseInt(requestedQuality, 10);
                     variants.push({ url, contentKey, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', vid,
                         userAgent: VIDEO_UA, quality: deliveredQuality,
-                        ...(limited ? { qualityLimited: true, notice: `本集没有可确认的 ${requestedQuality.toUpperCase()} 片源，实际为 ${shortSide}P（${selected.width}×${selected.height}），已改用该清晰度` } : {}),
+                        ...(downgraded ? { qualityLimited: true, notice: `本集没有可确认的 ${requestedQuality.toUpperCase()} 片源，实际为 ${shortSide}P（${selected.width}×${selected.height}），已改用该清晰度` } : {}),
                         ...(requestedQuality === 'auto' ? {} : { width: selected.width, height: selected.height }) });
                 } catch (error) { lastError = error; }
             }

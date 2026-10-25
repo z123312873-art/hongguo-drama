@@ -47,7 +47,7 @@ function applyEpisodeUpdate(record, oldSeries, freshSeries, now = Date.now()) {
 function seasonTitle(title) {
   const text = String(title || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
   const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两\d]+)[季部]|[（(]([一二三四五六七八九十百零两\d]+)[）)]|season(\d+))$/i);
-  if (!match) return { base: text, season: 1 };
+  if (!match) return { base: text, season: 1, explicit: false };
   const value = match[2] || match[3] || match[4];
   let season = Number(value);
   if (!Number.isFinite(season)) {
@@ -60,8 +60,9 @@ function seasonTitle(title) {
     season = /[十百]/.test(value) ? n + digit : Number([...value].map(char => digits[char]).join(''));
   }
   // Bare bracket numbers can be years or other title metadata; accept only modest season numbers.
-  if (!Number.isInteger(season) || season < 1 || match[3] && season > 99) return { base: text, season: 1 };
-  return { base: match[1], season };
+  if (match[3] && season > 99) return { base: text, season: 1, explicit: false };
+  if (!Number.isSafeInteger(season) || season < 1) return { base: text, season: 1, explicit: false, invalid: true };
+  return { base: match[1], season, explicit: true };
 }
 
 function sourceOf(id) {
@@ -75,15 +76,16 @@ function sourceOf(id) {
 function findSequels(series, candidates) {
   const current = seasonTitle(series.series_title);
   const source = sourceOf(String(series.series_id));
-  if (!current.base || !source) return [];
+  if (!current.base || current.invalid || !source) return [];
   const seen = new Set([String(series.series_id)]);
   return candidates.filter(candidate => {
     const id = String(candidate.series_id || '');
     const next = seasonTitle(candidate.series_title);
-    if (seen.has(id) || sourceOf(id) !== source || next.base !== current.base || next.season <= current.season) return false;
+    if (seen.has(id) || sourceOf(id) !== source || !next.explicit || next.invalid || next.base !== current.base || next.season <= current.season) return false;
     seen.add(id);
     return true;
-  }).slice(0, 10).map(candidate => ({ series_id: String(candidate.series_id), series_title: String(candidate.series_title) }));
+  }).sort((a, b) => seasonTitle(a.series_title).season - seasonTitle(b.series_title).season)
+    .slice(0, 10).map(candidate => ({ series_id: String(candidate.series_id), series_title: String(candidate.series_title) }));
 }
 
 function sequelKeyword(series) { return seasonTitle(series.series_title).base; }
@@ -107,4 +109,4 @@ function acknowledge(record, snapshot) {
     seenSequelIds: [...new Set([...(record.seenSequelIds || []), ...visibleIds.filter(id => knownIds.has(id))])] };
 }
 
-module.exports = { listHistory, recordPlayback, applyEpisodeUpdate, findSequels, sequelKeyword, acknowledge, forgetPlayback };
+module.exports = { listHistory, recordPlayback, applyEpisodeUpdate, seasonTitle, sourceOf, findSequels, sequelKeyword, acknowledge, forgetPlayback };
