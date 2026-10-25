@@ -7,7 +7,7 @@
 <p align="center">在電腦上找劇、接著看、下載與合併。這個倉庫把介面與說明改成繁體中文，並維護自己的 Windows 正式版。</p>
 
 <p align="center">
-  <img alt="目前預發布 3.3" src="https://img.shields.io/badge/預發布-3.3-8b3a3a?style=flat-square">
+  <img alt="目前正式版 3.3" src="https://img.shields.io/badge/正式版-3.3-8b3a3a?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -37,16 +37,16 @@
 
 | 項目 | 現況 |
 |---|---|
-| 目前預發布 | **3.3**（安裝包內部版本 3.3.0） |
-| 仍在架上的正式版 | **2.9**（2.9.0）。已安裝的 2.9 不會因為這次預發布自動跳出更新 |
-| 發行頁 | [3.3 預發布](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-3.3-traditional-pre) |
+| 目前正式版 | **3.3**（安裝包內部版本 3.3.0） |
+| 上一版正式版 | **2.9**（2.9.0）。已安裝的 2.9 會收到 3.3 的更新提醒，只顯示有新版本，不會顯示條列說明 |
+| 發行頁 | [3.3 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v3.3) |
 | 安裝檔 | Windows x64 NSIS，未簽章 |
 | 自動更新 | 預設開啟，只檢查本倉庫 `z123312873-art/hongguo-drama` 的正式發行 |
 | 不會提示的情況 | 預發布、草稿，以及和目前安裝相同的版本號 |
 | 會提示的情況 | 之後編號更高的正式版。下載與安裝都要你自己確認 |
 | 不檢查的來源 | 原作者倉庫 [jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama) |
 
-3.3 是預發布，用來先核對上游 3.0 到 3.3 併進來的行為。請用發行頁上的 SHA256 核對安裝檔。
+3.3 是正式版。請用發行頁上的 SHA256 核對安裝檔。
 
 本專案是社群維護的開源修改版，**不是紅果、西飯或河馬的官方用戶端，也沒有平台官方背書**。不提供付費分集解鎖。劇集、清晰度與可播放範圍取決於來源平臺。
 
@@ -54,10 +54,10 @@
 
 這個倉庫只發行 **Windows x64** 安裝檔。媒體工具已內建，不需要另外安裝 Node.js 或 FFmpeg。
 
-**[下載 3.3 預發布（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-3.3-traditional-pre/hongguo-downloader-3.3-win-x64-setup.exe)**
+**[下載 3.3 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v3.3/hongguo-downloader-3.3-win-x64-setup.exe)**
 
-- 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。應用內更新仍只看本倉庫的正式版，這包預發布不會推給已安裝的 2.9。
-- 安裝檔未簽章，系統可能出現安全提示。請從 [3.3 預發布頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-3.3-traditional-pre) 下載，並對照該頁的 SHA256。
+- 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。已安裝的 2.9 會收到這個正式版的更新提醒；下載和安裝仍要自己確認。
+- 安裝檔未簽章，系統可能出現安全提示。請從 [3.3 正式版頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v3.3) 下載，並對照該頁的 SHA256。
 - 一般使用只需要這個安裝檔。發行頁裡的 `latest*.yml`、`.blockmap` 給更新程式用；Source code 是原始碼，不能直接執行。
 - 從 2.9 或更舊的程式換過來時，先退出舊程式再安裝。設定、觀看紀錄與已下載的影片留在原來的資料目錄。上一版正式安裝檔仍在 [2.9 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)。
 
@@ -200,7 +200,7 @@
 
 ### 怎樣更新？
 
-Windows x64 安裝版預設檢查本倉庫的正式版。出現較新的正式版時，先由你決定是否下載，下載完成後再由你決定是否重新啟動安裝。預發布不會提示。正式版發行說明若以「摘要：」起頭，或第一行本身就是一句短話，這個版本的更新提醒會多顯示那一句。已安裝的 2.9 只會看到有新版本，不會顯示這句。
+Windows x64 安裝版預設檢查本倉庫的正式版。出現較新的正式版時，先由你決定是否下載，下載完成後再由你決定是否重新啟動安裝。預發布不會提示。從 3.3 起，正式版發行說明若寫成「摘要：」再接幾行短條列，更新提醒會逐條顯示，不會收成一整句。已安裝的 2.9 只會看到有新版本，不會顯示這些條目。
 
 ### Windows 裝了新版，為什麼還是舊版本？
 

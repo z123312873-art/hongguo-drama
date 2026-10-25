@@ -616,7 +616,7 @@
 .player-episodes { gap: 8px; }
 .player-header .btn-autonext-on { background: var(--accent-soft); border-color: transparent !important; }
 .player-now-status.status-downloading { background: var(--accent-soft); }
-@media (max-width: 1080px) { .player-header { flex-direction: column; gap: 15px; } .player-header-right { justify-content: flex-start; } .player-stat { flex-basis: auto; text-align: left; margin: 0 8px 0 0; } }
+@media (max-width: 1080px) { .player-header { flex-direction: column; gap: 15px; } .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; } .player-header-right { justify-content: flex-start; } .player-stat { flex-basis: auto; text-align: left; margin: 0 8px 0 0; } }
 
 .ep-chip:disabled { flex-direction: column; gap: 2px; cursor: not-allowed; background: var(--bg-inset); color: var(--text-secondary); }
 .ep-lock-label { display: block; font-size: 10px; line-height: 1.2; font-weight: 400; }
@@ -650,6 +650,7 @@
 .layout-portrait .player-container { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .layout-portrait .player-header { position: relative; margin: 0; }
 .layout-portrait .player-title { display: none; }
+.layout-portrait .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; }
 .layout-portrait .player-header-right { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 8px; }
 .layout-portrait .player-header-right .player-stat { display: none; }
 .layout-portrait .player-management { flex-shrink: 0; max-height: 35%; overflow: auto; }
@@ -691,7 +692,8 @@
 
 .player-download-quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
 .player-download-quality .input-field { width: auto; max-width: 100%; min-height: 31px; padding: 5px 8px; font-size: 12px; }
-.player-download-quality-hint { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary); font-size: calc(12px * var(--font-scale, 1)); line-height: 1.6; }
+.player-download-quality-hint { color: var(--text-secondary); font-size: calc(12px * var(--font-scale, 1)); line-height: 1.7; }
+.player-header > .player-download-quality-hint { flex: 1 1 320px; max-width: 560px; margin: 0 0 0 auto; }
 
 .player-rate-notice {
   position: absolute;

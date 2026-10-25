@@ -1266,8 +1266,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <Play size={22} />
           <h2>我的剧库</h2>
         </div>
+        <p className="player-download-quality-hint" id="player-online-quality-hint">自动、720P、1080P 都会保留。某一集片源不够时只临时播放该集的实际画面，自动播放下一集仍按所选清晰度重新取源。</p>
         <div className="player-header-right">
-          <p className="player-download-quality-hint" id="player-online-quality-hint">自动、720P、1080P 都会保留。某一集片源不够时只临时播放该集的实际画面，自动播放下一集仍按所选清晰度重新取源。</p>
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
           <button aria-pressed={cacheNext} className={`btn btn-outline ${cacheNext ? 'btn-autonext-on' : ''}`}
             disabled={qualityLoading || playbackSettingSaving}
