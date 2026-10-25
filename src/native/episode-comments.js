@@ -1,5 +1,6 @@
 const { createHash } = require('node:crypto');
 const { fetchPublicDetails } = require('./public-details');
+const danmaku = require('./danmaku');
 
 const NOTICE = '官网仅提供本集部分评论，暂未提供可用的公开翻页接口；更多评论请到红果短剧 App 查看。';
 
@@ -11,6 +12,10 @@ async function fetchEpisodeComments(options) {
       !Number.isInteger(limit) || limit < 1 || limit > 30) return { success: false, retryable: false, error: '评论请求编号或条数无效' };
   if (cursor !== null) return { success: false, retryable: false, source_limited: true, error: NOTICE };
   const details = await fetchPublicDetails(seriesId, episodeId);
+  if (!details.success && (details.status === 302 || details.status === 404)) {
+    const preview = await danmaku.fetchCommentPreview({ seriesId, episodeId, limit });
+    if (preview.success && preview.items.length) return preview;
+  }
   if (!details.success) return details;
   const seen = new Set();
   const items = [];

@@ -22,7 +22,7 @@ function publicFailure(error) {
   const message = timedOut ? '公开评论加载超时，请重试'
     : error?.response ? `公开评论加载失败（HTTP ${Number.isInteger(status) ? status : '错误'}）`
       : (typeof error?.message === 'string' && error.message ? error.message : '公开评论加载失败，请重试');
-  return { retryable, message };
+  return { retryable, message, status: Number.isInteger(status) ? status : 0 };
 }
 const count = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 
@@ -75,7 +75,7 @@ async function fetchPublicDetails(seriesId, vid = '') {
       return data;
     } catch (error) {
       const failure = publicFailure(error);
-      return { success: false, retryable: failure.retryable, sourceUrl: url, error: failure.message };
+      return { success: false, retryable: failure.retryable, status: failure.status, sourceUrl: url, error: failure.message };
     } finally { pending.delete(url); }
   });
   pending.set(url, request);

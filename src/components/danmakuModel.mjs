@@ -128,26 +128,9 @@ export function resizeDanmaku(state, before, after) {
   return true;
 }
 
-// Only fully departed comments enter the replay queue; active comments are never cloned.
+// 飞出画面就结束。不再放回复用队列，避免同一条在时间轴走完或评论很少时不停重播。
 export function retireDanmaku(state, reducedMotion) {
-  state.replayQueue ??= [];
-  state.items = state.items.filter(item => {
-    if (reducedMotion ? item.age < 6 : item.x + item.width > 0) return true;
-    if (!reducedMotion && !state.replayQueue.some(old => old.content === item.content)) state.replayQueue.push(item);
-    return false;
-  });
-}
-
-export function takeDanmakuReplay(state, options, pending = 0, currentTime = Infinity) {
-  const { settings, reducedMotion } = options;
-  if (reducedMotion) return undefined;
-  const { lanes } = danmakuLayout(options);
-  const target = { sparse: 1, normal: 3, dense: Math.max(6, lanes * 2) }[settings.density];
-  if (state.items.length + pending >= target) return undefined;
-  const index = state.replayQueue.findIndex(item =>
-    (!item.entry || item.entry.time <= currentTime) && !commentIsBlocked(item.content, settings) &&
-    !state.items.some(active => active.content === item.content));
-  return index < 0 ? undefined : state.replayQueue.splice(index, 1)[0];
+  state.items = state.items.filter(item => (reducedMotion ? item.age < 6 : item.x + item.width > 0));
 }
 
 // 本集评论没有视频时间点。节奏按这一集的种子打散，换集就换一套间隔、轨道和速度。
@@ -305,8 +288,6 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     const full = typeof comment === 'string' ? comment : comment.content;
     if (!commentIsBlocked(full, settings)) { content = full; break; }
   }
-  const fromReplay = !content;
-  if (fromReplay) content = takeDanmakuReplay(state, { width, height, settings, reducedMotion, bottomInset })?.content;
   if (!content) {
     state.cursor = nextCursor;
     return changed;
@@ -318,10 +299,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
     const y = top + lane * lineHeight;
     if (commentLaneOpen(state, lane, y, lineHeight, width, textWidth) && foreignClear(obstacles, y, lineHeight, width, textWidth)) open.push(lane);
   }
-  if (!open.length) {
-    if (fromReplay) state.replayQueue?.unshift({ content });
-    return changed;
-  }
+  if (!open.length) return changed;
   state.cursor = nextCursor;
   const lane = open[Math.floor(roll(state) * open.length)];
   const y = top + lane * lineHeight;

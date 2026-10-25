@@ -1,4 +1,4 @@
-// 时间轴弹幕与本集评论是两层。评论层每帧读时间轴的位置，避免快慢不同时互相盖住。
+// 时间轴和本集评论各写各的层。读取时传入自己的层名，只拿另一层的位置，避免把自己当成障碍往前推。
 const layers = new Map();
 
 export function syncDanmakuLayer(name, items) {

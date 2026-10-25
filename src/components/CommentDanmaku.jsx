@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DanmakuLine from './DanmakuLine';
-import { foreignDanmaku } from './danmakuSpace.mjs';
+import { foreignDanmaku, syncDanmakuLayer, clearDanmakuLayer } from './danmakuSpace.mjs';
 import { DEFAULT_DANMAKU_SETTINGS, normalizeDanmakuSettings, createCommentFeed, commentIsBlocked, commentFetchBlocked, commentFailureAction, acceptCommentPage, advanceDanmaku, danmakuSeed, resizeDanmaku } from './danmakuModel.mjs';
+import { measureDanmakuText } from './danmakuEmoji.mjs';
 import './CommentDanmaku.css';
 
 const STORAGE_KEY = 'hongguo:comment-danmaku:v1';
@@ -93,7 +94,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     state.items = state.items.filter(item => !commentIsBlocked(item.content, settings));
     let nextY = 12;
     for (const item of [...state.items].sort((a, b) => a.y - b.y)) {
-      item.width = (Array.from(item.text).length + 1) * settings.fontSize;
+      item.width = measureDanmakuText(item.text, settings.fontSize);
       item.y = Math.max(item.y, nextY);
       nextY = item.y + settings.fontSize + 12;
     }
@@ -106,7 +107,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     let width = layer.clientWidth;
     let height = layer.clientHeight;
     const controls = layer.parentElement?.querySelector('.player-controls-bar');
-    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), seed: danmakuSeed(feed.seriesId, feed.episodeId), obstacles: foreignDanmaku('timeline') });
+    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), seed: danmakuSeed(feed.seriesId, feed.episodeId), obstacles: foreignDanmaku('comments') });
     const reset = () => {
       state.items = [];
       state.replayQueue = [];
@@ -125,6 +126,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
       const delta = previous ? Math.min((now - previous) / 1000, 0.1) * video.playbackRate : 0.001;
       previous = now;
       if (advanceDanmaku(state, comments, delta, options())) setItems([...state.items]);
+      syncDanmakuLayer('comments', state.items);
       paint();
       frame = requestAnimationFrame(tick);
     };
@@ -145,7 +147,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
     observer.observe(layer);
     const events = { playing: start, play: start, seeked: start, canplay: start, pause: stop, ended: stop, waiting: start, seeking: start, emptied };
     Object.entries(events).forEach(([name, handler]) => video.addEventListener(name, handler));
-    return () => { stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
+    return () => { clearDanmakuLayer('comments'); stop(); observer.disconnect(); Object.entries(events).forEach(([name, handler]) => video.removeEventListener(name, handler)); };
   }, [running, available, comments, settings, reducedMotion, source, videoRef, feed]);
 
   if (!running) return null;

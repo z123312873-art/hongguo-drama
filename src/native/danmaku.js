@@ -33,6 +33,7 @@
 
 const axios = require('axios');
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const sign = require('./danmaku-sign');
 
 const BASE_URL = 'https://api5-normal-sinfonlineb.fqnovel.com';
@@ -405,6 +406,51 @@ function present(result, items, limit) {
  * @returns {Promise<{success:boolean, source:string, items:Array<{time:number,text:string,color:string,mode:string}>, notice:string, error:string}>}
  *          按时间升序；任何异常都转成 `success:false` + 中文说明，不抛出。
  */
+// 公开播放页把未开放的分集转走时，本集评论改读这一集自己的评论接口。
+// 只往后再要几段，凑满上限就停，不把整集时间轴都拉下来。
+async function fetchCommentPreview(options = {}) {
+  const seriesId = typeof options.seriesId === 'string' ? options.seriesId.trim() : '';
+  const episodeId = typeof options.episodeId === 'string' ? options.episodeId.trim() : '';
+  const limit = options.limit === undefined ? 30 : options.limit;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(episodeId) || !Number.isInteger(limit) || limit < 1 || limit > 30) {
+    return { success: false, retryable: false, items: [], error: '评论请求编号或条数无效' };
+  }
+  const transport = options.transport;
+  const now = options.now;
+  const random = options.random;
+  try {
+    let start = 0;
+    let duration = EFFECTIVE_DURATION_MS;
+    let cursorText = '';
+    const seen = new Set();
+    const items = [];
+    for (let page = 0; page < 6 && items.length < limit; page++) {
+      if (page > 0) await new Promise(resolve => setTimeout(resolve, PAGE_GAP_MS));
+      const payload = await requestWindow({ vid: episodeId, bookId: seriesId, start, duration, cursor: cursorText, transport, now, random });
+      const parsed = parsePage(payload, episodeId);
+      for (const item of parsed.items) {
+        const content = cleanControl(item.text).replace(/\s+/g, ' ').trim();
+        if (!content || content.length > MAX_TEXT_LEN || seen.has(content)) continue;
+        seen.add(content);
+        items.push({ id: createHash('sha256').update(`${seriesId}\n${episodeId}\n${content}`).digest('hex'), content });
+        if (items.length >= limit) break;
+      }
+      if (items.length >= limit || parsed.nextMs == null || parsed.nextMs <= start) break;
+      start = parsed.nextMs;
+      cursorText = parsed.cursorText || '';
+      duration = Math.min(Math.max(duration, start + EFFECTIVE_DURATION_MS), MAX_DURATION_MS);
+    }
+    if (!items.length) return { success: false, retryable: true, items: [], error: '本集评论接口没有返回可显示的内容' };
+    return {
+      success: true, series_id: seriesId, episode_id: episodeId, items, total: items.length,
+      next_cursor: null, has_more: false, source_limited: true,
+      notice: '公开网页没有这一集的评论，已改显示本集评论接口返回的部分内容',
+    };
+  } catch {
+    return { success: false, retryable: true, items: [], error: '本集评论接口暂时不可用，请重试' };
+  }
+}
+
 async function fetchDanmaku(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) {
     return finalize({ seriesId: '', vid: '', items: [], error: '弹幕请求无效' });
@@ -603,6 +649,7 @@ function resetDanmakuCache() {
 
 module.exports = {
   fetchDanmaku,
+  fetchCommentPreview,
   // 测试与复用需要的内部件
   parsePage,
   normalizeColor,

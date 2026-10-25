@@ -260,7 +260,7 @@ test('all three comment densities emit more distinct comments while keeping thei
 });
 
 
-test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停有效', () => {
+test('少量评论滚出后不轮播，追加的新评论仍会播出，屏蔽和暂停有效', () => {
   const state = { items: [], cursor: 0, nextId: 0, cooldown: 0 };
   const comments = ['甲', '乙', '丙'];
   const runtime = { width: 500, height: 300, settings: { ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', speed: 2 }, reducedMotion: false };
@@ -269,7 +269,8 @@ test('少量评论滚出后轮播，追加的新评论优先，屏蔽和暂停�
     assert.ok(state.items.length <= 8, `不能一次铺满: ${frame}`);
     assert.equal(new Set(state.items.map(item => item.content)).size, state.items.length);
   }
-  assert.ok(state.nextId > comments.length);
+  assert.equal(state.nextId, comments.length);
+  assert.equal(state.items.length, 0, '三条都飞出后应停住');
   comments.push('新内容');
   let sawNew = false;
   for (let frame = 0; frame < 300; frame++) {

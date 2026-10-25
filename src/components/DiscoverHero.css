@@ -28,21 +28,21 @@
 }
 .discover-hero-poster {
   position: absolute;
-  right: 7%;
-  bottom: 0;
-  height: 112%;
-  width: auto;
-  max-width: 34%;
-  aspect-ratio: 3 / 4;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
   object-fit: cover;
-  object-position: center top;
-  border-radius: 14px 14px 0 0;
-  box-shadow: 0 16px 40px #00000055;
+  object-position: 72% center;
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 34%, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 34%, #000 100%);
 }
 .discover-hero-shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, #1a1412f2 0%, #1a1412c7 38%, #1a141240 68%, #1a141214 100%);
+  background: linear-gradient(90deg, #1a1412f7 0%, #1a1412d0 32%, #1a141273 58%, #1a141214 100%);
 }
 .discover-hero-copy {
   position: relative;
@@ -132,8 +132,12 @@
 .discover-hero-dots button:focus-visible { outline-offset: 1px; }
 
 @container hero (max-width: 760px) {
-  .discover-hero-poster { right: 0; height: 100%; max-width: none; width: 100%; border-radius: 0; opacity: .45; }
-  .discover-hero-shade { background: linear-gradient(180deg, #1a141266 0%, #1a1412e6 58%, #1a1412f2 100%); }
+  .discover-hero-poster {
+    object-position: center 18%;
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+  }
+  .discover-hero-shade { background: linear-gradient(180deg, #1a14124d 0%, #1a1412d6 58%, #1a1412f5 100%); }
   .discover-hero-copy { max-width: none; padding: 16px 16px 46px; }
 }
 @container hero (max-height: 250px) {
@@ -144,5 +148,9 @@
 
 .layout-portrait .discover-hero { height: clamp(200px, 32vh, 280px); margin-bottom: 16px; }
 .layout-portrait .discover-hero-copy { max-width: none; }
-.layout-portrait .discover-hero-poster { right: 0; width: 100%; max-width: none; height: 100%; border-radius: 0; opacity: .4; }
-.layout-portrait .discover-hero-shade { background: linear-gradient(180deg, #1a14125c, #1a1412f0 70%); }
+.layout-portrait .discover-hero-poster {
+  object-position: center 18%;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+}
+.layout-portrait .discover-hero-shade { background: linear-gradient(180deg, #1a14124d, #1a1412f2 72%); }

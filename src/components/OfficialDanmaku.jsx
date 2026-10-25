@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { commentIsBlocked, resizeDanmaku } from './danmakuModel.mjs';
 import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus } from './danmakuOfficial.mjs';
 import DanmakuLine from './DanmakuLine';
-import { syncDanmakuLayer, clearDanmakuLayer } from './danmakuSpace.mjs';
+import { syncDanmakuLayer, clearDanmakuLayer, foreignDanmaku } from './danmakuSpace.mjs';
 import './CommentDanmaku.css';
 
 /**
@@ -148,7 +148,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     let { width, height } = layoutRef.current || { width: layer.clientWidth, height: layer.clientHeight };
     layoutRef.current = { width, height };
     const controls = layer.parentElement?.querySelector('.player-controls-bar');
-    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8) });
+    const options = () => ({ width, height, settings, reducedMotion, bottomInset: Math.max(76, (controls?.clientHeight || 0) + 8), obstacles: foreignDanmaku('timeline') });
     const paint = () => state.items.forEach(item => {
       const node = nodes.current.get(item.id);
       if (node) node.style.transform = `translate3d(${Math.round(item.x)}px, ${Math.round(item.y)}px, 0)`;

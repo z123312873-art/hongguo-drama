@@ -42,6 +42,29 @@ axios.get = async (url, options) => {
   assert.equal(calls, 1, 'reuse the existing bounded public-details cache');
   assert.equal((await fetchEpisodeComments({ seriesId, episodeId: '7503780577347128382' })).success, false,
     'a mismatched episode cannot leak the old comments');
+  const danmaku = require('./danmaku');
+  const previousPreview = danmaku.fetchCommentPreview;
+  danmaku.fetchCommentPreview = async (request) => ({
+    success: true, series_id: request.seriesId, episode_id: request.episodeId,
+    items: [{ id: 'locked-comment', content: '锁定分集的评论' }], total: 1,
+    next_cursor: null, has_more: false, source_limited: true, notice: '公开网页没有这一集的评论',
+  });
+  axios.get = async () => {
+    const error = new Error('Redirect');
+    error.response = { status: 302 };
+    throw error;
+  };
+  const lockedId = '7503780574541123001';
+  const locked = await fetchEpisodeComments({ seriesId, episodeId: lockedId, cursor: null, limit: 30 });
+  assert.equal(locked.success, true);
+  assert.equal(locked.episode_id, lockedId);
+  assert.equal(locked.items[0].content, '锁定分集的评论');
+  assert.equal(locked.source_limited, true);
+  danmaku.fetchCommentPreview = async () => ({ success: false, items: [] });
+  const stillFailed = await fetchEpisodeComments({ seriesId, episodeId: '7503780574541123002', cursor: null, limit: 30 });
+  assert.equal(stillFailed.success, false);
+  assert.match(stillFailed.error, /302/);
+  danmaku.fetchCommentPreview = previousPreview;
   let started = 0;
   let releaseFirst;
   const episodeHtml = id => `window._ROUTER_DATA=${JSON.stringify({ loaderData: { player: {

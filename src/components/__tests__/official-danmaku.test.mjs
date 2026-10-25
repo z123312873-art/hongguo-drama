@@ -165,11 +165,11 @@ test('快进跳转：不把中间整段弹幕一次性倒到屏幕上', () => {
   const state = makeFeed().animation;
   const list = Array.from({ length: 200 }, (_, index) => at(index + 1, `弹幕${index + 1}`));
   playTo(state, list, 0, 2, options());
-  const resumeAt = lowerBoundTime(list, 150);
+  const resumeAt = lowerBoundTime(list, 145);
   advanceTimedDanmaku(state, list, 150, 0.016, options());
-  // 单帧最多投放 MAX_EMIT_PER_FRAME 条，绝不能因为快进而把 1~150 秒的弹幕全倒出来
+  // 单帧最多投放有限条，绝不能因为快进而把 1~150 秒的弹幕全倒出来。
   assert.ok(state.items.length <= 4, `快进后单帧投放应受限，实际 ${state.items.length}`);
-  assert.ok(state.cursor >= resumeAt, '光标应至少推进到快进后的位置');
+  assert.ok(state.cursor >= resumeAt, '光标应落在仍算新鲜的窗口内');
   assert.ok(state.cursor <= resumeAt + 4, '光标不应越过快进位置批量消费');
 });
 
@@ -346,29 +346,34 @@ test('backward seek never duplicates a comment that is still visible', () => {
 });
 
 
-test('少量时间轴弹幕轮播补空档，新到点优先且不提前或同屏重复', () => {
+test('少量时间轴弹幕只播放一次，空档保持空白，新到点仍优先', () => {
   const state = makeFeed().animation;
   const list = [at(0, '甲'), at(0.2, '乙'), at(0.4, '丙'), at(20, '新内容')];
   const runtime = options({ ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', speed: 2 }, { width: 500, height: 300 });
-  const seen = new Set();
-  let replayed = false;
+  const emitted = new Map();
+  const seenIds = new Set();
+  let quiet = false;
   for (let frame = 0; frame < 2400; frame++) {
     const time = frame / 60;
     advanceTimedDanmaku(state, list, time, 1 / 60, runtime);
-    if (time > 1) assert.ok(state.items.length > 0, `不能空屏: ${time}`);
     assert.equal(new Set(state.items.map(item => item.content)).size, state.items.length);
     for (const item of state.items) {
       assert.ok(item.entry.time <= time);
-      if (!seen.has(item.id)) { if (item.entry === list[0] && item.id > 0) replayed = true; seen.add(item.id); }
+      if (!seenIds.has(item.id)) {
+        seenIds.add(item.id);
+        emitted.set(item.entry, (emitted.get(item.entry) || 0) + 1);
+      }
+    }
+    if (time > 8 && time < 19) {
+      if (!state.items.length) quiet = true;
+      assert.ok(state.items.every(item => item.entry !== list[3]), '未到点的弹幕不能提前补上');
     }
     if (time > 20.1 && time < 20.2) assert.ok(state.items.some(item => item.entry === list[3]));
   }
-  assert.ok(replayed);
+  assert.ok(quiet, '前面几条飞完后应留下空档，而不是循环重播');
+  assert.equal(emitted.size, list.length);
+  for (const count of emitted.values()) assert.equal(count, 1);
   assert.equal(state.cursor, list.length);
-  runtime.settings = { ...runtime.settings, blockedWords: '甲,乙,丙,新内容' };
-  state.items = [];
-  playTo(state, list, 40, 50, runtime);
-  assert.equal(state.items.length, 0, '轮播不得绕过屏蔽词');
 });
 
 test('密集模式新弹幕供应充足时不轮播', () => {
@@ -386,12 +391,12 @@ test('密集模式新弹幕供应充足时不轮播', () => {
 });
 
 
-test('轮播遇到快进、倒退和缓冲保留在屏内容，暂停不补发', () => {
+test('跳转和缓冲保留在屏内容，暂停不补发已经飞过的弹幕', () => {
   const state = makeFeed().animation;
   const list = [at(0, '甲'), at(0.2, '乙'), at(0.4, '丙')];
   const runtime = options({ ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', speed: 2 }, { width: 500, height: 300 });
   playTo(state, list, 0, 8, runtime);
-  assert.ok(state.nextId > 3);
+  assert.equal(state.nextId, 3);
   const ids = state.items.map(item => item.id);
   advanceTimedDanmaku(state, list, 50, 0.016, runtime);
   assert.ok(ids.every(id => state.items.some(item => item.id === id)));
@@ -404,60 +409,57 @@ test('轮播遇到快进、倒退和缓冲保留在屏内容，暂停不补发',
   assert.equal(state.nextId, nextId);
 });
 
-test('稀疏真实时间点从52秒续播立即补空档，不提前投放未来内容', () => {
+test('稀疏真实时间点从空档续播时不补历史，也不提前投放', () => {
   const list = [25.484, 64.009, 78.148, 78.694].map((time, i) => at(time, `真实${i}`));
   const state = makeFeed().animation;
   const runtime = options({ ...DEFAULT_DANMAKU_SETTINGS, density: 'dense' });
   advanceTimedDanmaku(state, list, 52, 0, runtime);
   assert.equal(state.items.length, 0, '静止首帧不补发');
-  advanceTimedDanmaku(state, list, 52.016, 0.016, runtime);
-  assert.equal(state.items.length, 1, '续播不用空等64秒');
-  assert.equal(state.items[0].entry, list[0]);
-  playTo(state, list, 52.032, 63.5, runtime);
-  assert.ok(state.items.length > 0);
-  assert.ok(state.items.every(item => item.entry === list[0]), '未来条目不得提前进入回放');
+  playTo(state, list, 52.016, 63.5, runtime);
+  assert.equal(state.items.length, 0, '已经过去的弹幕不再循环补空档');
   playTo(state, list, 63.516, 64.1, runtime);
-  assert.ok(state.items.some(item => item.entry === list[1]), '新到点内容优先');
+  assert.ok(state.items.some(item => item.entry === list[1]), '到点内容仍会播出');
+  assert.ok(state.items.every(item => item.entry.time >= 64 && item.entry.time <= 64.1));
 });
 
-test('重新开启和空屏跳转只补少量去重历史，保留现有轨迹与回放队列', () => {
+test('重新开启和空屏跳转不回放历史，静止帧也不补发', () => {
   const list = [at(0.1, '早期'), at(0.2, '早期'), at(0.3, '屏蔽'), ...Array.from({ length: 20 }, (_, i) => at(1 + i, `历史${i}`)), at(80, '未来')];
   const runtime = options({ ...DEFAULT_DANMAKU_SETTINGS, density: 'dense', blockedWords: '屏蔽' });
   const state = makeFeed().animation;
   advanceTimedDanmaku(state, list, 0.5, 0.016, runtime);
   assert.deepEqual(state.items.map(item => item.content), ['早期']);
-  assert.equal(state.replayQueue.length, 0, '重复内容只准备一次');
-  Object.assign(state, { lastTime: undefined, items: [], replayQueue: [] }); // component disable/enable reset
+  Object.assign(state, { lastTime: undefined, items: [] });
   advanceTimedDanmaku(state, list, 52, 0.016, runtime);
-  assert.equal(state.items.length, 1);
-  assert.ok(state.items.length + state.replayQueue.length <= 6, '不能整段复制历史');
-  assert.ok([...state.items, ...state.replayQueue].every(item => item.content !== '屏蔽' && item.entry.time < 52));
-  const visible = state.items[0], queued = [...state.replayQueue];
+  assert.equal(state.items.length, 0, '空档不能把已飞过的历史再铺上来');
   advanceTimedDanmaku(state, list, 60, 0, runtime);
-  assert.equal(state.items[0], visible);
-  assert.deepEqual(state.replayQueue, queued);
-  state.items = []; state.replayQueue = [];
-  advanceTimedDanmaku(state, list, 30, 0.016, runtime);
-  assert.equal(state.items.length, 1, '空屏倒退也能补已到点历史');
+  assert.equal(state.items.length, 0);
+  playTo(state, list, 80, 80.05, runtime);
+  assert.deepEqual(state.items.map(item => item.content), ['未来']);
 });
 
-test('历史补空档沿用密度目标且缓冲、减少动态效果不补发', () => {
+test('空档续播和减少动态效果都不补发已经过去的弹幕', () => {
   const list = Array.from({ length: 8 }, (_, i) => at(i, `历史${i}`));
-  const counts = [];
   for (const density of ['sparse', 'normal', 'dense']) {
     const state = makeFeed().animation;
     const runtime = options({ ...DEFAULT_DANMAKU_SETTINGS, density });
     advanceTimedDanmaku(state, list, 52, 0.016, { ...runtime, emitting: false });
     assert.equal(state.items.length, 0);
-    assert.equal(state.replayQueue.length, 0);
     playTo(state, list, 52, 53, runtime);
-    counts.push(state.items.length);
+    assert.equal(state.items.length, 0, `${density} 不能循环历史`);
   }
-  assert.deepEqual(counts, [1, 3, 6]);
   const reduced = makeFeed().animation;
   advanceTimedDanmaku(reduced, list, 52, 0.016, options(DEFAULT_DANMAKU_SETTINGS, { reducedMotion: true }));
   assert.equal(reduced.items.length, 0);
-  assert.equal(reduced.replayQueue.length, 0);
+});
+
+test('时间轴让开仍在画面右侧的本集评论', () => {
+  const state = makeFeed().animation;
+  const runtime = options(DEFAULT_DANMAKU_SETTINGS, {
+    obstacles: [{ x: 760, y: 12, width: 80, speed: 1 }],
+  });
+  advanceTimedDanmaku(state, [at(0, '时间轴')], 0.016, 0.016, runtime);
+  assert.equal(state.items.length, 1);
+  assert.notEqual(state.items[0].y, 12);
 });
 
 test('丰富片源中途续播不为历史回放挤占新到点弹幕', () => {
@@ -468,7 +470,7 @@ test('丰富片源中途续播不为历史回放挤占新到点弹幕', () => {
   for (let frame = 0; frame < 600; frame++) {
     advanceTimedDanmaku(state, list, 52 + frame / 60, 1 / 60, runtime);
     for (const item of state.items) if (!ids.has(item.id)) {
-      assert.ok(item.entry.time >= 52, '供应充足时不补旧内容');
+      assert.ok(item.entry.time >= 47, '只保留跳转前仍算新鲜的几秒，不回放整段历史');
       assert.ok(!entries.has(item.entry), '供应充足时不轮播');
       entries.add(item.entry); ids.add(item.id);
     }
