@@ -8,6 +8,8 @@ import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
 import { uiScale } from '../uiScale.mjs';
+import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
+import DiscoverHero from './DiscoverHero';
 
 const pageCache = new Map();
 const PAGE_CACHE_TTL_MS = 60_000;
@@ -15,7 +17,7 @@ const LIST_TIMEOUT_MS = 25_000;
 
 // Window size only. The live grid's top moves when genre chips, skeletons, or
 // scrolling appear, and that was flipping a full window between one and two source pages.
-function readPosterCapacity() {
+function readPosterCapacity(reservedRows = 0) {
   try {
     const width = window.innerWidth;
     if (!Number.isFinite(width) || width <= 0) return { slots: 0, columns: 0 };
@@ -26,7 +28,7 @@ function readPosterCapacity() {
     const boxWidth = Math.max(0, width - sidebarWidth - 72);
     const boxHeight = Math.max(0, window.innerHeight - 300);
     return {
-      slots: posterSlots({ width: boxWidth, height: boxHeight, minCard }),
+      slots: posterSlots({ width: boxWidth, height: boxHeight, minCard, reservedRows }),
       columns: posterColumns({ width: boxWidth, minCard }),
     };
   } catch {
@@ -99,6 +101,10 @@ function Browse({ onNavigate, active = true }) {
   // 已下载统计（按 series_id -> 已下载集数）
   const [downloadedMap, setDownloadedMap] = useState({});
   const [toast, setToast] = useState(null);
+  const [heroItems, setHeroItems] = useState([]);
+  const [heroReady, setHeroReady] = useState(false);
+  const heroRequest = useRef(0);
+  const reserveRows = source === 'hongguo' && (!heroReady || heroItems.length > 0) ? HERO_RESERVED_ROWS : 0;
 
   const showToast = useCallback((text, type = 'success') => {
     setToast({ text, type });
@@ -136,7 +142,7 @@ function Browse({ onNavigate, active = true }) {
     async (cat, gen, pg, forceRefresh = false) => {
       invalidateList();
       const request = listRequest.current;
-      const capacity = readPosterCapacity();
+      const capacity = readPosterCapacity(reserveRows);
       const slots = cushionedSlots(capacity.slots, capacity.columns);
       const key = JSON.stringify([sourceRevision, source, cat, gen, pg, slots, pageSpan.current]);
       const cached = pageCache.get(key);
@@ -220,7 +226,7 @@ function Browse({ onNavigate, active = true }) {
         }
       }
     },
-    [invalidateList, source, sourceRevision]
+    [invalidateList, source, sourceRevision, reserveRows]
   );
 
   useEffect(() => {
@@ -242,6 +248,30 @@ function Browse({ onNavigate, active = true }) {
   }, [active, category, genre, page, loadList, sourcesLoading, mediaSources, invalidateList]);
 
   useEffect(() => {
+    if (source !== 'hongguo') {
+      heroRequest.current += 1;
+      setHeroItems([]);
+      setHeroReady(true);
+      return undefined;
+    }
+    const request = ++heroRequest.current;
+    setHeroReady(false);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electronAPI.browseList({ source: 'hongguo', category: 'hot-drama', page: 1 });
+        if (cancelled || request !== heroRequest.current) return;
+        setHeroItems(heroLineup(res?.success ? res.results : []));
+      } catch {
+        if (!cancelled && request === heroRequest.current) setHeroItems([]);
+      } finally {
+        if (!cancelled && request === heroRequest.current) setHeroReady(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [source, sourceRevision]);
+
+  useEffect(() => {
     if (!active || page !== 1 || !results.length) return undefined;
     let timer;
     const onResize = () => {
@@ -249,7 +279,7 @@ function Browse({ onNavigate, active = true }) {
       timer = setTimeout(() => {
         const perPage = Math.max(1, Math.round(results.length / pageSpan.current));
         const sourcePages = Math.max(1, (meta.totalPages || 1) * pageSpan.current);
-        const capacity = readPosterCapacity();
+        const capacity = readPosterCapacity(reserveRows);
         const next = pagesToFill(cushionedSlots(capacity.slots, capacity.columns), perPage, sourcePages);
         if (next > pageSpan.current) loadList(category, genre, 1, false);
       }, 300);
@@ -257,7 +287,7 @@ function Browse({ onNavigate, active = true }) {
     onResize();
     window.addEventListener?.('resize', onResize);
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
-  }, [active, page, results.length, category, genre, loadList, meta.totalPages]);
+  }, [active, page, results.length, category, genre, loadList, meta.totalPages, reserveRows]);
 
   const switchSource = (next) => {
     if (next === source) return;
@@ -427,6 +457,9 @@ function Browse({ onNavigate, active = true }) {
 
   return (
     <div className="browse-container">
+      {source === 'hongguo' && (heroItems.length > 0
+        ? <DiscoverHero items={heroItems} active={active} busy={detailLoading} onPlay={openSeries} />
+        : !heroReady && <div className="discover-hero discover-hero-pending" aria-hidden="true" />)}
       <div className="browse-header">
         <div className="browse-title">
           <div><h2>发现短剧</h2><p className="page-description">挑一部喜欢的，让故事继续。</p></div>

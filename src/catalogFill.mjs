@@ -9,14 +9,18 @@ export function posterColumns({ width, minCard = 150, gapX = 20 } = {}) {
   return Math.max(1, Math.floor((boxWidth + gapX) / (card + gapX)));
 }
 
-export function posterSlots({ width, height, minCard = 150, gapX = 20, gapY = 26, textHeight = 78 } = {}) {
+export function posterSlots({ width, height, minCard = 150, gapX = 20, gapY = 26, textHeight = 78, reservedRows = 0 } = {}) {
   const columns = posterColumns({ width, minCard, gapX });
   const boxWidth = Number(width);
   const boxHeight = Number(height);
   if (!columns || !(boxHeight > 0)) return 0;
   const cardWidth = (boxWidth - gapX * (columns - 1)) / columns;
   const cardHeight = cardWidth * 4 / 3 + textHeight;
-  const rows = Math.max(1, Math.floor((boxHeight + gapY) / (cardHeight + gapY)));
+  const fitted = Math.max(1, Math.floor((boxHeight + gapY) / (cardHeight + gapY)));
+  const reserve = Number(reservedRows);
+  const hold = Number.isFinite(reserve) && reserve > 0 ? Math.floor(reserve) : 0;
+  // A banner can reserve rows, but a short window still keeps one row of posters.
+  const rows = Math.max(1, fitted - hold);
   return columns * rows;
 }
 

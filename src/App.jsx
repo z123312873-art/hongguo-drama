@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react';
-import { Film, Download, Settings, Play, Home, Search, Clock } from './components/icons';
+import { Download, Settings, Play, Home, Search, Clock } from './components/icons';
 import HongguoDownload from './components/HongguoDownload';
 import DownloadManager from './components/DownloadManager';
 import SettingsPage from './components/Settings';
@@ -11,13 +11,11 @@ import { initializeTheme } from './theme';
 import { getScriptPreference, setScriptPreference, subscribeScript } from './scriptPreference.js';
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
-import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
 import AppUpdateNotice from './components/AppUpdateNotice';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
-  { id: 'feed', label: '热播推荐', icon: Film },
   { id: 'download', label: '搜索与下载', icon: Search },
   { id: 'player', label: '我的剧库', icon: Play },
   { id: 'history', label: '观看记录', icon: Clock },
@@ -81,7 +79,7 @@ export default function App() {
       setCalendarOpening('');
       pageRef.current = nextPage;
     }
-    if (nextPage === 'player' || nextPage === 'feed') setPlayerMounted(nextPage === 'player');
+    if (nextPage === 'player') setPlayerMounted(true);
     setVisited((pages) => pages.includes(nextPage) ? pages : [...pages, nextPage]);
     setPage(nextPage);
   };
@@ -92,8 +90,6 @@ export default function App() {
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
         return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onNavigate={navigate} /> : null;
-      case 'feed':
-        return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
       case 'calendar':
         return <ReleaseCalendar opening={calendarOpening} active={page === id} onPlay={async ({ seriesId }) => {
           if (pageRef.current !== 'calendar' || calendarOpeningRef.current) return;

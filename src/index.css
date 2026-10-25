@@ -134,8 +134,9 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 .layout-portrait .window-toolbar { padding: 0 16px; gap: 12px; }
 .layout-portrait.platform-mac .window-toolbar { padding-left: 104px; }
 .layout-portrait .toolbar-caption { display: none; }
-.layout-portrait .compact-navigation { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.compact-navigation button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 46px; padding: 5px 2px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font-size: calc(10px * var(--font-scale, 1)); white-space: nowrap; }
+.layout-portrait .compact-navigation { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.compact-navigation button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 0; min-height: 46px; padding: 5px 2px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font-size: calc(10px * var(--font-scale, 1)); white-space: nowrap; }
+.compact-navigation button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .compact-navigation button:hover { background: var(--bg-inset); }
 .compact-navigation button[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .layout-portrait .main-content { padding: 20px 18px 28px; }

@@ -80,6 +80,14 @@ function decodeHtml(value) {
   });
 }
 
+function cleanIntroduction(value) {
+  const plain = typeof value === 'string'
+    ? decodeHtml(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+  if (plain.length < 12) return '';
+  return plain.slice(0, 280);
+}
+
 function parseRanking(html, category, page, sourceUrl) {
   const text = value => decodeHtml(String(value).replace(/<[^>]*>/g, ' ')).trim();
   let data;
@@ -108,6 +116,7 @@ function parseRanking(html, category, page, sourceUrl) {
       episode_count: Array.isArray(item.episodeVids) ? item.episodeVids.length : 0,
       tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
+      introduction: cleanIntroduction(item.description || item.intro || item.series_intro || item.abstract),
       ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${id}` };
   };
@@ -120,10 +129,18 @@ function parseRanking(html, category, page, sourceUrl) {
       if (!heading || !article.includes(`/detail?series_id=${heading[1]}`)) continue;
       const cover = article.match(/<img\b[^>]*\bsrc=(?:"([^"]*)"|'([^']*)')/i);
       const tags = article.match(/<p\b[^>]*class=["'][^"']*pc-categories-[^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
+      let introduction = '';
+      for (const paragraph of article.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+        const plain = text(paragraph[1]).replace(/\s+/g, ' ').trim();
+        if (plain.length < 24 || plain.length <= introduction.length) continue;
+        if (/^[\d.,]+\s*[万亿]?\s*热度$/.test(plain)) continue;
+        introduction = plain;
+      }
       const item = normalize({ seriesId: heading[1], title: text(heading[2]),
         rank: article.match(/<span\b[^>]*>\s*(\d+)\s*<\/span>/i)?.[1],
         heatText: text(article).match(/[\d.,]+\s*[万亿]?\s*热度/)?.[0] || '',
         cover: cover ? decodeHtml(cover[1] ?? cover[2]) : '',
+        description: introduction,
         tags: tags ? Array.from(tags[1].matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi), tag => text(tag[1])) : [],
       });
       if (item) results.push(item);

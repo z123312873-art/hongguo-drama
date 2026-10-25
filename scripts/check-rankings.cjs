@@ -28,7 +28,11 @@ async function main() {
     assert.equal(data.results[0].rank, 1);
     assert.match(data.results[0].heat, /热度$/);
     if (heat) assert.equal(data.results[0].heat, heat);
-    if (category === 'hot-real-drama') assert(data.results[0].episode_count > 24, 'streamed JSON must supply full episode metadata');
+    if (category === 'hot-real-drama') {
+      assert(data.results[0].episode_count > 24, 'streamed JSON must supply full episode metadata');
+      assert.match(data.results[0].introduction, /顾娇/, 'streamed ranking JSON keeps the public description');
+    }
+    if (category === 'hot-drama') assert.match(data.results[0].introduction, /聚宝盆/, 'rendered ranking cards keep their description');
     assert.equal(data.results[0].url, `https://hongguoduanju.com/detail?series_id=${id}`);
     assert.equal(data.totalPages, 5);
     assert.equal(data.page, 1);
@@ -51,6 +55,7 @@ async function main() {
   assert.equal(renamed.success, true, 'semantic parsing must survive CSS hash changes');
   assert.equal(renamed.results[0].rank, 1);
   assert.equal(renamed.results[0].heat, '7173万热度');
+  assert.match(renamed.results[0].introduction, /聚宝盆/, 'description survives renamed style classes');
   const invalid = await browseList({ category: 'hot-drama', genre: '../../outside' });
   assert.equal(invalid.success, false);
   console.log('PASS rankings: four live-source fixtures, streamed JSON and semantic HTML, rank/heat, page 2, cache, retry and malformed data');

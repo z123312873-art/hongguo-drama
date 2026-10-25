@@ -37,9 +37,18 @@ const navigate = id => {
 const players = () => nodes().filter(node => node.type === './components/Player');
 render();
 navigate('player'); assert.equal(players().length, 1);
-navigate('feed'); assert.equal(players().length, 0);
-navigate('settings'); assert.equal(players().length, 0, 'leaving feed must not remount a hidden player');
-navigate('player'); assert.equal(players().length, 1, 'returning to library explicitly mounts its player');
-navigate('settings'); assert.equal(players().length, 1, 'ordinary navigation preserves the existing retained-player behavior');
-assert.equal(players()[0].props.active, false);
-console.log('PASS navigation: feed/library exclusivity without hidden playback remount');
+for (const id of ['browse', 'download', 'history', 'calendar', 'manager', 'settings']) {
+  navigate(id);
+  assert.equal(players().length, 1, `${id} keeps the library player mounted`);
+  assert.equal(players()[0].props.active, false);
+}
+navigate('player'); assert.equal(players().length, 1, 'returning to library keeps the same mounted player');
+assert.equal(players()[0].props.active, true);
+const labels = [];
+(function visit(node) {
+  if (!node || typeof node !== 'object') return;
+  node.children?.forEach(child => { if (typeof child === 'string') labels.push(child); else visit(child); });
+})(tree);
+assert.equal(labels.includes('热播推荐'), false, '热播推荐 is no longer a navigation destination');
+assert.ok(labels.includes('发现短剧'));
+console.log('PASS navigation: library player stays mounted across pages, without a hot-feed destination');
