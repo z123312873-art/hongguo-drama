@@ -310,13 +310,14 @@ test('评论超时会再试，空页面只再确认一次，永久错误立即�
   assert.match(flaky.error, /超时/);
 });
 
-test('时间轴不足才补本集评论，超过 60 条就不取', () => {
+test('时间轴不足 25 条才补本集评论，够了就不再补', () => {
   assert.equal(commentFillCount(0), 25);
   assert.equal(commentFillCount(2), 23);
   assert.equal(commentFillCount(24), 1);
   assert.equal(commentFillCount(25), 0);
-  assert.equal(commentFillCount(60), 0);
-  assert.equal(commentFillCount(61), 0);
+  assert.equal(commentFillCount(30), 0);
+  assert.equal(commentFillCount(35), 0);
+  assert.equal(commentFillCount(40), 0);
   assert.equal(commentFillCount(80.9), 0);
   assert.equal(commentFillCount(Number.NaN), 25);
   assert.equal(warmupCommentLimit({ skipped: true, items: [] }), 0);

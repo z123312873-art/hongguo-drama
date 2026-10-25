@@ -3,11 +3,11 @@
 // 时间轴投放与评论队列分开；两种来源共用视觉设置、轨道布局和窗口重排。
 
 import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
-import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku } from './danmakuModel.mjs';
+import { commentIsBlocked, danmakuLayout, keepDanmakuSpacing, retireDanmaku, TIMELINE_PLAYBACK_CAP } from './danmakuModel.mjs';
 
 export const DANMAKU_SOURCES = Object.freeze(['official', 'comments']);
 
-/** 默认走时间轴弹幕。不足约 25 条才补本集评论；超过 60 条不再取评论。 */
+/** 默认走时间轴弹幕。不足约 25 条才补本集评论；时间轴播放最多 35 条。 */
 export const DEFAULT_DANMAKU_SOURCE = 'official';
 
 export function normalizeDanmakuSource(value) {
@@ -65,6 +65,32 @@ export function lowerBoundTime(list, currentTime) {
     else high = mid;
   }
   return low;
+}
+
+// 超过 35 条时按时间均匀留下 35 条，开头和结尾都保留。不足则原样播放。
+export function selectTimelinePlayback(items) {
+  if (!Array.isArray(items)) return [];
+  const sorted = items.slice().sort((a, b) => (a?.time || 0) - (b?.time || 0));
+  const cap = TIMELINE_PLAYBACK_CAP;
+  if (sorted.length <= cap) return sorted;
+  const last = sorted.length - 1;
+  const used = new Set();
+  const indexes = [];
+  for (let slot = 0; slot < cap; slot++) {
+    let index = Math.round(slot * last / (cap - 1));
+    if (used.has(index)) {
+      let step = 1;
+      while (step <= last) {
+        if (index + step <= last && !used.has(index + step)) { index += step; break; }
+        if (index - step >= 0 && !used.has(index - step)) { index -= step; break; }
+        step += 1;
+      }
+    }
+    used.add(index);
+    indexes.push(index);
+  }
+  indexes.sort((a, b) => a - b);
+  return indexes.map(index => sorted[index]);
 }
 
 export function createOfficialFeed(seriesId, vid) {

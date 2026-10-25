@@ -2,7 +2,7 @@
 // https://github.com/dawei233/hongguo-drama
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { commentIsBlocked, resizeDanmaku } from './danmakuModel.mjs';
-import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus } from './danmakuOfficial.mjs';
+import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus, selectTimelinePlayback } from './danmakuOfficial.mjs';
 import DanmakuLine from './DanmakuLine';
 import { syncDanmakuLayer, clearDanmakuLayer, foreignDanmaku, publishTimeline } from './danmakuSpace.mjs';
 import './CommentDanmaku.css';
@@ -74,6 +74,8 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
 
   // 状态文案只有这一个出口：失败、部分成功、加载中、空集都必须经由它，
   // 否则某条路径会把"源坏了"显示成"本集没有弹幕"。
+  const playback = useMemo(() => selectTimelinePlayback(feed.danmaku), [feed, feed.loaded, feed.danmaku.length]);
+  const capped = feed.danmaku.length > playback.length;
   const status = resolveDanmakuStatus({
     source: 'official',
     supported,
@@ -82,9 +84,9 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
     visible,
     error: feed.error,
     loading: running && feed.loading,
-    notice: feed.notice,
+    notice: feed.notice || (capped ? `时间轴较多，这一集最多播放 ${playback.length} 条` : ''),
     loaded: feed.loaded,
-    count: feed.danmaku.length,
+    count: playback.length,
   });
 
   return {
@@ -96,6 +98,7 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
     settings,
     feed,
     comments: feed.danmaku,
+    playback,
     status,
     saveError,
     error: feed.error || (feed.partial ? feed.notice : ''),
@@ -120,7 +123,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
   const [items, setItems] = useState([]);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const { running, enabled, active, supported, settings, feed, status, error, loading } = danmaku;
-  const list = feed.danmaku;
+  const list = danmaku.playback || feed.danmaku;
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');

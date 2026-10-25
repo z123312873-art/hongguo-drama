@@ -5,7 +5,7 @@ import CommentDanmaku, { useCommentDanmaku } from './CommentDanmaku';
 import OfficialDanmaku, { useOfficialDanmaku } from './OfficialDanmaku';
 import { useDanmakuWarmup } from './danmakuWarmup.mjs';
 // 时间轴弹幕在 danmaku.js / OfficialDanmaku；本集评论在 episode-comments.js / CommentDanmaku。
-// 两条通路不要并成同一次请求。时间轴优先，不足约 25 条才补本集评论；超过 60 条不再取评论。
+// 两条通路不要并成同一次请求。时间轴优先，不足约 25 条才补本集评论；时间轴播放最多 35 条。
 // 时间轴失败说明保持原样，不能说成本集没有弹幕。下一集在当前集读完后先预载时间轴。
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
@@ -542,7 +542,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   // 换清晰度会短暂卸下当前地址。弹幕跟这一集走，不跟这一次片源地址走。
   const danmakuActive = active && showDanmakuControls && playbackRequested && Boolean(current?.vid) && !current.locked;
   // 时间轴弹幕：OfficialDanmaku / getEpisodeDanmaku，带 offset_time。时间到了才出现，这里不改它的投放。
-  // 本集评论：时间轴落地后，不足约 25 条才读取；超过 60 条不取。评论不绑固定秒数。
+  // 本集评论：时间轴落地后，不足约 25 条才读取。时间轴超过 35 条时只播放 35 条。评论不绑固定秒数。
   const showEpisodeComments = danmakuActive;
   const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: showEpisodeComments });
   const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive, preferences: commentDanmaku });

@@ -2,14 +2,13 @@ import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
 
 export const DEFAULT_DANMAKU_SETTINGS = Object.freeze({ opacity: 80, fontSize: 22, speed: 1, area: 'half', density: 'normal', sensitiveFilter: true, blockedWords: '' });
 
-// 一集画面大约 25 条。时间轴优先，不够的部分才用本集评论补。
-// 时间轴超过 60 条时不再取本集评论，避免短剧里两层一起涌出来。
+// 时间轴不够 25 条时，用本集评论补到大约 25 条。
+// 时间轴已经够 25 条就不再补；播放最多 35 条，避免一集里时间轴太密。
 export const DANMAKU_MIX_TARGET = 25;
-export const TIMELINE_ONLY_ABOVE = 60;
+export const TIMELINE_PLAYBACK_CAP = 35;
 
 export function commentFillCount(timelineCount) {
   const count = Number.isFinite(timelineCount) ? Math.max(0, Math.floor(timelineCount)) : 0;
-  if (count > TIMELINE_ONLY_ABOVE) return 0;
   return Math.max(0, DANMAKU_MIX_TARGET - count);
 }
 

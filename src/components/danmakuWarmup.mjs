@@ -32,7 +32,7 @@ export function useDanmakuWarmup({ seriesId, nextEpisodeId, enabled, timelineRea
     const startTimer = setTimeout(() => {
       if (cancelled) return;
       warmed.current.add(plan.key);
-      // 下一集先读时间轴。超过 60 条就不预载本集评论；不足的部分才按空档补。
+      // 下一集先读时间轴。够 25 条就不预载本集评论；不足的部分才按空档补。
       window.electronAPI?.getEpisodeDanmaku?.({ seriesId: plan.seriesId, vid: plan.episodeId, prefetch: true })
         ?.then?.(timeline => {
           if (cancelled) return 0;

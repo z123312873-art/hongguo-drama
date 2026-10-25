@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_DANMAKU_SOURCE, normalizeDanmakuSource, createOfficialFeed, appendOfficialPage,
-  advanceTimedDanmaku, lowerBoundTime, resolveDanmakuStatus,
+  advanceTimedDanmaku, lowerBoundTime, resolveDanmakuStatus, selectTimelinePlayback,
 } from '../danmakuOfficial.mjs';
 import { DEFAULT_DANMAKU_SETTINGS } from '../danmakuModel.mjs';
 import * as sharedModel from '../danmakuModel.mjs';
@@ -23,6 +23,22 @@ function playTo(state, list, from, to, optionsFor) {
     advanceTimedDanmaku(state, list, Math.min(time, to), step, optionsFor);
   }
 }
+
+test('时间轴超过 35 条时均匀留下 35 条，开头和结尾都在', () => {
+  assert.deepEqual(selectTimelinePlayback(null), []);
+  assert.equal(selectTimelinePlayback(Array.from({ length: 25 }, (_, index) => at(index, `少${index}`))).length, 25);
+  assert.equal(selectTimelinePlayback(Array.from({ length: 35 }, (_, index) => at(index, `满${index}`))).length, 35);
+  const many = Array.from({ length: 80 }, (_, index) => at(index * 1.5, `多${index}`));
+  const picked = selectTimelinePlayback(many);
+  assert.equal(picked.length, 35);
+  assert.equal(picked[0], many[0]);
+  assert.equal(picked.at(-1), many.at(-1));
+  for (let index = 1; index < picked.length; index++) assert.ok(picked[index].time > picked[index - 1].time);
+  assert.equal(many.length, 80);
+  const crowded = selectTimelinePlayback(Array.from({ length: 36 }, (_, index) => at(index, `边${index}`)));
+  assert.equal(crowded.length, 35);
+  assert.equal(new Set(crowded.map(item => item.text)).size, 35);
+});
 
 test('时间轴弹幕保留时间点，并把表情代码显示成 emoji', () => {
   const state = { items: [], nextId: 0, cursor: 0, cooldown: 0, lastTime: undefined, replayQueue: [] };
