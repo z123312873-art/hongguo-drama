@@ -34,6 +34,13 @@ assert.equal(availableRelease({ tag_name: 'v3.2' }, '3.1.0').version, '3.2');
 assert.equal(availableRelease({ tag_name: 'v3.2' }, '3.2.0'), null);
 assert.equal(availableRelease({ tag_name: 'v3.3' }, '3.2.0').version, '3.3');
 assert.equal(availableRelease({ tag_name: 'v3.3' }, '3.3.0'), null);
+const noted = availableRelease({ tag_name: 'v3.4', body: '摘要：修正彈幕重疊，時間軸最多播放 35 條\n\nSHA256：abc\nhttps://example.invalid/setup.exe' }, '3.3.0');
+assert.equal(noted.version, '3.4');
+assert.equal(noted.summary, '修正彈幕重疊，時間軸最多播放 35 條');
+assert.equal(availableRelease({ tag_name: 'v3.4', body: '修正彈幕重疊' }, '3.3.0').summary, '修正彈幕重疊');
+assert.equal(availableRelease({ tag_name: 'v3.4', body: '這個安裝檔說明很長，後面還有很多下載與校驗資訊，不適合塞進提醒。' }, '3.3.0').summary, undefined);
+assert.equal(availableRelease({ tag_name: 'v3.4', body: `摘要：${'字'.repeat(80)}` }, '3.3.0').summary.length, 42);
+assert.equal(availableRelease({ tag_name: 'v3.4', prerelease: true, body: '摘要：不該出現' }, '3.3.0'), null);
 for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) {
   assert(artifact.includes(`-${publicVersion}-`), 'Download filenames must contain the two-part release version');
   assert(!artifact.includes('${version}'), 'Raw internal versions must not leak into download filenames');
