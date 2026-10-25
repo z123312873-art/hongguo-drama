@@ -27,4 +27,4 @@
 .history-empty { padding: 64px 20px; text-align: center; color: var(--text-secondary); }
 .history-empty h2 { margin: 16px 0 8px; color: var(--text-primary); }
 .history-empty .btn { margin-top: 20px; }
-@media (max-width: 900px) { .history-header { align-items: flex-start; flex-wrap: wrap; } .history-resume { gap: 12px; } .history-action { font-size: 12px; } .history-sequels { padding-left: 8px; } }
+@media (max-width: 900px) { .history-header { align-items: flex-start; flex-wrap: wrap; } .history-resume { gap: 12px; } .history-sequels { padding-left: 8px; } }

@@ -6,7 +6,7 @@ const app=new EventEmitter(),handlers={};
 Object.assign(app,{getVersion:()=> 'test',getPath:()=>root,commandLine:{appendSwitch(){}},requestSingleInstanceLock: () => true, whenReady:()=>({then(){}})});
 let permissionCalls=0;
 const native={fetchEpisodeList:async sid=>({series_id:sid,episodes:[{vid:sid+':2',vid_index:2,locked:true}]}),fetchPlayUrlSingle:async()=>{permissionCalls++;return {url:null,locked:true,error:'该集已锁定'};}};
-const hema={search:async()=>({success:true,results:[{series_id:'hema:1'}]})};
+const hema={search:async()=>({success:true,results:[{series_id:'hema:1',series_title:'剧名'}]})};
 const electron={app,ipcMain:{handle:(name,fn)=>handlers[name]=fn},protocol:{registerSchemesAsPrivileged(){}}};
 const context=vm.createContext({require:n=>n==='electron'?electron:n==='./src/native/hongguo'?native:n==='./src/native/hema'?hema:n==='./src/store'?{getSettings:()=>({root}),saveTasks(){},saveSeries(){}}:req(n),__dirname:path.dirname(file),process,Buffer,URL,Response,Request,Headers,AbortController,setTimeout,clearTimeout,console:{log(){},warn(){},error(){}}});
 vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});

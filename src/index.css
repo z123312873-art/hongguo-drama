@@ -121,8 +121,8 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 .ep-missing { opacity: 1; border-style: solid; color: var(--text-secondary); }
 .ep-completed { border-color: var(--success-border); }
 .ep-downloading { border-color: var(--accent-border); }
-@media (max-width: 1060px) { .sidebar { width: 190px; } .sidebar-brand { padding-left: 16px; padding-right: 12px; } .main-content { padding: 28px 26px 40px; } .window-toolbar { padding: 0 26px; } .brand-text { font-size: calc(17px * var(--font-scale, 1)); } }
-@media (max-width: 760px) { .sidebar { width: 164px; } .brand-sub { display: none; } .sidebar-brand { gap: 8px; } .brand-text { font-size: calc(15px * var(--font-scale, 1)); } .logo { width: 29px; height: 29px; } .sidebar-item { padding: 10px 8px; gap: 8px; font-size: calc(12px * var(--font-scale, 1)); } .main-content { padding: 24px 20px; } .window-toolbar { padding: 0 20px; } h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-title h2 { font-size: calc(25px * var(--font-scale, 1)); } .folder-row, .input-group { flex-wrap: wrap; } .folder-row .input-field, .input-group .input-field { flex-basis: 100%; } }
+@media (max-width: 1060px) { .sidebar { width: 190px; } .sidebar-brand { padding-left: 16px; padding-right: 12px; } .main-content { padding: 28px 26px 40px; } .window-toolbar { padding: 0 26px; } }
+@media (max-width: 760px) { .sidebar { width: 164px; } .brand-sub { display: none; } .sidebar-brand { gap: 8px; } .logo { width: 29px; height: 29px; } .sidebar-item { padding: 10px 8px; gap: 8px; } .main-content { padding: 24px 20px; } .window-toolbar { padding: 0 20px; } .folder-row, .input-group { flex-wrap: wrap; } .folder-row .input-field, .input-group .input-field { flex-basis: 100%; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
 
 /* Portrait mode keeps every destination accessible without spending width on a sidebar. */

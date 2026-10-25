@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { publicDateKey, readLocalLibrary, removeLocalSeries, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import './ReleaseCalendar.css';
 
-export default function ReleaseCalendar({ onPlay }) {
+export default function ReleaseCalendar({ onPlay, opening = '', active = true }) {
   const [library, setLibrary] = useState(readLocalLibrary);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [chosenMonth, setChosenMonth] = useState('');
@@ -31,7 +31,7 @@ export default function ReleaseCalendar({ onPlay }) {
     <div className="release-row-actions">
       <button type="button" className="btn btn-sm btn-outline" aria-label={`${item.favorite ? '取消收藏' : '收藏'}《${item.title}》`} aria-pressed={item.favorite} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: !item.favorite }))}>{item.favorite ? '已收藏' : '收藏'}</button>
       <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title="仅移除本机收藏与日历记录，不删除视频文件" onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
-      <button type="button" className="btn btn-sm" disabled={!onPlay} aria-label={`播放《${item.title}》`} onClick={() => onPlay?.({ seriesId: item.id, title: item.title })}>播放</button>
+      <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => onPlay?.({ seriesId: item.id, title: item.title })}>{opening === item.id ? '打开中…' : '播放'}</button>
     </div>
   </li>;
 

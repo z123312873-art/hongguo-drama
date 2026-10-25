@@ -16,10 +16,34 @@ const { mount } = require('./check-player-resume.cjs');
   }
   const ui = mount({ props: { target: null, onNavigate() {} } }); await ui.flush();
   const panel = () => ui.find(n => n.props.id === 'player-management');
-  assert.equal(panel().props.hidden, true);
-  ui.button('管理').props.onClick(); await ui.flush();
-  assert.equal(panel().props.hidden, false, 'management opens real actions in either layout');
-  assert.ok(ui.button('播放设置')); ui.unmount();
+  assert.equal(panel().props.hidden, false, 'download actions remain visible below episode selection');
+  assert.ok(ui.button('下载未完成集')); assert.ok(ui.button('合并导出全集'));
+  let scrolled;
+  panel().props.ref.current = { scrollIntoView: options => { scrolled = options; } };
+  ui.button('下载管理').props.onClick();
+  for (const timer of ui.timers.values()) if (timer.delay === 0) timer.fn();
+  assert.equal(scrolled?.block, 'center', 'download shortcut scrolls to this page download tools');
+
+  for (const [label, key, next] of [['缓存下一集', 'cache_next_episode', false], ['兼容模式', 'compat_mode', false]]) {
+    assert.equal(ui.button(label).props['aria-pressed'], true);
+    await ui.button(label).props.onClick(); await ui.flush();
+    assert.equal(ui.button(label).props['aria-pressed'], next);
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.settingsSaved.at(-1))), { [key]: next }, 'save only the changed setting');
+  }
+  const beforeDelete = ui.settingsSaved.length;
+  ui.button('看完自动删').props.onClick(); await ui.flush();
+  assert.equal(ui.settingsSaved.length, beforeDelete, 'automatic file deletion requires confirmation');
+  await ui.button('开启自动删除').props.onClick(); await ui.flush();
+  assert.equal(ui.button('看完自动删').props['aria-pressed'], true);
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.settingsSaved.at(-1))), { auto_delete_watched: true });
+  ui.props.portrait = true; await ui.flush();
+  assert.equal(panel().props.hidden, false, 'portrait episode panel retains download actions');
+  ui.props.actionsHidden = true; await ui.flush(); assert.equal(panel().props.hidden, true);
+  ui.unmount();
+  const failed = mount({ apiOverrides: { saveSettings: async () => ({ success: false, error: 'disk full' }) } });
+  await failed.flush(); await failed.button('兼容模式').props.onClick(); await failed.flush();
+  assert.equal(failed.button('兼容模式').props['aria-pressed'], true, 'failed save must not show the new state');
+  assert.ok(failed.find(n => n.props.className?.includes('dm-toast'))); failed.unmount();
   for (const local of [false, true]) for (const autoNext of [false, true]) {
     const cleaned = [];
     const playing = mount({ local, settings: { auto_delete_watched: true },
@@ -61,5 +85,29 @@ const { mount } = require('./check-player-resume.cjs');
   await library.button('永久移除').props.onClick(); await library.flush();
   assert.deepEqual(forgotten, ['A']); assert.equal(library.prepares.length, 0, 'removing a record must not play its replacement');
   assert.equal(library.button('恢复已移除'), undefined); library.unmount();
+  const queued = [];
+  const rangeEpisodes = Array.from({ length: 20 }, (_, i) => ({ vid_index: i + 1, vid: `v${i + 1}`, status: i === 10 ? 'completed' : 'missing', locked: i === 9 }));
+  const ranges = mount({ episodeCount: 20, props: { target: { seriesId: 'A', vidIndex: 8, autoplay: false, ts: 1 } }, settings: { download_quality: '720p' }, apiOverrides: {
+    getSeriesEpisodes: async () => ({ success: true, data: { series_id: 'A', series_title: '测试剧', episodes: rangeEpisodes } }),
+    downloadSingleEpisode: async (...args) => { queued.push(args); return args[1] === 12 ? { success: false, error: '测试失败' } : { success: true, count: 1 }; },
+  } });
+  await ranges.flush();
+  assert.ok(ranges.button('下载本集'), 'current episode download button exists');
+  await ranges.button('下载本集').props.onClick(); await ranges.flush();
+  assert.deepEqual(queued, [['A', 8, '720p']]); queued.length = 0;
+  await ranges.button('下载后5集').props.onClick(); await ranges.flush();
+  assert.deepEqual(queued.map(args => args[1]), [9, 12, 13], 'next five excludes current, locked and completed, without extending the range');
+  const text = n => typeof n === 'string' || typeof n === 'number' ? String(n) : n?.children?.map(text).join('') || '';
+  assert.match(text(ranges.find(n => n.props.className === 'dm-toast dm-toast-success')), /2 集提交成功，1 集失败/);
+  queued.length = 0;
+  await ranges.button('下载后10集').props.onClick(); await ranges.flush();
+  assert.deepEqual(queued.map(args => args[1]), [9, 12, 13, 14, 15, 16, 17, 18]);
+  assert.ok(queued.every(args => args[0] === 'A' && args[2] === '720p'));
+  ranges.episode(18); await ranges.flush(); queued.length = 0;
+  await ranges.button('下载后5集').props.onClick(); await ranges.flush();
+  assert.deepEqual(queued.map(args => args[1]), [19, 20], 'range ends at the final episode');
+  ranges.episode(20); await ranges.flush();
+  assert.equal(ranges.button('下载后10集').props.disabled, true);
+  ranges.unmount();
   console.log('PASS library waits for intent; explicit playback, management, cleanup and permanent record removal');
 })().catch(error => { console.error(error); process.exitCode = 1; });

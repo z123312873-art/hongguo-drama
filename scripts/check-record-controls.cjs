@@ -29,6 +29,7 @@ function fixture() {
       useMemo: fn => { cursor++; return fn(); },
       useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(fn); } },
     };
+    react.useLayoutEffect = react.useEffect;
     const component = load(file, { ...imports, react }).default;
     const render = () => { cursor = 0; tree = component(props); effects.splice(0).forEach(fn => fn()); };
     const nodes = () => { const result = []; const visit = n => { if (!n || typeof n !== 'object') return; result.push(n); n.children?.forEach(visit); }; visit(tree); return result; };

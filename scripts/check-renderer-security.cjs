@@ -12,15 +12,22 @@ const app = new EventEmitter();
 Object.assign(app, { getVersion: () => 'test', getPath: () => '/synthetic', commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }) });
 class Window extends EventEmitter {
   constructor(options) {
-    super(); this.options = options;
+    super(); this.options = options; this.bounds = { x: 100, y: 100, width: options.width, height: options.height };
     this.webContents = new EventEmitter();
-    Object.assign(this.webContents, { mainFrame: { url: pathToFileURL(path.join(path.dirname(file), 'dist-react/index.html')).href }, setWindowOpenHandler: fn => { this.openHandler = fn; }, send() {} });
+    Object.assign(this.webContents, { mainFrame: { url: pathToFileURL(path.join(path.dirname(file), 'dist-react/index.html')).href }, setWindowOpenHandler: fn => { this.openHandler = fn; }, send() {}, setZoomFactor: value => { this.zoomFactor = value; } });
   }
   isDestroyed() { return false; }
+  getContentSize() { return [this.bounds.width, this.bounds.height]; }
+  getBounds() { return { ...this.bounds }; }
+  getNormalBounds() { return this.getBounds(); }
+  isFullScreen() { return false; }
+  isMaximized() { return false; }
+  setMinimumSize() {}
+  setBounds(bounds) { this.bounds = { ...bounds }; this.emit('resize'); }
   setMenuBarVisibility() {}
   loadFile() {}
 }
-const electron = { app, BrowserWindow: Window, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, protocol: { registerSchemesAsPrivileged() {} }, shell: { openExternal: async url => { opened.push(url); } } };
+const electron = { app, BrowserWindow: Window, screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) }, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, protocol: { registerSchemesAsPrivileged() {} }, shell: { openExternal: async url => { opened.push(url); } } };
 const context = vm.createContext({ require: name => name === 'electron' ? electron : name === './src/store' ? { setErrorHandler() {}, getSettings: () => ({}) } : req(name), __dirname: path.dirname(file), process, Buffer, URL, AbortController, setTimeout, clearTimeout, console: { log() {}, warn() {}, error() {} } });
 vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
 context.createWindow();
@@ -29,6 +36,21 @@ const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame 
 const failures = [];
 async function check(name, fn) { try { await fn(); } catch (error) { failures.push(`${name}: ${error.message}`); } }
 (async () => {
+  await check('window scaling follows native events and layout IPC', async () => {
+    assert.equal(win.zoomFactor, 1);
+    for (const name of ['resize', 'enter-full-screen', 'leave-full-screen', 'did-finish-load']) {
+      win.bounds.width = 1470;
+      win.zoomFactor = 2;
+      (name === 'did-finish-load' ? win.webContents : win).emit(name);
+      assert.equal(win.zoomFactor, 1, name);
+    }
+    assert.equal((await handlers['set-window-layout'](event, 'portrait')).success, true);
+    assert.equal(win.zoomFactor, 1, 'portrait preserves font size');
+    win.emit('resize');
+    assert.equal(win.zoomFactor, 1, 'portrait resize keeps original scale');
+    assert.equal((await handlers['set-window-layout'](event, 'landscape')).success, true);
+    assert.equal(win.zoomFactor, 1, 'landscape restores bounds without changing font size');
+  });
   await check('sandbox enabled', () => assert.equal(win.options.webPreferences.sandbox, true));
   await check('trusted page can invoke IPC', async () => assert.equal((await handlers['get-app-info'](event)).version, 'test'));
   await check('foreign window rejected', async () => assert.rejects(async () => handlers['get-app-info']({ sender: {}, senderFrame: event.senderFrame }), /窗口请求无效/));

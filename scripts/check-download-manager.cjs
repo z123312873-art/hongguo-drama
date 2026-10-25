@@ -171,6 +171,18 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     await assert.doesNotReject(() => ui.button('仅删除记录').props.onClick(), 'delete rejection must become visible feedback'); await ui.flush();
     assert.ok(ui.text().includes('删除失败示例')); assert.ok(rows(ui)[0].props.className.includes('selected')); ui.unmount();
   });
+  for (const deleteFiles of [false, true]) await test(`delete persistence failure shows actual released bytes and retained records: files=${deleteFiles}`, async () => {
+    const ui = mount({ getDownloadTasks: async () => [task(1, 'completed')], deleteTasksWithFiles: async () => ({ success: false, count: 0, freed: deleteFiles ? 1024 : 0, failed: 0, error: '任务记录保存失败，原记录已保留' }) });
+    try {
+      await ui.flush(); rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
+      if (deleteFiles) { ui.find(n => n.props.className === 'dm-confirm-check').children.find(n => n.type === 'input').props.onChange({ target: { checked: true } }); ui.render(); }
+      await ui.button(deleteFiles ? '删除任务和文件' : '仅删除记录').props.onClick(); await ui.flush();
+      assert.match(ui.text(), /已移除 0 个任务记录/);
+      assert.ok(ui.text().includes(deleteFiles ? '已释放 1.0 KB' : '已释放 0 B'));
+      assert.match(ui.text(), /任务记录保存失败，原记录已保留/);
+      assert.ok(rows(ui)[0].props.className.includes('selected'));
+    } finally { ui.unmount(); }
+  });
   await test('merge cancellation only acknowledges the request and exposes failure', async () => {
     let fail = false;
     const ui = mount({ getMergeTasks: async () => [runningMerge()], cancelMerge: async () => fail ? { success: false, error: '取消请求失败' } : { success: true } }); await ui.flush();

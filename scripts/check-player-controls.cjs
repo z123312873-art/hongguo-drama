@@ -334,6 +334,9 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     documentListeners.get('fullscreenchange')(); render();
     movePointer(); assert.ok(!hidden());
     leavePointer(); assert.ok(hidden(), `${mode}: leaving the player hides immediately without advancing time`);
+    stageListeners.get('pointermove')({ screenX: pointerX, screenY: 100, movementX: 20, movementY: 0 }); render();
+    assert.ok(!hidden(), `${mode}: returning to the same stage coordinate after real outside movement reveals controls`);
+    leavePointer();
     advance(); render(); assert.ok(hidden(), `${mode}: the old idle timer cannot reveal controls after leaving`);
     movePointer(); assert.ok(!hidden(), `${mode}: returning with real movement reveals controls`);
     media.pause(); render(); leavePointer(); assert.ok(!hidden(), `${mode}: paused controls remain accessible on leave`);

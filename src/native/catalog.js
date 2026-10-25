@@ -6,7 +6,8 @@ const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
 const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama', 'hot-ai-drama']);
 const TIMEOUT_MS = 10000;
 const MAX_PAGE_BYTES = 8 * 1024 * 1024;
-const CACHE_MS = 30000;
+// 分类页与热播页共用同一份目录缓存；30 秒过短会让每次切页都直连来源。
+const CACHE_MS = 120000;
 const cache = new Map();
 const pending = new Map();
 

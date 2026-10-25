@@ -11,7 +11,8 @@ function fixture(platform = 'darwin', options = {}) {
   const store = { getSettings: () => ({ root }), setErrorHandler: fn => state.storage = fn, saveTasks() {},
     saveMergeTasks: tasks => state.mergeSaves.push(JSON.parse(JSON.stringify(tasks))) };
   class Window extends EventEmitter {
-    constructor() { super(); windows.push(this); this.webContents = new EventEmitter(); this.webContents.setWindowOpenHandler = () => {}; }
+    constructor(options) { super(); this.options = options; windows.push(this); this.webContents = new EventEmitter(); this.webContents.setWindowOpenHandler = () => {}; this.webContents.setZoomFactor = value => { this.zoomFactor = value; }; }
+    getContentSize() { return [this.options.width, this.options.height]; }
     setMenuBarVisibility() {} loadFile() {} isDestroyed() { return false; }
   }
   const axios = Object.assign(async config => {
@@ -50,6 +51,7 @@ const checks = [
   ['Windows main close requests normal quit even when a hidden search window survives', async () => {
     const h = fixture('win32');
     h.context.createWindow();
+    assert.equal(h.windows[0].zoomFactor, 1, 'main window initializes default font size');
     h.context.getSearchWindow(true);
     let prevented = false;
     h.windows[0].emit('close', { preventDefault: () => prevented = true });

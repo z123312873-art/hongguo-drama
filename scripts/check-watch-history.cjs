@@ -62,3 +62,74 @@ for (const metadata of [undefined, { duration: Infinity, ended: true }, { durati
 const early = recordPlayback(null, finalSeries, 3, 5, 1300, { duration: 100, ended: true });
 assert.equal(listHistory([finalSeries], { last: early })[0].completed, false, '不在片尾不能标记完成');
 console.log('PASS completion evidence: final episode end, replay persistence, new episodes, legacy and invalid metadata');
+
+const { test } = require('node:test');
+const vm = require('node:vm');
+const { transformSync } = require('esbuild');
+const historySource = transformSync(fs.readFileSync(require('node:path').join(__dirname, '../src/components/WatchHistory.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
+
+function mountHistory({ missing = false, playError = '', resolveError = '', locked = false, acknowledgeError = '' } = {}) {
+ const slots = [], effects = [], calls = [], acknowledgements = [];
+ let cursor = 0, tree;
+ const react = {
+  createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) }),
+  useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
+  useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
+  useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((value, j) => !Object.is(value, slots[i][j]))) { slots[i] = deps; effects.push(fn); } },
+ };
+ react.useLayoutEffect = react.useEffect;
+ const row = { series_id: 'A', series_title: '原剧', total: 9, vid_index: 3, hasUpdates: true, unreadEpisodes: 1, sequels: [{ series_id: 'B', series_title: '续作' }] };
+ const api = {
+  getWatchHistory: async () => ({ success: true, results: [row] }),
+  playSeries: async payload => {
+   calls.push(['play', JSON.parse(JSON.stringify(payload))]);
+   if (playError) return { success: false, error: playError };
+   if (missing) return { success: false, code: 'SERIES_NOT_FOUND', error: '档案已移除' };
+   return { success: true };
+  },
+  searchResolve: async id => {
+   calls.push(['resolve', id]);
+   if (resolveError) return { success: false, error: resolveError };
+   missing = false;
+   return { success: true, data: { episodes: [{ vid_index: 1, locked: true }, { vid_index: 2, locked }] } };
+  },
+  acknowledgeWatchUpdates: async (...args) => {
+   acknowledgements.push(JSON.parse(JSON.stringify(args)));
+   return acknowledgeError ? { success: false, error: acknowledgeError } : { success: true };
+  },
+ };
+ const module = { exports: {} };
+ vm.runInNewContext(historySource, { module, exports: module.exports, require: name => name === 'react' ? react : {}, window: { electronAPI: api } });
+ const render = () => { cursor = 0; tree = module.exports.default({}); effects.splice(0).forEach(fn => fn()); };
+ const find = predicate => { const visit = node => { if (!node || typeof node !== 'object') return; if (predicate(node)) return node; return node.children?.map(visit).find(Boolean); }; return visit(tree); };
+ const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } };
+ render();
+ return { calls, acknowledgements, find, flush, open: async () => { await flush(); await find(node => node.type === 'button' && node.children.includes('续作')).props.onClick(); await flush(); }, error: () => find(node => node.props.role === 'alert')?.children[0]?.children[0] };
+}
+
+test('local sequel starts from the first playable episode without network or saved-position resume', async () => {
+ const ui = mountHistory({ resolveError: 'offline' }); await ui.open();
+ assert.deepEqual(ui.calls, [['play', { seriesId: 'B', vidIndex: 1 }]]);
+ assert.deepEqual(ui.acknowledgements, [['A', { total: 9, sequelIds: ['B'] }]]);
+ assert.equal(ui.error(), undefined);
+ assert.equal(ui.find(node => node.props['aria-label'] === '有更新'), undefined);
+});
+
+test('missing sequel archive resolves once and starts the first unlocked episode', async () => {
+ const ui = mountHistory({ missing: true }); await ui.open();
+ assert.deepEqual(ui.calls, [['play', { seriesId: 'B', vidIndex: 1 }], ['resolve', 'B'], ['play', { seriesId: 'B', vidIndex: 2 }]]);
+ assert.equal(ui.acknowledgements.length, 1); assert.equal(ui.error(), undefined);
+});
+
+test('sequel playback failure without the missing-archive code never resolves or acknowledges', async () => {
+ const ui = mountHistory({ playError: '未找到短剧档案，请重新打开详情' }); await ui.open();
+ assert.deepEqual(ui.calls, [['play', { seriesId: 'B', vidIndex: 1 }]]);
+ assert.equal(ui.acknowledgements.length, 0); assert.ok(ui.error());
+ assert.ok(ui.find(node => node.props['aria-label'] === '有更新'));
+});
+
+for (const options of [{ missing: true, resolveError: 'offline' }, { missing: true, locked: true }, { acknowledgeError: '保存失败' }]) test(`sequel failure retains unread updates: ${JSON.stringify(options)}`, async () => {
+ const ui = mountHistory(options); await ui.open();
+ assert.ok(ui.error()); assert.ok(ui.find(node => node.props['aria-label'] === '有更新'));
+ if (!options.acknowledgeError) assert.equal(ui.acknowledgements.length, 0);
+});

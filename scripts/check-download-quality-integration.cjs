@@ -13,7 +13,7 @@ const dirs = [];
 function fixture({ width = 1080, height = 1920, quality = 'auto' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-quality-'));
   dirs.push(root);
-  const handlers = {}, calls = [], app = new EventEmitter();
+  const handlers = {}, calls = [], events = [], app = new EventEmitter();
   let settings = { root, download_quality: quality }, saved;
   Object.assign(app, { getVersion: () => 'test', getPath: () => root,
     commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }) });
@@ -24,15 +24,15 @@ function fixture({ width = 1080, height = 1920, quality = 'auto' } = {}) {
       saveTasks: tasks => { saved = JSON.parse(JSON.stringify(tasks)); } } : req(n),
     __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} },
     process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout,
-    testReadStream: () => Readable.from([Buffer.alloc(200000)]), testDimensions: { w: width, h: height, duration: 12, codec: "h264" } });
+    testEvents: events, testReadStream: () => Readable.from([Buffer.alloc(200000)]), testDimensions: { w: width, h: height, duration: 12, codec: "h264" } });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   require('./fixtures/trusted-ipc.cjs')(context, handlers);
   const run = text => vm.runInContext(text, context);
-  run(`pumpQueue = () => {}; resolveFfmpeg = () => '/test/ffprobe';
+  run(`globalThis.originalProbeVideoInfo = probeVideoInfo; sendToRenderer = (channel, data) => testEvents.push({channel, data: {...data}}); pumpQueue = () => {}; resolveFfmpeg = () => '/test/ffprobe';
     probeVideoInfo = async () => testDimensions;
     requestMedia = async () => ({headers: {'content-length': '200000'}, data: testReadStream()});
     seriesRegistry = [{series_id:'1',series_title:'测试剧',episodes:[{vid:'11',vid_index:1},{vid:'12',vid_index:2}]}];`);
-  return { root, context, run, handlers, calls, saved: () => saved,
+  return { root, context, run, handlers, calls, events, saved: () => saved,
     setQuality: value => { settings.download_quality = value; } };
 }
 const payload = quality => ({ seriesId: '1', seriesTitle: '测试剧', episodes: [{vid:'11',vid_index:1}], ...(quality ? {quality} : {}) });
@@ -54,15 +54,83 @@ const checks = [
     assert.equal(h.saved().find(t => t.hongguoInfo.vid === '11').downloadQuality, '1080p');
     assert.equal(h.saved().find(t => t.hongguoInfo.vid === '12').downloadQuality, '720p');
   }],
-  ['1080 request rejects a real 720 file before publishing a completed file', async () => {
+  ['download accepts lower measured quality and reports it without an early failure', async () => {
     const h = fixture({ width:720, height:1280 });
     await h.handlers['hongguo-download-batch']({}, payload('1080p'));
     await h.run('executeHongguoDownload(downloadTasks[0])');
     const t = h.saved()[0];
-    assert.equal(t.status, 'failed');
-    assert.match(t.error, /720.*1080|1080.*720/);
-    assert.equal(fs.existsSync(t.savePath), false);
-    assert.equal(fs.existsSync(t.savePath + '.enc.tmp'), false);
+    assert.equal(t.status, 'completed', t.error);
+    assert.equal(t.downloadQuality, '1080p');
+    assert.equal(t.actualQuality, '720p');
+    assert.match(t.qualityNotice, /已下载更低质量.*720P.*1080P/);
+    assert.equal(h.events.some(e => e.channel === 'download-failed'),false);
+  }],
+  ['failed higher variants exhaust all tiers, including after four addresses, before reporting an error', async () => {
+    const h = fixture();
+    h.run(`hongguo.fetchPlayUrlSingle = async (_vid,_sid,options) => {
+      if (!options.allowLowerQuality) return {url:null,error:'1080 unavailable'};
+      const variants = Array.from({length:7},(_,i) => ({url:'https://media.example/'+i,width:i<5?1080:i===5?720:480,height:1920}));
+      return {...variants[0],variants};
+    }; requestMedia = async info => {
+      if (!info.url.endsWith('/6')) throw Object.assign(new Error('bad stream'),{mediaRetryable:true});
+      testDimensions = {w:480,h:854,duration:12,codec:'h264'};
+      return {headers:{'content-length':'200000'},data:testReadStream()};
+    };`);
+    await h.handlers['hongguo-download-batch']({},payload('1080p'));
+    await h.run('executeHongguoDownload(downloadTasks[0])');
+    assert.equal(h.saved()[0].status,'completed',h.saved()[0].error);
+    assert.equal(h.saved()[0].actualQuality,'480p');
+    const notices = h.events.filter(e=>e.channel==='download-progress'&&e.data.qualityNotice).map(e=>e.data.qualityNotice);
+    assert(notices.some(s=>/正在下载更低质量.*720P/.test(s)));
+    assert(notices.some(s=>/正在下载更低质量.*480P/.test(s)));
+    assert.equal(h.events.filter(e=>e.channel==='download-failed').length,0);
+  }],
+  ['all tiers unavailable reports one failure only after lower candidates were attempted', async () => {
+    const h = fixture();
+    h.run(`globalThis.attempts=[]; hongguo.fetchPlayUrlSingle = async () => ({url:'https://media.example/high',width:1080,height:1920,variants:[{url:'https://media.example/low',width:360,height:640}]});
+      requestMedia = async info => { attempts.push(info.url); throw new Error('invalid video'); };`);
+    await h.handlers['hongguo-download-batch']({},payload('1080p'));
+    await h.run('executeHongguoDownload(downloadTasks[0])');
+    assert.equal(h.saved()[0].status,'failed');
+    assert(h.run("attempts.includes('https://media.example/low')"));
+    assert.equal(h.events.filter(e=>e.channel==='download-failed').length,1);
+    assert.equal(fs.existsSync(h.saved()[0].savePath),false);
+  }],
+  ['disk errors and cancellation never trigger a lower-quality download', async () => {
+    for(const code of ['ENOSPC','EACCES','ENOTDIR','EMFILE','EBUSY','SECURITY_BLOCKED','ERR_CANCELED']) {
+      const h = fixture();
+      h.context.failureCode=code;
+      h.run(`globalThis.attempts=0; hongguo.fetchPlayUrlSingle = async () => ({url:'https://media.example/high',variants:[{url:'https://media.example/low',width:480,height:854}]});
+        requestMedia = async () => { attempts++; if(failureCode==='ERR_CANCELED') downloadTasks[0].cancelSource.cancel('stop'); throw Object.assign(new Error('stop'),{code:failureCode}); };`);
+      await h.handlers['hongguo-download-batch']({},payload('1080p'));
+      await h.run('executeHongguoDownload(downloadTasks[0])');
+      assert.equal(h.run('attempts'),1,code);
+      assert.equal(h.saved()[0].status,code==='ERR_CANCELED'?'stopped':'failed');
+    }
+  }],
+  ['missing probe tool stops without downloading lower candidates', async () => {
+    for (const tool of [null, '/nonexistent/hongguo-fixture-ffprobe']) {
+      const h = fixture(); h.context.probeTool = tool;
+      h.run(`globalThis.attempts=0; probeVideoInfo=originalProbeVideoInfo; resolveFfmpeg=()=>probeTool;
+        hongguo.fetchPlayUrlSingle=async()=>({url:'https://media.example/high',variants:[{url:'https://media.example/low',width:480,height:854}]});
+        requestMedia=async()=>{attempts++;return {headers:{'content-length':'200000'},data:testReadStream()};};`);
+      await h.handlers['hongguo-download-batch']({},payload('1080p'));
+      await h.run('executeHongguoDownload(downloadTasks[0])');
+      assert.equal(h.saved()[0].status,'failed');
+      assert.equal(h.run('attempts'),1);
+      assert.match(h.saved()[0].error,/工具/);
+    }
+  }],
+  ['lost files and interrupted or stopped tasks never retain a download notice', async () => {
+    const h = fixture({width:720,height:1280});
+    await h.handlers['hongguo-download-batch']({},payload('1080p'));
+    await h.run('executeHongguoDownload(downloadTasks[0])');
+    fs.unlinkSync(h.saved()[0].savePath);
+    const rows=await h.handlers['get-download-tasks']({});
+    assert.equal(rows[0].status,'failed'); assert.equal(rows[0].qualityNotice,'');
+    h.run(`store.getTasks = () => [{id:'interrupted',status:'downloading',qualityNotice:'正在下载更低质量片源'}, {id:'stopped',status:'stopped',qualityNotice:'正在下载更低质量片源'}]; loadDownloadTasks();`);
+    assert.equal(h.run('downloadTasks[0].qualityNotice'),'');
+    assert.equal(h.run('downloadTasks[1].qualityNotice'),'');
   }],
   ['unverifiable resolution fails closed for explicit quality', async () => {
     const h = fixture(); h.context.testDimensions = null;
