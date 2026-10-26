@@ -33,7 +33,7 @@ const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
 const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const seriesSearch = require('./src/native/series-search');
-const { fitWindowBounds, getWindowScale, saveWindowZoom } = require('./src/native/window-layout');
+const { fitWindowBounds, getWindowScale, saveWindowZoom, initialWindowSize, revealMaximized } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
 const { availableRelease, LATEST_API, LATEST_PAGE, RELEASES_URL, updateRedirectTag } = require('./src/native/app-update');
 const { fetchPublicDetails } = require('./src/native/public-details');
@@ -3997,11 +3997,13 @@ ipcMain.handle('set-window-layout', async (event, mode) => {
 function createWindow() {
   windowLayout = 'landscape';
   landscapeBounds = null;
+  const workArea = screen?.getPrimaryDisplay?.()?.workArea;
+  const limits = initialWindowSize(workArea);
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 750,
-    minWidth: 900,
-    minHeight: 620,
+    width: limits.width,
+    height: limits.height,
+    minWidth: limits.minWidth,
+    minHeight: limits.minHeight,
     title: APP_TITLE,
     ...(process.platform === 'darwin' ? {
       titleBarStyle: 'hiddenInset',
@@ -4016,14 +4018,11 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      paintWhenInitiallyHidden: true,
     },
   });
 
-  mainWindow.once('ready-to-show', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (typeof mainWindow.maximize === 'function' && mainWindow.isMaximized?.() !== true) mainWindow.maximize();
-    if (typeof mainWindow.show === 'function') mainWindow.show();
-  });
+  mainWindow.once('ready-to-show', () => revealMaximized(mainWindow));
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on('resize', syncMainWindowScale);
   mainWindow.on('enter-full-screen', syncMainWindowScale);

@@ -10,7 +10,7 @@ import { useDanmakuWarmup } from './danmakuWarmup.mjs';
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
 import SequelFinder from './SequelFinder';
-import * as nextSeason from '../native/next-season.js';
+import * as nextSeason from '../native/next-season.mjs';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';

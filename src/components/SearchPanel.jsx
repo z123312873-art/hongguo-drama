@@ -6,11 +6,11 @@ import { readSearchHistory, saveSearchTerm, removeSearchTerm, clearSearchHistory
 
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
-import * as scriptQuery from '../native/script-query.js';
+import { canonicalTitle } from '../chineseScript.mjs';
 
 export function rankSearchResults(results, keyword) {
-  const normalize = value => typeof scriptQuery.canonicalTitle === 'function'
-    ? scriptQuery.canonicalTitle(value)
+  const normalize = value => typeof canonicalTitle === 'function'
+    ? canonicalTitle(value)
     : String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
   const query = normalize(keyword), seen = new Set();
   return results.filter(item => {
