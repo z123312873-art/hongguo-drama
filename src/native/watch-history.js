@@ -1,3 +1,5 @@
+const { canonicalTitle } = require('./script-query');
+
 function totalEpisodes(series) {
   return Math.max(Number(series?.total) || 0, series?.episodes?.length || 0);
 }
@@ -45,13 +47,13 @@ function applyEpisodeUpdate(record, oldSeries, freshSeries, now = Date.now()) {
 }
 
 function seasonTitle(title) {
-  const text = String(title || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const text = canonicalTitle(title);
   const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两\d]+)[季部]|[（(]([一二三四五六七八九十百零两\d]+)[）)]|season(\d+))$/i);
   if (!match) return { base: text, season: 1, explicit: false };
   const value = match[2] || match[3] || match[4];
   let season = Number(value);
   if (!Number.isFinite(season)) {
-    const digits = {零:0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
+    const digits = {零:0,〇:0,一:1,二:2,两:2,兩:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
     let n = 0, digit = 0;
     for (const char of value) {
       if (char === '十' || char === '百') { n += (digit || 1) * (char === '十' ? 10 : 100); digit = 0; }
@@ -85,7 +87,10 @@ function findSequels(series, candidates) {
     seen.add(id);
     return true;
   }).sort((a, b) => seasonTitle(a.series_title).season - seasonTitle(b.series_title).season)
-    .slice(0, 10).map(candidate => ({ series_id: String(candidate.series_id), series_title: String(candidate.series_title) }));
+    .slice(0, 10).map(candidate => {
+      const cover = typeof candidate.cover === 'string' && /^https?:\/\//i.test(candidate.cover) ? candidate.cover : '';
+      return { series_id: String(candidate.series_id), series_title: String(candidate.series_title), ...(cover ? { cover } : {}) };
+    });
 }
 
 function sequelKeyword(series) { return seasonTitle(series.series_title).base; }

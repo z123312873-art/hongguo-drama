@@ -1,6 +1,7 @@
 const { seasonTitle, sourceOf, findSequels } = require('./watch-history');
+const { canonicalTitle } = require('./script-query');
 
-const normalizeTitle = title => String(title || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+const normalizeTitle = title => canonicalTitle(title);
 const score = (title, keyword) => title === keyword ? 0 : title.includes(keyword) ? 1 : 2;
 function rankedUnique(results, keyword) {
   const seen = new Set(), normalized = normalizeTitle(keyword);

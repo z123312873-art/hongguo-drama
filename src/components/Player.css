@@ -24,6 +24,8 @@
   font-weight: 700;
 }
 
+.player-title .series-picker-btn { flex-shrink: 0; }
+
 .player-header-right {
   display: flex;
   width: 100%;
@@ -64,7 +66,11 @@
   gap: 10px;
   flex: 1;
   min-width: 0;
+  flex-wrap: wrap;
 }
+
+.player-series-current > .sequel-finder { margin: 0; }
+.player-series-current > .sequel-finder .sequel-finder-results { flex-basis: 100%; }
 
 .player-series-label {
   font-size: calc(12px * var(--font-scale, 1));
@@ -386,6 +392,52 @@
   margin-bottom: 12px;
 }
 
+.season-handoff {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+}
+
+.season-handoff-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.season-handoff-card img {
+  width: 120px;
+  height: 168px;
+  object-fit: cover;
+  object-position: center 28%;
+  border-radius: 8px;
+  background: #111;
+}
+
+.season-handoff-card h3 {
+  margin: 6px 0;
+  font-size: calc(20px * var(--font-scale, 1));
+  line-height: 1.4;
+}
+
+.season-handoff-card p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.season-handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .player-video {
   width: 100%;
   height: 100%;
@@ -649,7 +701,8 @@
 .player-management[hidden] { display: none; }
 .layout-portrait .player-container { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .layout-portrait .player-header { position: relative; margin: 0; }
-.layout-portrait .player-title { display: none; }
+.layout-portrait .player-title { display: flex; }
+.layout-portrait .player-title h2 { display: none; }
 .layout-portrait .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; }
 .layout-portrait .player-header-right { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 8px; }
 .layout-portrait .player-header-right .player-stat { display: none; }

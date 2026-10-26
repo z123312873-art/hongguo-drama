@@ -1126,12 +1126,13 @@ const BROWSE_META_JS = `(() => {
 })()`;
 
 /** 隐藏搜索窗口串行嗅探；整个任务（含加载和读取）共用超时。 */
-async function runSniffOnUrl(url, label) {
+async function runSniffOnUrl(url, label, timeoutMs = SEARCH_TIMEOUT_MS) {
+  const budget = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : SEARCH_TIMEOUT_MS;
   // 同一窗口串行执行，避免并发导航互相打断
   const task = async () => {
     const win = getSearchWindow(true);
     // Reserve the last part of the deadline for empty-page details.
-    const pollDeadline = Date.now() + SEARCH_TIMEOUT_MS * 0.8;
+    const pollDeadline = Date.now() + budget * 0.8;
     let expired = false;
     const timeoutError = new Error('搜索超时，请稍后重试');
     const assertActive = () => {
@@ -1150,7 +1151,7 @@ async function runSniffOnUrl(url, label) {
         expired = true;
         if (!win.isDestroyed()) win.destroy();
         reject(timeoutError);
-      }, SEARCH_TIMEOUT_MS);
+      }, budget);
     });
     const sniff = async () => {
       console.log(`[${label}] 打开:`, url);
@@ -1211,7 +1212,9 @@ async function runSniffOnUrl(url, label) {
 }
 
 async function runSearchSniff(keyword) {
-  return runSniffOnUrl(`${SEARCH_SITE}/search/${encodeURIComponent(keyword)}`, 'Search');
+  return require('./src/native/hongguo-catalog-search').searchHongguoCatalog(keyword, {
+    sniff: (query) => runSniffOnUrl(`${SEARCH_SITE}/search/${encodeURIComponent(query)}`, 'Search', 8000),
+  });
 }
 
 // ===== 浏览：分类页（含题材筛选与分页）=====
@@ -4006,6 +4009,7 @@ function createWindow() {
     } : {}),
     autoHideMenuBar: true,
     backgroundColor: '#f5f6fa',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       zoomMode: 'isolated',
@@ -4015,6 +4019,11 @@ function createWindow() {
     },
   });
 
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (typeof mainWindow.maximize === 'function' && mainWindow.isMaximized?.() !== true) mainWindow.maximize();
+    if (typeof mainWindow.show === 'function') mainWindow.show();
+  });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on('resize', syncMainWindowScale);
   mainWindow.on('enter-full-screen', syncMainWindowScale);
