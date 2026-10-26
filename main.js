@@ -1222,7 +1222,6 @@ const BROWSE_CATEGORIES = [
   { slug: 'real-drama', label: '真人剧' },
   { slug: 'comic-drama', label: '漫剧' },
   { slug: 'ai-drama', label: 'AI剧' },
-  { slug: 'series-drama', label: '系列剧' },
   { slug: 'hot-drama', label: '综合热播榜', group: 'rank' },
   { slug: 'hot-real-drama', label: '真人热播榜', group: 'rank' },
   { slug: 'hot-comic-drama', label: '漫剧热播榜', group: 'rank' },

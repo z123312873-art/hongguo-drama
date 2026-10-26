@@ -12,8 +12,27 @@ import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
 
 const pageCache = new Map();
-const PAGE_CACHE_TTL_MS = 60_000;
+// Category and rank clicks swap this snapshot. A fresh one is not downloaded again.
+// The refresh button, a larger window that still needs more pages, or this age starts an update.
+const PAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
 const LIST_TIMEOUT_MS = 25_000;
+
+function snapshotKey(source, category, genre, page) {
+  return JSON.stringify([source, category || '', genre || '', Number(page) || 1]);
+}
+
+function readSnapshot(source, category, genre, page) {
+  const cached = pageCache.get(snapshotKey(source, category, genre, page));
+  return cached?.results?.length ? cached : null;
+}
+
+function writeSnapshot(source, category, genre, page, entry) {
+  const key = snapshotKey(source, category, genre, page);
+  pageCache.delete(key);
+  pageCache.set(key, entry);
+  if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+}
 
 // Window size only. The live grid's top moves when genre chips, skeletons, or
 // scrolling appear, and that was flipping a full window between one and two source pages.
@@ -47,7 +66,8 @@ function readPosterCapacity(reservedRows = 0) {
  */
 function Browse({ onNavigate, active = true }) {
   const [source, setSource] = useState('hongguo');
-  const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
+  const { sources: mediaSources, loading: sourcesLoading, error: sourcesError } = useMediaSources();
+  const sourceIds = mediaSources.map(item => item.id).join('|');
   const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState('real-drama');
   const [genre, setGenre] = useState('');
@@ -74,6 +94,8 @@ function Browse({ onNavigate, active = true }) {
   const toastTimer = useRef(null);
   const pageSpan = useRef(1);
   const spanWidth = useRef(0);
+  const reserveRowsRef = useRef(0);
+  const seenSourceIds = useRef(sourceIds);
 
   const invalidateList = useCallback(() => {
     listRequest.current++;
@@ -105,6 +127,7 @@ function Browse({ onNavigate, active = true }) {
   const [heroReady, setHeroReady] = useState(false);
   const heroRequest = useRef(0);
   const reserveRows = source === 'hongguo' && (!heroReady || heroItems.length > 0) ? HERO_RESERVED_ROWS : 0;
+  reserveRowsRef.current = reserveRows;
 
   const showToast = useCallback((text, type = 'success') => {
     setToast({ text, type });
@@ -142,27 +165,37 @@ function Browse({ onNavigate, active = true }) {
     async (cat, gen, pg, forceRefresh = false) => {
       invalidateList();
       const request = listRequest.current;
-      const capacity = readPosterCapacity(reserveRows);
+      const capacity = readPosterCapacity(reserveRowsRef.current);
       const slots = cushionedSlots(capacity.slots, capacity.columns);
-      const key = JSON.stringify([sourceRevision, source, cat, gen, pg, slots, pageSpan.current]);
+      const key = snapshotKey(source, cat, gen, pg);
       const cached = pageCache.get(key);
+      const haveCards = Boolean(cached?.results?.length);
       const fallbackUrl = source === 'hongguo'
         ? `https://hongguoduanju.com/${cat.startsWith('hot-') ? 'rank' : 'category'}/${encodeURIComponent(cat)}${gen ? `/${encodeURIComponent(gen)}` : ''}${pg > 1 ? `?page=${pg}` : ''}` : '';
       setUnsupported(false);
       setError('');
-      setResults(cached?.results || []);
-      setMeta(cached?.meta || { total: 0, totalPages: 0, genres: [] });
-      setSourceUrl(cached?.sourceUrl || fallbackUrl);
-      if (!forceRefresh && cached && Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS) {
+      if (haveCards) {
+        pageSpan.current = cached.pageSpan || 1;
+        setResults(cached.results);
+        setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(cached.sourceUrl || fallbackUrl);
+      }
+      const neededSpan = haveCards && pg === 1
+        ? pagesToFill(slots, cached.perPage || cached.results.length, cached.sourcePages || 1)
+        : 1;
+      const stale = !haveCards || Date.now() - cached.savedAt >= PAGE_CACHE_TTL_MS;
+      // A category click keeps the posters it already has. Only a short first page of a fresh list grows.
+      if (haveCards && !forceRefresh && (stale || neededSpan <= (cached.pageSpan || 1))) {
         setLoading(false);
         return;
       }
       setLoading(true);
       listTimer.current = setTimeout(() => {
         if (request !== listRequest.current) return;
+        if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
         invalidateList();
         setLoading(false);
-        setError(cached ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
+        setError(haveCards ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
       }, LIST_TIMEOUT_MS);
       try {
         const planned = sourcePageWindow(pg, pageSpan.current, Number.MAX_SAFE_INTEGER);
@@ -199,26 +232,27 @@ function Browse({ onNavigate, active = true }) {
           meta: { total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: res.hasMore === true && windowed.count < 2 },
           sourceUrl: res.sourceUrl || fallbackUrl,
           savedAt: Date.now(),
+          pageSpan: pageSpan.current,
+          perPage: firstResults.length,
+          sourcePages: reportedPages,
         };
-        if (!next.results.length && cached && res.unsupported !== true) {
+        if (!next.results.length && haveCards && res.unsupported !== true) {
           throw new Error(res.emptyMessage || '来源这次没有返回片单，请稍后重试。');
         }
         rememberCatalogTitles(next.results);
         setResults(next.results);
         setMeta(next.meta);
         setSourceUrl(next.sourceUrl);
-        if (next.results.length) {
-          pageCache.delete(key);
-          pageCache.set(key, next);
-          if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
-        } else {
+        if (next.results.length) writeSnapshot(source, cat, gen, pg, next);
+        else {
           pageCache.delete(key);
           setUnsupported(res.unsupported === true);
           setError(res.emptyMessage || '这一页没有取到内容，可重新加载或换分类。');
         }
       } catch (e) {
         if (request !== listRequest.current) return;
-        setError(`${cached ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
+        if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
+        setError(`${haveCards ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
       } finally {
         if (request === listRequest.current) {
           clearTimeout(listTimer.current);
@@ -226,7 +260,7 @@ function Browse({ onNavigate, active = true }) {
         }
       }
     },
-    [invalidateList, source, sourceRevision, reserveRows]
+    [invalidateList, source]
   );
 
   useEffect(() => {
@@ -236,16 +270,41 @@ function Browse({ onNavigate, active = true }) {
   useEffect(() => { if (active) loadDownloadedMap(); }, [active, loadDownloadedMap]);
 
   useEffect(() => {
-    invalidateList(); closeDetail(); pageCache.clear();
-    pageSpan.current = 1; spanWidth.current = 0;
-    setGenre(''); setPage(1); setResults([]); setMeta({ total: 0, totalPages: 0, genres: [] });
-    if (!mediaSources.some(item => item.id === source)) { setSource('hongguo'); setCategory('real-drama'); }
-  }, [sourceRevision, mediaSources, invalidateList, closeDetail]);
+    if (seenSourceIds.current === sourceIds) return;
+    seenSourceIds.current = sourceIds;
+    invalidateList();
+    closeDetail();
+    pageCache.clear();
+    heroRequest.current += 1;
+    pageSpan.current = 1;
+    spanWidth.current = 0;
+    setGenre('');
+    setPage(1);
+    setResults([]);
+    setMeta({ total: 0, totalPages: 0, genres: [] });
+    setSourceUrl('');
+    setError('');
+    setHeroItems([]);
+    setHeroReady(false);
+    if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory('real-drama'); }
+  }, [sourceIds, source, invalidateList, closeDetail]);
 
   useEffect(() => {
-    if (active && !sourcesLoading && mediaSources.some(item => item.id === source)) loadList(category, genre, page);
+    if (!active || !sourceIds.split('|').includes(source)) return undefined;
+    loadList(category, genre, page);
     return invalidateList;
-  }, [active, category, genre, page, loadList, sourcesLoading, mediaSources, invalidateList]);
+  }, [active, category, genre, page, loadList, source, sourceIds, invalidateList]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      const cached = readSnapshot(source, category, genre, page);
+      if (!cached || cached.holdUntil > Date.now() || Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS) return;
+      loadList(category, genre, page, true);
+    }, CATALOG_REFRESH_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [active, source, category, genre, page, loadList]);
 
   useEffect(() => {
     if (source !== 'hongguo') {
@@ -254,22 +313,41 @@ function Browse({ onNavigate, active = true }) {
       setHeroReady(true);
       return undefined;
     }
+    const cached = readSnapshot('hongguo', 'hot-drama', '', 1);
+    const lineup = heroLineup(cached?.results);
+    const fresh = lineup.length > 0 && Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS && !(cached.holdUntil > Date.now());
+    if (lineup.length) {
+      setHeroItems(lineup);
+      setHeroReady(true);
+      if (fresh) return undefined;
+    } else setHeroReady(false);
     const request = ++heroRequest.current;
-    setHeroReady(false);
     let cancelled = false;
     (async () => {
       try {
-        const res = await window.electronAPI.browseList({ source: 'hongguo', category: 'hot-drama', page: 1 });
+        const res = await window.electronAPI.browseList({ source: 'hongguo', category: 'hot-drama', page: 1, forceRefresh: lineup.length > 0 });
         if (cancelled || request !== heroRequest.current) return;
-        setHeroItems(heroLineup(res?.success ? res.results : []));
+        const results = res?.success && Array.isArray(res.results) ? res.results : [];
+        if (results.length) {
+          writeSnapshot('hongguo', 'hot-drama', '', 1, {
+            results,
+            meta: { total: res.total || results.length, totalPages: Number(res.totalPages) || 0, genres: [], hasMore: false },
+            sourceUrl: res.sourceUrl || 'https://hongguoduanju.com/rank/hot-drama',
+            savedAt: Date.now(),
+            pageSpan: 1,
+            perPage: results.length,
+            sourcePages: Number(res.totalPages) || 1,
+          });
+          setHeroItems(heroLineup(results));
+        } else if (!lineup.length) setHeroItems([]);
       } catch {
-        if (!cancelled && request === heroRequest.current) setHeroItems([]);
+        if (!cancelled && request === heroRequest.current && !lineup.length) setHeroItems([]);
       } finally {
         if (!cancelled && request === heroRequest.current) setHeroReady(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [source, sourceRevision]);
+  }, [source, sourceIds]);
 
   useEffect(() => {
     if (!active || page !== 1 || !results.length) return undefined;
@@ -289,6 +367,18 @@ function Browse({ onNavigate, active = true }) {
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
   }, [active, page, results.length, category, genre, loadList, meta.totalPages, reserveRows]);
 
+  const showSnapshot = (nextSource, cat, gen, pg) => {
+    const snap = readSnapshot(nextSource, cat, gen, pg);
+    if (snap?.pageSpan) pageSpan.current = snap.pageSpan;
+    else { pageSpan.current = 1; spanWidth.current = 0; }
+    setResults(snap?.results || []);
+    setMeta(snap?.meta || { total: 0, totalPages: 0, genres: [] });
+    setSourceUrl(snap?.sourceUrl || '');
+    setUnsupported(false);
+    setError('');
+    setLoading(!snap?.results?.length);
+  };
+
   const switchSource = (next) => {
     if (next === source) return;
     invalidateList();
@@ -297,32 +387,24 @@ function Browse({ onNavigate, active = true }) {
     setCategory('real-drama');
     setGenre('');
     setPage(1);
-    setResults([]);
-    setMeta({ total: 0, totalPages: 0, genres: [] });
-    setSourceUrl('');
-    setError('');
-    pageSpan.current = 1;
-    spanWidth.current = 0;
+    showSnapshot(next, 'real-drama', '', 1);
   };
 
   const switchCategory = (slug) => {
     if (slug === category) return;
     invalidateList();
-    setError('');
-    setMeta({ total: 0, totalPages: 0, genres: [] });
     setCategory(slug);
     setGenre('');
     setPage(1);
-    setResults([]);
+    showSnapshot(source, slug, '', 1);
   };
 
   const switchGenre = (slug) => {
     if (slug === genre) return;
     invalidateList();
-    setError('');
     setGenre(slug);
     setPage(1);
-    setResults([]);
+    showSnapshot(source, category, slug, 1);
   };
 
   const gotoPage = (p) => {
@@ -330,8 +412,8 @@ function Browse({ onNavigate, active = true }) {
     const next = Math.min(Math.max(1, p), max);
     if (next === page) return;
     invalidateList();
-    setError('');
     setPage(next);
+    showSnapshot(source, category, genre, next);
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -500,7 +582,6 @@ function Browse({ onNavigate, active = true }) {
       {sourcesError && <p className="browse-source-note" role="status">来源列表更新失败，暂用上次列表。可在设置重新保存来源后重试。</p>}
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
-      {source === 'hongguo' && category === 'series-drama' && <p className="browse-source-note">官网没有独立的系列剧榜。这里显示公开搜索中的系列剧，续集仍按剧名规则衔接，不会从第一季跳到后面的季。</p>}
 
       {/* 题材 chips */}
       {meta.genres.length > 0 && (

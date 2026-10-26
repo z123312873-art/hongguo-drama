@@ -6,8 +6,8 @@ const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
 const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama', 'hot-ai-drama']);
 const TIMEOUT_MS = 10000;
 const MAX_PAGE_BYTES = 8 * 1024 * 1024;
-// 分类页与热播页共用同一份目录缓存；30 秒过短会让每次切页都直连来源。
-const CACHE_MS = 120000;
+// Same window as the discover page. A manual refresh still bypasses this.
+const CACHE_MS = 10 * 60 * 1000;
 const cache = new Map();
 const pending = new Map();
 
@@ -202,7 +202,6 @@ async function fetchCatalogPage(url, signal, proxyLogin) {
 
 async function browseList(options = {}, proxyLogin) {
   const { category = 'real-drama', genre = '', page = 1, forceRefresh = false } = options || {};
-  if (category === 'series-drama') return require('./series-browse').browseSeriesDramas({ page, forceRefresh });
   const ranking = RANKINGS.has(category);
   if ((!CATEGORIES.has(category) && !ranking) || (genre && (!/^[a-z0-9-]+$/.test(genre) || ranking))) return { success: false, error: '无效的目录分类或题材' };
   const pg = Math.max(1, Number.parseInt(page, 10) || 1);

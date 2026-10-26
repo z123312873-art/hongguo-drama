@@ -103,9 +103,20 @@
 .sequel-finder-list .btn { white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .layout-portrait .sequel-finder { max-height: 30%; overflow-y: auto; }
 
-.series-picker-btn.open {
-  border-color: var(--accent);
-  color: var(--accent);
+.player-title .series-picker-btn.btn-primary,
+.player-title .series-picker-btn.btn-primary.open {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.player-title .series-picker-btn.btn-primary:hover:not(:disabled) {
+  color: #fff;
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.player-title .series-picker-btn .series-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
 }
 
 .series-count {

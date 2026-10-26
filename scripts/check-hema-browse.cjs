@@ -84,8 +84,8 @@ async function check() {
   const paging = browse.slice(browse.indexOf('  const gotoPage ='), browse.indexOf('  // ===== 打开某部剧'));
   for (const source of ['hema', 'xifan']) {
     let selectedPage = 1;
-    vm.runInNewContext(paging + '\ngotoPage(2);', { source, page: 1, meta: {hasMore:true,totalPages:0},
-      invalidateList() {}, setError() {}, setPage(value) { selectedPage = value; }, document: {querySelector:()=>null} });
+    vm.runInNewContext(paging + '\ngotoPage(2);', { source, category: '', genre: '', page: 1, meta: {hasMore:true,totalPages:0},
+      invalidateList() {}, setPage(value) { selectedPage = value; }, showSnapshot() {}, document: {querySelector:()=>null} });
     assert.equal(selectedPage, 2, source + ' 下一页必须改变当前页码');
   }
 

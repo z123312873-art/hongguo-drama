@@ -1346,7 +1346,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <h2>我的剧库</h2>
           <button
             aria-expanded={pickerOpen}
-            className={`btn btn-outline series-picker-btn ${pickerOpen ? 'open' : ''}`}
+            className={`btn btn-primary series-picker-btn ${pickerOpen ? 'open' : ''}`}
             onClick={() => setPickerOpen((v) => !v)}
           >
             切换短剧
