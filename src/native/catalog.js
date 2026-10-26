@@ -202,6 +202,7 @@ async function fetchCatalogPage(url, signal, proxyLogin) {
 
 async function browseList(options = {}, proxyLogin) {
   const { category = 'real-drama', genre = '', page = 1, forceRefresh = false } = options || {};
+  if (category === 'series-drama') return require('./series-browse').browseSeriesDramas({ page, forceRefresh });
   const ranking = RANKINGS.has(category);
   if ((!CATEGORIES.has(category) && !ranking) || (genre && (!/^[a-z0-9-]+$/.test(genre) || ranking))) return { success: false, error: '无效的目录分类或题材' };
   const pg = Math.max(1, Number.parseInt(page, 10) || 1);

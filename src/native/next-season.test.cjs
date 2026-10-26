@@ -31,10 +31,29 @@ test('traditional and simplified season titles stay in order across ten', () => 
 });
 
 test('main-process and renderer season parsers stay aligned', () => {
-  for (const title of ['誰讓這個文盲修仙的', '谁让这个文盲修仙的第二季', '從雜役到符仙人第十一季', '年轮（2024）', '双子房客第十季']) {
+  for (const title of ['誰讓這個文盲修仙的', '谁让这个文盲修仙的第二季', '從雜役到符仙人第十一季', '年轮（2024）', '双子房客第十季', '青铜门后Ⅰ', '老千2', '炼气3000层2', '剧名100']) {
     assert.deepEqual(cjsSeason.seasonTitle(title), esmSeason.seasonTitle(title), title);
     assert.equal(cjsSeason.sourceOf('10000011'), esmSeason.sourceOf('10000011'));
   }
+  assert.equal(cjsSeason.seasonTitle('青铜门后Ⅰ').season, 2);
+  assert.equal(cjsSeason.seasonTitle('青铜门后Ⅱ').season, 3);
+  assert.equal(cjsSeason.seasonTitle('剧名100').explicit, false);
+  assert.equal(cjsSeason.seasonTitle('年轮（2024）').explicit, false);
+});
+
+test('the next installment is the immediate one and stays on the same source', () => {
+  const current = { series_id: '7675302847793089560', series_title: '青铜门' };
+  const first = { series_id: '7660777963603889177', series_title: '青铜门后Ⅰ' };
+  const fourth = { series_id: '7680917056362925118', series_title: '青铜门后Ⅳ' };
+  const picked = immediateNextSeason(current, [fourth, { series_id: 'xifan:room:1', series_title: '青铜门后Ⅰ' }, first, { series_id: 'hema:9', series_title: '青铜门后Ⅰ' }]);
+  assert.equal(picked.series_id, first.series_id);
+  assert.equal(picked.season, 2);
+  assert.equal(immediateNextSeason(current, [fourth]), null);
+  const numbered = immediateNextSeason({ series_id: '10000031', series_title: '老千' }, [
+    { series_id: '10000035', series_title: '老千5' },
+    { series_id: '10000032', series_title: '老千2' },
+  ]);
+  assert.equal(numbered.series_id, '10000032');
 });
 
 test('a season finale is the highest episode, including a locked later episode', () => {

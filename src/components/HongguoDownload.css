@@ -9,6 +9,12 @@
 .card-header-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 16px; }
 .card-header-title svg { color: var(--text-secondary); }
 .input-group { display: flex; gap: 10px; align-items: center; }
+.search-suggest-wrap { position: relative; flex: 1; min-width: 0; }
+.search-suggest-list { position: absolute; z-index: 6; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 6px; list-style: none; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; max-height: 280px; overflow: auto; box-shadow: var(--shadow-md); }
+.search-suggest-list button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 0; background: transparent; text-align: left; padding: 8px 10px; color: var(--text-primary); border-radius: 6px; }
+.search-suggest-list button:hover { background: var(--bg-hover); }
+.search-suggest-list span { min-width: 0; overflow-wrap: anywhere; }
+.search-suggest-list small { color: var(--text-tertiary); flex-shrink: 0; }
 .input-group .btn { min-height: 40px; padding-left: 20px; padding-right: 20px; }
 .series-header { display: flex; flex-wrap: wrap; gap: 22px; justify-content: space-between; align-items: center; padding-bottom: 24px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
 .series-info { display: flex; align-items: center; gap: 16px; min-width: 0; }

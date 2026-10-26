@@ -500,6 +500,7 @@ function Browse({ onNavigate, active = true }) {
       {sourcesError && <p className="browse-source-note" role="status">来源列表更新失败，暂用上次列表。可在设置重新保存来源后重试。</p>}
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
+      {source === 'hongguo' && category === 'series-drama' && <p className="browse-source-note">官网没有独立的系列剧榜。这里显示公开搜索中的系列剧，续集仍按剧名规则衔接，不会从第一季跳到后面的季。</p>}
 
       {/* 题材 chips */}
       {meta.genres.length > 0 && (

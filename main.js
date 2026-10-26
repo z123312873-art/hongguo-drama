@@ -1222,6 +1222,7 @@ const BROWSE_CATEGORIES = [
   { slug: 'real-drama', label: '真人剧' },
   { slug: 'comic-drama', label: '漫剧' },
   { slug: 'ai-drama', label: 'AI剧' },
+  { slug: 'series-drama', label: '系列剧' },
   { slug: 'hot-drama', label: '综合热播榜', group: 'rank' },
   { slug: 'hot-real-drama', label: '真人热播榜', group: 'rank' },
   { slug: 'hot-comic-drama', label: '漫剧热播榜', group: 'rank' },
@@ -1278,10 +1279,16 @@ ipcMain.handle('browse-list', (_event, options) =>
       else callback();
     }));
 
+function catalogQuery(keyword) {
+  const typed = String(keyword || '').trim();
+  const simplified = require('./src/native/script-query').toSimplified(typed).trim();
+  return simplified || typed;
+}
+
 async function searchAtSource(keyword, options = {}) {
   if (String(options?.source).startsWith('custom:')) return require('./src/native/custom-source').searchSeries(keyword, options);
-  if (options?.source === 'hema') return require('./src/native/hema').search(keyword);
-  if (options?.source === 'xifan') return require('./src/native/xifan').search(keyword);
+  if (options?.source === 'hema') return require('./src/native/hema').search(catalogQuery(keyword));
+  if (options?.source === 'xifan') return require('./src/native/xifan').search(catalogQuery(keyword));
   if (options?.source && options.source !== 'hongguo') throw new Error('不支持的搜索来源');
   return runSearchSniff(keyword);
 }

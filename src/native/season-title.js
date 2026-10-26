@@ -1,9 +1,36 @@
 const { canonicalTitle } = require('./script-query');
 
+const ROMAN = {Ⅰ:1,Ⅱ:2,Ⅲ:3,Ⅳ:4,Ⅴ:5,Ⅵ:6,Ⅶ:7,Ⅷ:8,Ⅸ:9,Ⅹ:10,Ⅺ:11,Ⅻ:12,I:1,II:2,III:3,IV:4,V:5,VI:6,VII:7,VIII:8,IX:9,X:10,XI:11,XII:12};
+
+function romanValue(token) {
+  return ROMAN[token] || ROMAN[String(token || '').toUpperCase()] || null;
+}
+
+// 后Ⅰ is the first sequel after an unnumbered original, so it is season 2.
+// A bare trailing 2, as in 老千2, is season 2 itself. Neither form may skip ahead.
+function trailingInstallment(text) {
+  const marked = text.match(/^(.*?)后([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+|[ivx]{1,8}|\d{1,2})$/i);
+  if (marked && marked[1].length >= 2) {
+    const number = /^\d+$/.test(marked[2]) ? Number(marked[2]) : romanValue(marked[2]);
+    if (number >= 1 && number <= 98) return { base: marked[1], season: number + 1, explicit: true };
+  }
+  const roman = text.match(/^(.*?)([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+)$/);
+  if (roman && roman[1].length >= 2) {
+    const number = romanValue(roman[2]);
+    if (number >= 1 && number <= 99) return { base: roman[1], season: number, explicit: true };
+  }
+  const digit = text.match(/^(.*?)(\d{1,2})$/);
+  if (digit && digit[1].length >= 2 && !/\d$/.test(digit[1])) {
+    const number = Number(digit[2]);
+    if (number >= 1 && number <= 99) return { base: digit[1], season: number, explicit: true };
+  }
+  return null;
+}
+
 function seasonTitle(title) {
   const text = canonicalTitle(title);
   const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两兩\d]+)[季部]|[（(]([一二三四五六七八九十百零两兩\d]+)[）)]|season(\d+))$/i);
-  if (!match) return { base: text, season: 1, explicit: false };
+  if (!match) return trailingInstallment(text) || { base: text, season: 1, explicit: false };
   const value = match[2] || match[3] || match[4];
   let season = Number(value);
   if (!Number.isFinite(season)) {
