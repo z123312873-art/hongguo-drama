@@ -11,6 +11,13 @@ const CACHE_MS = 10 * 60 * 1000;
 const cache = new Map();
 const pending = new Map();
 
+function ratingNumber(value) {
+  const match = String(value ?? '').match(/(\d+(?:\.\d+)?)/);
+  const number = typeof value === 'number' ? value : Number(match?.[1]);
+  if (!Number.isFinite(number) || number <= 0 || number > 10) return null;
+  return Math.round(number * 10) / 10;
+}
+
 function publicMetadata(item) {
   const episode_label = typeof item?.episode_right_text === 'string' ? item.episode_right_text.trim().slice(0, 80) : '';
   const completion_status = /^(?:全\s*\d+\s*集|已完结|完结)$/.test(episode_label) ? 'completed'
@@ -60,7 +67,8 @@ function parseCatalog(html, category, page, sourceUrl) {
   }).map(item => ({
     series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
     episode_count: Number(item.episode_cnt) || 0,
-    tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
+    tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
+    rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
     ...publicMetadata(item),
     url: `${SITE}/detail?series_id=${item.series_id}`,
   }));
@@ -114,7 +122,8 @@ function parseRanking(html, category, page, sourceUrl) {
     return { series_id: id, series_title: title,
       cover: typeof item.cover === 'string' && /^https?:\/\//.test(item.cover) ? item.cover : '',
       episode_count: Array.isArray(item.episodeVids) ? item.episodeVids.length : 0,
-      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
+      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
+      rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
       introduction: cleanIntroduction(item.description || item.intro || item.series_intro || item.abstract),
       ...publicMetadata(item),
@@ -141,6 +150,7 @@ function parseRanking(html, category, page, sourceUrl) {
         heatText: text(article).match(/[\d.,]+\s*[万亿]?\s*热度/)?.[0] || '',
         cover: cover ? decodeHtml(cover[1] ?? cover[2]) : '',
         description: introduction,
+        rating: text(article).match(/评分\s*(\d+(?:\.\d+)?)/)?.[1],
         tags: tags ? Array.from(tags[1].matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi), tag => text(tag[1])) : [],
       });
       if (item) results.push(item);

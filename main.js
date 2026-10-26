@@ -36,7 +36,7 @@ const seriesSearch = require('./src/native/series-search');
 const { fitWindowBounds, getWindowScale, saveWindowZoom, initialWindowSize, revealMaximized } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
 const { availableRelease, LATEST_API, LATEST_PAGE, RELEASES_URL, updateRedirectTag } = require('./src/native/app-update');
-const { fetchPublicDetails } = require('./src/native/public-details');
+const { fetchPublicDetails, fetchPublicRatings } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
 const mediaAccess = require('./src/native/media-access').createMediaAccess(process.env.VITE_DEV_SERVER_URL);
@@ -3899,6 +3899,10 @@ ipcMain.handle('open-app-update', async event => {
 ipcMain.handle('get-public-details', async (event, seriesId, vid) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
   return fetchPublicDetails(seriesId, vid);
+});
+ipcMain.handle('get-public-ratings', async (event, ids) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
+  return fetchPublicRatings(ids);
 });
 ipcMain.handle('get-episode-comments', async (event, options) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };

@@ -3,7 +3,9 @@ import useDialogKeyboard from './useDialogKeyboard';
 import './Browse.css';
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
-import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search } from './icons';
+import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search, Heart } from './icons';
+import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
+import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseTags } from '../catalogTags.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
@@ -25,6 +27,12 @@ function snapshotKey(source, category, genre, page) {
 function readSnapshot(source, category, genre, page) {
   const cached = pageCache.get(snapshotKey(source, category, genre, page));
   return cached?.results?.length ? cached : null;
+}
+
+function needsPublicScore(results, ratings, id) {
+  const item = results.find(entry => String(entry?.series_id) === id);
+  if (item?.rating != null) return false;
+  return !Object.prototype.hasOwnProperty.call(ratings, id);
 }
 
 function writeSnapshot(source, category, genre, page, entry) {
@@ -71,6 +79,11 @@ function Browse({ onNavigate, active = true }) {
   const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState('real-drama');
   const [genre, setGenre] = useState('');
+  const [tagLabels, setTagLabels] = useState([]);
+  const [genreCatalog, setGenreCatalog] = useState({});
+  const [library, setLibrary] = useState(readLocalLibrary);
+  const [ratings, setRatings] = useState({});
+  const ratingRequest = useRef(0);
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
@@ -129,6 +142,8 @@ function Browse({ onNavigate, active = true }) {
   const reserveRows = source === 'hongguo' && (!heroReady || heroItems.length > 0) ? HERO_RESERVED_ROWS : 0;
   reserveRowsRef.current = reserveRows;
 
+  useEffect(() => subscribeLocalLibrary(setLibrary), []);
+
   const showToast = useCallback((text, type = 'success') => {
     setToast({ text, type });
     clearTimeout(toastTimer.current);
@@ -174,11 +189,30 @@ function Browse({ onNavigate, active = true }) {
         ? `https://hongguoduanju.com/${cat.startsWith('hot-') ? 'rank' : 'category'}/${encodeURIComponent(cat)}${gen ? `/${encodeURIComponent(gen)}` : ''}${pg > 1 ? `?page=${pg}` : ''}` : '';
       setUnsupported(false);
       setError('');
+      const keepGenres = (list) => {
+        if (source !== 'hongguo' || !Array.isArray(list) || !list.length) return;
+        setGenreCatalog(current => {
+          const previous = current[cat] || {};
+          let changed = false;
+          const next = { ...previous };
+          for (const item of list) {
+            if (!item?.label || !item?.slug || next[item.label] === item.slug) continue;
+            next[item.label] = item.slug;
+            changed = true;
+          }
+          return changed ? { ...current, [cat]: next } : current;
+        });
+      };
       if (haveCards) {
         pageSpan.current = cached.pageSpan || 1;
         setResults(cached.results);
         setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
         setSourceUrl(cached.sourceUrl || fallbackUrl);
+        keepGenres(cached.meta?.genres);
+      } else {
+        setResults([]);
+        setMeta({ total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(fallbackUrl);
       }
       const neededSpan = haveCards && pg === 1
         ? pagesToFill(slots, cached.perPage || cached.results.length, cached.sourcePages || 1)
@@ -243,6 +277,7 @@ function Browse({ onNavigate, active = true }) {
         setResults(next.results);
         setMeta(next.meta);
         setSourceUrl(next.sourceUrl);
+        keepGenres(next.meta.genres);
         if (next.results.length) writeSnapshot(source, cat, gen, pg, next);
         else {
           pageCache.delete(key);
@@ -288,6 +323,30 @@ function Browse({ onNavigate, active = true }) {
     setHeroReady(false);
     if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory('real-drama'); }
   }, [sourceIds, source, invalidateList, closeDetail]);
+
+  const rankingView = source === 'hongguo' && String(category).startsWith('hot-');
+  const serverSlug = source === 'hongguo' && tagLabels.length === 1 && !rankingView
+    ? (genreCatalog[category]?.[tagLabels[0]] || '') : '';
+  useEffect(() => {
+    if (source !== 'hongguo' || serverSlug === genre) return;
+    setGenre(serverSlug);
+  }, [source, serverSlug, genre]);
+
+  useEffect(() => {
+    if (source !== 'hongguo') return undefined;
+    const ids = results
+      .map(item => String(item?.series_id || ''))
+      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratings, id))
+      .slice(0, 24);
+    if (!ids.length || !window.electronAPI?.getPublicRatings) return undefined;
+    const request = ++ratingRequest.current;
+    let cancelled = false;
+    window.electronAPI.getPublicRatings(ids).then(response => {
+      if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) return;
+      setRatings(current => ({ ...current, ...response.ratings }));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [source, results, ratings]);
 
   useEffect(() => {
     if (!active || !sourceIds.split('|').includes(source)) return undefined;
@@ -386,6 +445,7 @@ function Browse({ onNavigate, active = true }) {
     setSource(next);
     setCategory('real-drama');
     setGenre('');
+    setTagLabels([]);
     setPage(1);
     showSnapshot(next, 'real-drama', '', 1);
   };
@@ -395,6 +455,7 @@ function Browse({ onNavigate, active = true }) {
     invalidateList();
     setCategory(slug);
     setGenre('');
+    setTagLabels([]);
     setPage(1);
     showSnapshot(source, slug, '', 1);
   };
@@ -522,7 +583,25 @@ function Browse({ onNavigate, active = true }) {
 
   useDialogKeyboard(active && (!!detail || detailLoading), closeDetail, '.browse-drawer');
 
-  const visibleResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
+  const chooseTags = (label) => {
+    setTagLabels(toggleBrowseTags(tagLabels, label));
+    setPage(1);
+  };
+  const clientTagFilter = source === 'hongguo' && (tagLabels.length > 1 || (tagLabels.length === 1 && !serverSlug));
+  const completionResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
+  const visibleResults = clientTagFilter ? completionResults.filter(item => posterMatchesTags(item.tags, tagLabels)) : completionResults;
+  const favoriteIds = new Set((library.items || []).filter(item => item.favorite).map(item => item.id));
+  const toggleFavorite = (event, item) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = String(item.series_id || '');
+    const saved = saveLocalSeries({
+      id, title: item.series_title, cover: typeof item.cover === 'string' ? item.cover : '',
+      published_at: item.published_at, favorite: !favoriteIds.has(id),
+    });
+    if (saved.error) showToast(saved.error, 'error');
+    else setLibrary(saved);
+  };
   const totalPages = meta.totalPages || 0;
   const pageNumbers = useMemo(() => {
     if (!totalPages) return [];
@@ -583,8 +662,17 @@ function Browse({ onNavigate, active = true }) {
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
-      {/* 题材 chips */}
-      {meta.genres.length > 0 && (
+      {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
+      {source === 'hongguo' && (
+        <div className="browse-genres" role="group" aria-label="标签筛选，可左右滑动，最多同时选择两个">
+          <button type="button" className={`genre-chip ${tagLabels.length === 0 ? 'active' : ''}`} aria-pressed={tagLabels.length === 0} onClick={() => chooseTags('全部')}>全部</button>
+          {SHARED_BROWSE_TAGS.map((label) => (
+            <button type="button" key={label} className={`genre-chip ${tagLabels.includes(label) ? 'active' : ''}`} aria-pressed={tagLabels.includes(label)} onClick={() => chooseTags(label)}>{label}</button>
+          ))}
+        </div>
+      )}
+      {source === 'hongguo' && <p className="browse-tag-hint">左右滑动选择标签。只选一个时仍按该分类原有片单；再选一个时，海报上的分类要同时包含这两个标签。</p>}
+      {source !== 'hongguo' && meta.genres.length > 0 && (
         <div className="browse-genres">
           <button
             className={`genre-chip ${genre === '' ? 'active' : ''}`}
@@ -614,7 +702,7 @@ function Browse({ onNavigate, active = true }) {
         <span id="browse-completion-hint">仅筛选当前页；状态未注明的剧集只在“全部”显示。</span>
         {completion !== 'all' && <span role="status">本页 {visibleResults.length} / {results.length} 部</span>}
       </div>
-      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status"><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></div>}
+      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status">{clientTagFilter ? <><p>本页没有同时带有所选标签的剧集。</p><button className="btn btn-outline" onClick={() => chooseTags('全部')}>显示本页全部</button></> : <><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></>}</div>}
 
       {error && results.length > 0 && <div className="alert alert-error browse-update-error" role="alert">
         <span>{error}</span><button className="btn btn-outline btn-sm" disabled={loading || sourcesLoading} onClick={() => loadList(category, genre, page, true)}>重试</button>
@@ -639,11 +727,24 @@ function Browse({ onNavigate, active = true }) {
               >
                 <div className="browse-cover">
                   {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
+                  {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
                   {item.cover ? (
                     <img src={item.cover} alt={item.series_title} loading="lazy" />
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>
                   )}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className={`browse-fav ${favoriteIds.has(String(item.series_id)) ? 'is-on' : ''}`}
+                    aria-label={favoriteIds.has(String(item.series_id)) ? `取消收藏 ${item.series_title}` : `收藏 ${item.series_title}`}
+                    aria-pressed={favoriteIds.has(String(item.series_id))}
+                    onClick={(event) => toggleFavorite(event, item)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      toggleFavorite(event, item);
+                    }}
+                  ><Heart size={15} /></span>
                   {(item.episode_label || item.episode_count > 0) && (
                     <span className="browse-ep-badge">{item.episode_label || `${item.episode_count} 集`}</span>
                   )}
@@ -664,7 +765,7 @@ function Browse({ onNavigate, active = true }) {
                 {item.heat && <div className="browse-card-heat">{item.heat}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">
-                    {item.tags.slice(0, 2).map((t) => (
+                    {[...item.tags].sort((a, b) => Number(tagLabels.includes(b)) - Number(tagLabels.includes(a))).slice(0, 3).map((t) => (
                       <span key={t} className="browse-tag">{t}</span>
                     ))}
                   </div>

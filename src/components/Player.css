@@ -84,7 +84,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 160px;
 }
+.player-series-current > .sequel-finder { flex: 0 0 auto; }
 
 .series-picker-btn {
   flex-shrink: 0;

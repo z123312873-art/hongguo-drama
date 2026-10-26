@@ -13,11 +13,13 @@ function rankedUnique(results, keyword) {
   }).sort((a, b) => score(normalizeTitle(a.series_title), normalized) - score(normalizeTitle(b.series_title), normalized));
 }
 
-function nextSeasonQueries(base, season) {
+function nextSeasonQueries(base, season, samples = []) {
   if (!base || !Number.isInteger(season) || season < 2 || season > 99) return [];
   const digits = '零一二三四五六七八九';
   const chinese = season < 10 ? digits[season] : `${season < 20 ? '' : digits[Math.floor(season / 10)]}十${season % 10 ? digits[season % 10] : ''}`;
-  return [`${base}第${chinese}季`, `${base}第${season}季`];
+  const wrapped = samples.some(item => /[（(]第[^）)]+[季部][）)]/.test(canonicalTitle(item?.series_title || '')));
+  // Keep two supplements. Bracketed titles such as （第一季） also ask for （第N季）.
+  return wrapped ? [`${base}（第${chinese}季）`, `${base}第${chinese}季`] : [`${base}第${chinese}季`, `${base}第${season}季`];
 }
 
 // One primary search plus at most two supplements; never recursively expand upstream results.
@@ -37,7 +39,7 @@ async function searchSeries(keyword, search, knownSeries = [], { afterSeason = 1
         const knownSeasons = new Set(seasons.map(item => item.season));
         let nextSeason = afterSeason + 1;
         while (nextSeason <= 99 && knownSeasons.has(nextSeason)) nextSeason++;
-        queries = nextSeasonQueries(parsed.base, nextSeason);
+        queries = nextSeasonQueries(parsed.base, nextSeason, [...results, ...knownSeries]);
       }
     }
   }

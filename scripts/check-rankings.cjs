@@ -34,6 +34,7 @@ async function main() {
     }
     if (category === 'hot-drama') assert.match(data.results[0].introduction, /聚宝盆/, 'rendered ranking cards keep their description');
     assert.equal(data.results[0].url, `https://hongguoduanju.com/detail?series_id=${id}`);
+    assert.ok(data.results[0].rating >= 1 && data.results[0].rating <= 10, `${category} keeps the public score`);
     assert.equal(data.totalPages, 5);
     assert.equal(data.page, 1);
     assert.equal(data.genres.length, 0);

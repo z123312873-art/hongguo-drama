@@ -31,7 +31,7 @@ test('traditional and simplified season titles stay in order across ten', () => 
 });
 
 test('main-process and renderer season parsers stay aligned', () => {
-  for (const title of ['誰讓這個文盲修仙的', '谁让这个文盲修仙的第二季', '從雜役到符仙人第十一季', '年轮（2024）', '双子房客第十季', '青铜门后Ⅰ', '老千2', '炼气3000层2', '剧名100']) {
+  for (const title of ['誰讓這個文盲修仙的', '谁让这个文盲修仙的第二季', '從雜役到符仙人第十一季', '年轮（2024）', '双子房客第十季', '青铜门后Ⅰ', '老千2', '炼气3000层2', '剧名100', '开局青云宗主召唤大帝境老祖（第一季）', '開局青雲宗主召喚大帝境老祖（第二季）']) {
     assert.deepEqual(cjsSeason.seasonTitle(title), esmSeason.seasonTitle(title), title);
     assert.equal(cjsSeason.sourceOf('10000011'), esmSeason.sourceOf('10000011'));
   }
@@ -39,6 +39,27 @@ test('main-process and renderer season parsers stay aligned', () => {
   assert.equal(cjsSeason.seasonTitle('青铜门后Ⅱ').season, 3);
   assert.equal(cjsSeason.seasonTitle('剧名100').explicit, false);
   assert.equal(cjsSeason.seasonTitle('年轮（2024）').explicit, false);
+  const wrapped = cjsSeason.seasonTitle('开局青云宗主召唤大帝境老祖（第一季）');
+  assert.equal(wrapped.explicit, true);
+  assert.equal(wrapped.season, 1);
+  assert.equal(wrapped.base, cjsSeason.seasonTitle('开局青云宗主召唤大帝境老祖').base);
+  assert.equal(cjsSeason.seasonTitle('開局青雲宗主召喚大帝境老祖（第十季）').season, 10);
+  assert.equal(cjsSeason.seasonTitle('开局青云宗主召唤大帝境老祖(第二季)').season, 2);
+  const sequel = immediateNextSeason(
+    { series_id: '10000041', series_title: '开局青云宗主召唤大帝境老祖（第一季）' },
+    [
+      { series_id: '10000050', series_title: '开局青云宗主召唤大帝境老祖（第十季）' },
+      { series_id: '10000042', series_title: '开局青云宗主召唤大帝境老祖（第二季）', cover: 'https://img.example/s2.jpg' },
+      { series_id: 'xifan:room:2', series_title: '开局青云宗主召唤大帝境老祖（第二季）' },
+    ],
+  );
+  assert.equal(sequel.series_id, '10000042');
+  assert.equal(sequel.season, 2);
+  assert.equal(sequel.cover, 'https://img.example/s2.jpg');
+  assert.equal(immediateNextSeason(
+    { series_id: '10000041', series_title: '开局青云宗主召唤大帝境老祖（第一季）' },
+    [{ series_id: '10000050', series_title: '开局青云宗主召唤大帝境老祖（第十季）' }],
+  ), null);
 });
 
 test('the next installment is the immediate one and stays on the same source', () => {

@@ -27,11 +27,7 @@ function trailingInstallment(text) {
   return null;
 }
 
-function seasonTitle(title) {
-  const text = canonicalTitle(title);
-  const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两兩\d]+)[季部]|[（(]([一二三四五六七八九十百零两兩\d]+)[）)]|season(\d+))$/i);
-  if (!match) return trailingInstallment(text) || { base: text, season: 1, explicit: false };
-  const value = match[2] || match[3] || match[4];
+function seasonNumber(value) {
   let season = Number(value);
   if (!Number.isFinite(season)) {
     const digits = {零:0,〇:0,一:1,二:2,两:2,兩:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
@@ -42,8 +38,19 @@ function seasonTitle(title) {
     }
     season = /[十百]/.test(value) ? n + digit : Number([...value].map(char => digits[char]).join(''));
   }
-  if (match[3] && season > 99) return { base: text, season: 1, explicit: false };
-  if (!Number.isSafeInteger(season) || season < 1) return { base: text, season: 1, explicit: false, invalid: true };
+  return Number.isSafeInteger(season) && season >= 1 ? season : 0;
+}
+
+function seasonTitle(title) {
+  const text = canonicalTitle(title);
+  // （第一季）keeps 第N季 inside the brackets, so it is not a bare year like （2024）.
+  const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两兩\d]+)[季部]|[（(]\s*第([一二三四五六七八九十百零两兩\d]+)[季部]\s*[）)]|[（(]([一二三四五六七八九十百零两兩\d]+)[）)]|season(\d+))$/i);
+  if (!match) return trailingInstallment(text) || { base: text, season: 1, explicit: false };
+  const value = match[2] || match[3] || match[4] || match[5];
+  const season = seasonNumber(value);
+  // Bare bracket numbers above 99 are years or other title metadata, not seasons.
+  if (match[4] && season > 99) return { base: text, season: 1, explicit: false };
+  if (season < 1) return { base: text, season: 1, explicit: false, invalid: true };
   return { base: match[1], season, explicit: true };
 }
 

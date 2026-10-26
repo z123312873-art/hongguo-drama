@@ -82,4 +82,48 @@ async function fetchPublicDetails(seriesId, vid = '') {
   return request;
 }
 
-module.exports = { fetchPublicDetails, parsePublicDetails };
+const ratingCache = new Map();
+let ratingActive = 0;
+const ratingWait = [];
+
+function withRatingSlot(task) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      ratingActive += 1;
+      task().then(resolve, reject).finally(() => {
+        ratingActive -= 1;
+        const next = ratingWait.shift();
+        if (next) next();
+      });
+    };
+    if (ratingActive < 2) run();
+    else ratingWait.push(run);
+  });
+}
+
+async function loadPublicRating(id) {
+  const cached = ratingCache.get(id);
+  if (cached && cached.expires > Date.now()) return cached.rating;
+  let rating = null;
+  let ttl = 60 * 1000;
+  try {
+    const response = await axios.get(`${SITE}/detail?series_id=${id}`, { timeout: 10000, signal: AbortSignal.timeout(10000),
+      maxRedirects: 0, responseType: 'text', maxContentLength: 8 * 1024 * 1024,
+      headers: { 'User-Agent': UA, Referer: `${SITE}/` } });
+    rating = parsePublicDetails(response.data, id).rating;
+    if (rating != null) ttl = 10 * 60 * 1000;
+  } catch { rating = null; }
+  ratingCache.set(id, { rating, expires: Date.now() + ttl });
+  if (ratingCache.size > 240) ratingCache.delete(ratingCache.keys().next().value);
+  return rating;
+}
+
+async function fetchPublicRatings(ids) {
+  const unique = [...new Set((Array.isArray(ids) ? ids : []).map(id => String(id || '')))]
+    .filter(id => /^\d{6,30}$/.test(id)).slice(0, 24);
+  const ratings = {};
+  await Promise.all(unique.map(id => withRatingSlot(async () => { ratings[id] = await loadPublicRating(id); })));
+  return { success: true, ratings };
+}
+
+module.exports = { fetchPublicDetails, parsePublicDetails, fetchPublicRatings };
