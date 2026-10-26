@@ -11,7 +11,7 @@ async function main() {
   const context = { module: { exports: {} }, require: name => name === 'axios' ? { get: async (url, options) => {
     calls.push({ url, options });
     return { data: response ?? read(url.split('/rank/')[1].replace('?page=2', '-page-2')) };
-  } } : require(name), AbortController, setTimeout, clearTimeout, URL };
+  } } : require(name.startsWith('.') ? path.join(root, 'src/native', name) : name), AbortController, setTimeout, clearTimeout, URL };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'src/native/catalog.js'), 'utf8'), context);
   const { browseList } = context.module.exports;
   for (const [category, id, title, heat] of [

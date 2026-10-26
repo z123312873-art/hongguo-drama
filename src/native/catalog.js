@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { net } = require('electron');
+const { rememberWebEpisodes } = require('./episode-prelude');
 
 const SITE = 'https://hongguoduanju.com';
 const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
@@ -64,14 +65,17 @@ function parseCatalog(html, category, page, sourceUrl) {
     if (!/^\d{6,}$/.test(item?.series_id) || typeof item.series_name !== 'string' || !item.series_name.trim() || seen.has(String(item.series_id))) return false;
     seen.add(String(item.series_id));
     return true;
-  }).map(item => ({
-    series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
-    episode_count: Number(item.episode_cnt) || 0,
-    tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
-    rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
-    ...publicMetadata(item),
-    url: `${SITE}/detail?series_id=${item.series_id}`,
-  }));
+  }).map(item => {
+    rememberWebEpisodes(item.series_id, item);
+    return {
+      series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
+      episode_count: Number(item.episode_cnt) || 0,
+      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
+      rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
+      ...publicMetadata(item),
+      url: `${SITE}/detail?series_id=${item.series_id}`,
+    };
+  });
   const genres = (Array.isArray(data.selectorList) ? data.selectorList : []).flatMap(row => Array.isArray(row?.items) ? row.items : [])
     .filter(item => /^[a-z0-9-]+$/.test(item?.selector_item_id) && typeof item.show_name === 'string')
     .map(item => ({ slug: item.selector_item_id, label: item.show_name }));
@@ -247,4 +251,4 @@ async function browseList(options = {}, proxyLogin) {
   return task;
 }
 
-module.exports = { browseList, readRouterData, publicMetadata };
+module.exports = { browseList, parseCatalog, readRouterData, publicMetadata };

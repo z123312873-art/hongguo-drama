@@ -32,7 +32,8 @@ function readSnapshot(source, category, genre, page) {
 function needsPublicScore(results, ratings, id) {
   const item = results.find(entry => String(entry?.series_id) === id);
   if (item?.rating != null) return false;
-  return !Object.prototype.hasOwnProperty.call(ratings, id);
+  const known = Number(ratings?.[id]);
+  return !(Number.isFinite(known) && known > 0 && known <= 10);
 }
 
 function writeSnapshot(source, category, genre, page, entry) {
@@ -336,28 +337,37 @@ function Browse({ onNavigate, active = true }) {
   ratingsRef.current = ratings;
   useEffect(() => {
     if (source !== 'hongguo' || !window.electronAPI?.getPublicRatings) return undefined;
-    const ids = results
+    const pendingIds = () => results
       .map(item => String(item?.series_id || ''))
-      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, id))
-      .slice(0, 24);
-    if (!ids.length) return undefined;
+      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, id));
+    if (!pendingIds().length) return undefined;
     const request = ++ratingRequest.current;
     let cancelled = false;
-    (async () => {
+    let retryTimer;
+    const pull = async (attempt) => {
+      const ids = pendingIds();
+      if (!ids.length || cancelled || request !== ratingRequest.current) return;
       for (let index = 0; index < ids.length; index += 8) {
         if (cancelled || request !== ratingRequest.current) return;
         try {
           const response = await window.electronAPI.getPublicRatings(ids.slice(index, index + 8));
-          if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) return;
-          setRatings(current => {
-            const next = { ...current, ...response.ratings };
-            ratingsRef.current = next;
-            return next;
-          });
-        } catch { return; }
+          if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) continue;
+          const numeric = {};
+          for (const [id, value] of Object.entries(response.ratings)) {
+            const score = Number(value);
+            if (Number.isFinite(score) && score > 0 && score <= 10) numeric[id] = Math.round(score * 10) / 10;
+          }
+          if (Object.keys(numeric).length) {
+            ratingsRef.current = { ...ratingsRef.current, ...numeric };
+            setRatings(ratingsRef.current);
+          }
+        } catch { /* The next group still runs. A miss is retried below. */ }
       }
-    })();
-    return () => { cancelled = true; };
+      if (cancelled || request !== ratingRequest.current || attempt >= 2 || !pendingIds().length) return;
+      retryTimer = setTimeout(() => { pull(attempt + 1); }, attempt === 0 ? 4000 : 12000);
+    };
+    pull(0);
+    return () => { cancelled = true; clearTimeout(retryTimer); };
   }, [source, results]);
 
   useEffect(() => {

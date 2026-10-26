@@ -93,9 +93,9 @@
 
 .series-picker-btn {
   flex-shrink: 0;
-  min-height: 40px;
-  padding: 8px 16px;
-  font-size: calc(14px * var(--font-scale, 1));
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .sequel-finder { margin: 16px 0 12px; flex-shrink: 0; }
@@ -677,10 +677,10 @@
 }
 
 .player-title > svg { display: none; }
-.player-header { margin-bottom: 26px; align-items: flex-start; }
+.player-header { margin-bottom: 26px; align-items: center; }
 .player-header-right { gap: 6px; justify-content: flex-end; }
 .player-header-right .btn { font-size: 11px; padding: 6px 9px; min-height: 31px; }
-.player-stat { flex-basis: 100%; text-align: right; font-size: 11px; margin-bottom: 4px; }
+.player-stat { flex-basis: auto; text-align: left; font-size: 11px; margin: 0; }
 .player-series-row { background: transparent; border: 0; padding: 0 0 14px; margin-bottom: 0; }
 .player-series-name { font-size: calc(19px * var(--font-scale, 1)); font-weight: 600; }
 .player-series-label { font-size: calc(12px * var(--font-scale, 1)); }
@@ -696,7 +696,7 @@
 .player-episodes { gap: 8px; }
 .player-header .btn-autonext-on { background: var(--accent-soft); border-color: transparent !important; }
 .player-now-status.status-downloading { background: var(--accent-soft); }
-@media (max-width: 1080px) { .player-header { flex-direction: column; gap: 15px; } .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; } .player-header-right { justify-content: flex-start; } .player-stat { flex-basis: auto; text-align: left; margin: 0 8px 0 0; } }
+@media (max-width: 1080px) { .player-header { flex-wrap: wrap; align-items: center; gap: 8px; } .player-header > .player-download-quality-hint { flex-basis: 100%; max-width: none; margin-left: 0; } .player-header-right { justify-content: flex-start; } .player-stat { flex-basis: auto; text-align: left; margin: 0 8px 0 0; } }
 
 .ep-chip:disabled { flex-direction: column; gap: 2px; cursor: not-allowed; background: var(--bg-inset); color: var(--text-secondary); }
 .ep-lock-label { display: block; font-size: 10px; line-height: 1.2; font-weight: 400; }
@@ -825,7 +825,13 @@
 .player-online-quality-row[hidden] { display: none; }
 .player-online-quality-row .player-download-quality { flex-wrap: nowrap; }
 .layout-landscape .player-online-quality-row { margin-block: 12px 24px; }
-.player-header .player-header-right { display: flex; flex-wrap: wrap; width: auto; flex: 1 1 auto; justify-content: flex-start; gap: 8px; }
+.player-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.player-header .player-title,
+.player-header .player-header-right { display: contents; }
+.player-header .player-download-quality .input-field { height: 36px; min-height: 36px; padding-top: 0; padding-bottom: 0; }
+.player-header .series-picker-btn,
+.player-header .player-header-right .btn,
+.player-header .player-download-quality .input-field { align-self: center; }
 .player-header-right .player-series-actions { display: contents; }
 .player-header .player-header-right .btn { width: auto; min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 12px; gap: 7px; justify-content: center; white-space: nowrap; }
 .player-header-right .btn svg { width: 15px; height: 15px; flex-shrink: 0; }

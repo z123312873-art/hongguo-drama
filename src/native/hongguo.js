@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const { URL } = require('node:url');
 const { normalizeDownloadQuality } = require('./download-quality');
 const { isPublicMediaUrl, webMediaRequestOptions } = require('./web-media-guard');
+const { readPublicScore } = require('./public-score');
+const { takeWebEpisodes } = require('./episode-prelude');
 
 const API = "https://api5-normal-sinfonlineb.fqnovel.com";
 const UA = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)";
@@ -268,7 +270,72 @@ function episodeListFromHtml(html, seriesId) {
   };
 }
 
+const SCORE_HTML_LIMIT = 280000;
+
+function scoreRequestHeaders() {
+  return {
+    'User-Agent': WEB_UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    'Referer': WEB_REFERER,
+  };
+}
+
+function readScoreStream(stream) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      stream.destroy?.();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    stream.on('data', chunk => {
+      buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const score = readPublicScore(buf, { partial: true });
+      if (score != null || buf.length >= SCORE_HTML_LIMIT) finish(null, score ?? readPublicScore(buf));
+    });
+    stream.on('end', () => finish(null, readPublicScore(buf)));
+    stream.on('error', error => finish(error));
+  });
+}
+
+/** Public 0–10 score. Stops once the hero score is in hand instead of reading the whole detail page. */
+async function fetchPublicScore(seriesId, timeout = 8000) {
+  const id = String(seriesId || '');
+  if (!/^\d{6,30}$/.test(id)) return null;
+  const url = `${SITE_ORIGIN}/detail?series_id=${encodeURIComponent(id)}`;
+  const cached = sitePages.get(url);
+  if (cached && cached.expires > Date.now()) return readPublicScore(cached.html);
+  if (sitePending.has(url)) return readPublicScore(await sitePending.get(url));
+  let last;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await axios.get(url, {
+        headers: scoreRequestHeaders(),
+        timeout,
+        responseType: 'stream',
+        signal: AbortSignal.timeout(timeout),
+        maxRedirects: 5,
+      });
+      const body = res?.data;
+      if (body && typeof body.on === 'function') return await readScoreStream(body);
+      return readPublicScore(typeof body === 'string' ? body : '');
+    } catch (error) {
+      last = error;
+      const status = Number(error?.response?.status);
+      if (attempt === 0 && status >= 500) continue;
+      throw error;
+    }
+  }
+  throw last;
+}
+
 async function fetchEpisodeListFromWeb(seriesId) {
+  const prelude = takeWebEpisodes(seriesId);
+  if (prelude) return prelude;
   const encoded = encodeURIComponent(seriesId);
   const urls = [`${SITE_ORIGIN}/detail?series_id=${encoded}`, `${SITE_ORIGIN}/player/${encoded}`];
   let last = new Error('官网页面未找到分集数据（vid_list）');
@@ -1048,6 +1115,7 @@ module.exports = {
   fetchEpisodeList,
   fetchEpisodeListFromWeb,
   fetchSiteHtml,
+  fetchPublicScore,
   fetchPlayUrlSingle,
   fetchPlayUrlFromWeb,
   deriveKey,

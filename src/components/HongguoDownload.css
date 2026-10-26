@@ -17,7 +17,10 @@
 .search-suggest-list small { color: var(--text-tertiary); flex-shrink: 0; }
 .input-group .btn { min-height: 40px; padding-left: 20px; padding-right: 20px; }
 .series-header { display: flex; flex-wrap: wrap; gap: 22px; justify-content: space-between; align-items: center; padding-bottom: 24px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
-.series-info { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.series-info { display: flex; align-items: center; gap: 16px; min-width: 0; flex: 1 1 320px; }
+.series-meta { display: flex; align-items: center; gap: 16px; min-width: 0; flex: 1; }
+.series-meta-copy { min-width: 0; }
+.series-favorite-btn { margin-left: auto; flex-shrink: 0; }
 .series-cover, .series-cover-placeholder { width: 66px; height: 88px; border-radius: 8px; object-fit: cover; background: var(--bg-inset); flex-shrink: 0; }
 .series-cover-placeholder { display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .series-title { font-size: 19px; letter-spacing: -.02em; margin-bottom: 8px; }

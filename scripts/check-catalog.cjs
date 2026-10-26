@@ -35,7 +35,7 @@ async function checkBrowserTransport() {
       calls.push({ url: options.url, options, request }); return request;
     } } };
     if (name === 'axios') return { get: async () => { throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); } };
-    return require(name);
+    return require(name.startsWith('.') ? path.join(root, 'src/native', name) : name);
   }, Buffer, AbortController, URL, setTimeout: (fn, ms) => setTimeout(fn, ms === 10000 ? 40 : ms), clearTimeout };
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
   const { browseList } = context.module.exports;
@@ -102,7 +102,7 @@ async function main() {
   let response = (url) => url.endsWith('/comic') ? comic.promise : Promise.resolve({ data: html('real-drama', url.includes('page=2') ? 2 : 1) });
   const context = { module: { exports: {} }, require: name => name === 'axios' ? { get: (url, options) => {
     calls.push({ url, options }); return response(url);
-  } } : require(name), AbortController, setTimeout: (fn, ms) => setTimeout(fn, ms === 10000 ? 40 : ms), clearTimeout, URL, console };
+  } } : require(name.startsWith('.') ? path.join(root, 'src/native', name) : name), AbortController, setTimeout: (fn, ms) => setTimeout(fn, ms === 10000 ? 40 : ms), clearTimeout, URL, console };
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
   const { browseList } = context.module.exports;
   const slowComic = browseList({ category: 'comic' });

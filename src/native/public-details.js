@@ -83,6 +83,7 @@ async function fetchPublicDetails(seriesId, vid = '') {
 }
 
 const ratingCache = new Map();
+const ratingPending = new Map();
 let ratingActive = 0;
 const ratingWait = [];
 
@@ -103,17 +104,24 @@ function withRatingSlot(task) {
 
 async function loadPublicRating(id) {
   const cached = ratingCache.get(id);
-  if (cached && cached.expires > Date.now()) return cached.rating;
-  let rating = null;
-  let ttl = 60 * 1000;
-  try {
-    const html = await require('./hongguo').fetchSiteHtml(`${SITE}/detail?series_id=${id}`, 8000);
-    rating = parsePublicDetails(html, id).rating;
-    if (rating != null) ttl = 10 * 60 * 1000;
-  } catch { rating = null; }
-  ratingCache.set(id, { rating, expires: Date.now() + ttl });
-  if (ratingCache.size > 240) ratingCache.delete(ratingCache.keys().next().value);
-  return rating;
+  if (cached && cached.expires > Date.now() && cached.rating != null) return cached.rating;
+  if (ratingPending.has(id)) return ratingPending.get(id);
+  const task = (async () => {
+    try {
+      const rating = await require('./hongguo').fetchPublicScore(id, 8000);
+      if (rating != null) {
+        ratingCache.set(id, { rating, expires: Date.now() + 10 * 60 * 1000 });
+        if (ratingCache.size > 240) ratingCache.delete(ratingCache.keys().next().value);
+      }
+      return rating ?? null;
+    } catch {
+      return null;
+    } finally {
+      ratingPending.delete(id);
+    }
+  })();
+  ratingPending.set(id, task);
+  return task;
 }
 
 async function fetchPublicRatings(ids) {

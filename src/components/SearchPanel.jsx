@@ -27,7 +27,7 @@ export function rankSearchResults(results, keyword) {
  * SearchPanel —— 按所选来源搜索短剧
  * 拿到 series_id 后交给父组件走既有的「拉全集 + 选集下载」流程。
  */
-function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
+function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = true }) {
   const [source, setSource] = useState('all');
   const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const requestVersion = useRef(0);
@@ -186,6 +186,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
     const request = ++requestVersion.current;
     setPickingId(item.series_id);
     setError('');
+    onSelectStart?.(item);
     try {
       const res = await window.electronAPI.searchResolve(item.series_id);
       if (request !== requestVersion.current) return;

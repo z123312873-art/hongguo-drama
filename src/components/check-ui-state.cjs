@@ -665,6 +665,52 @@ async function mount(file, api, props = {}) {
     assert.equal(player().props.target, target, 'returning must keep the same playback target');
     ui.unmount();
   });
+  await test('search pick clears the previous series, stays on search, and favorites by click', async () => {
+    const ui = await mount('HongguoDownload', {});
+    await ui.flush();
+    const panel = () => ui.find(n => n.props.onSelectSeries);
+    panel().props.onSelectSeries(detail('旧剧')); ui.render();
+    assert.ok(ui.button('下载选中集数 (0/2)'), 'an open series is visible before the next search pick');
+    assert.ok(ui.button('搜索剧集').props.className.includes('active'));
+    panel().props.onSelectStart(); ui.render();
+    assert.equal(ui.button('下载选中集数 (0/2)'), undefined, 'the previous series leaves as soon as episode loading starts');
+    assert.ok(panel(), 'search stays mounted while the next series is loading');
+    assert.ok(ui.button('搜索剧集').props.className.includes('active'), 'episode loading stays on search');
+    assert.equal(ui.button('粘贴链接').props.className.includes('active'), false);
+    panel().props.onSelectSeries(detail('新剧')); ui.render();
+    assert.ok(ui.button('搜索剧集').props.className.includes('active'), 'a searched series stays on the search tab');
+    assert.equal(ui.button('粘贴链接').props.className.includes('active'), false);
+    assert.ok(ui.button('下载选中集数 (0/2)'));
+    const favorite = () => ui.button('收藏清单');
+    assert.equal(favorite().props['aria-pressed'], false);
+    favorite().props.onClick(); ui.render();
+    assert.equal(favorite().props['aria-pressed'], true);
+    assert.ok(ui.text().includes('已加入收藏清单'));
+    favorite().props.onClick(); ui.render();
+    assert.equal(favorite().props['aria-pressed'], false, 'the same button removes the favorite without inventing another date');
+    ui.unmount();
+  });
+  await test('search card tells the parent to clear before episodes return', async () => {
+    const pending = deferred();
+    const started = [];
+    const ui = await mount('SearchPanel', {
+      searchSeries: async () => ({ success: true, results: [{ series_id: '1234567', series_title: '新剧' }] }),
+      searchResolve: () => pending.promise,
+    }, { onSelectStart: item => started.push(item.series_id) });
+    await ui.flush();
+    ui.find(n => n.props['aria-label'] === '搜索短剧名称').props.onChange({ target: { value: '新剧' } }); ui.render();
+    ui.button('搜索').props.onClick();
+    await ui.flush();
+    ui.nodes().filter(n => n.props.className?.startsWith('search-card '))[0].props.onClick();
+    ui.render();
+    assert.deepEqual(started, ['1234567']);
+    assert.ok(ui.text().includes('正在拉取分集'));
+    pending.resolve({ success: false, error: '来源暂时受限' });
+    await ui.flush();
+    assert.ok(ui.text().includes('来源暂时受限'));
+    assert.equal(ui.text().includes('正在拉取分集'), false);
+    ui.unmount();
+  });
   await test('download keeps its search panel mounted while selecting episodes', async () => {
     const ui = await mount('HongguoDownload', {});
     ui.find(n => n.props.onSelectSeries).props.onSelectSeries(detail('A')); ui.render();
