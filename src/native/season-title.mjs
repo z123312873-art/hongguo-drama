@@ -1,3 +1,5 @@
+// Renderer-only copy. The installed main process uses season-title.js because
+// app.asar cannot resolve this ESM import. Keep the two parsers aligned.
 import { canonicalTitle } from '../chineseScript.mjs';
 
 export function seasonTitle(title) {

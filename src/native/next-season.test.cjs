@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { immediateNextSeason, seasonFinaleIndex, COUNTDOWN_SECONDS } = require('./next-season');
+const cjsSeason = require('./season-title');
+const esmSeason = require('./season-title.mjs');
 
 test('autoplay selects only the next season and keeps its poster', () => {
   const current = { series_id: '10000011', series_title: '誰讓這個文盲修仙的' };
@@ -26,6 +28,13 @@ test('traditional and simplified season titles stay in order across ten', () => 
   assert.equal(immediateNextSeason({ series_id: '10000021', series_title: '从杂役到符仙人第十季' }, [
     { series_id: '10000030', series_title: '从杂役到符仙人外传第十一季' },
   ]), null);
+});
+
+test('main-process and renderer season parsers stay aligned', () => {
+  for (const title of ['誰讓這個文盲修仙的', '谁让这个文盲修仙的第二季', '從雜役到符仙人第十一季', '年轮（2024）', '双子房客第十季']) {
+    assert.deepEqual(cjsSeason.seasonTitle(title), esmSeason.seasonTitle(title), title);
+    assert.equal(cjsSeason.sourceOf('10000011'), esmSeason.sourceOf('10000011'));
+  }
 });
 
 test('a season finale is the highest episode, including a locked later episode', () => {

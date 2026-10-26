@@ -1,4 +1,4 @@
-const { seasonTitle, sourceOf } = require('./season-title.mjs');
+const { seasonTitle, sourceOf } = require('./season-title');
 
 function totalEpisodes(series) {
   return Math.max(Number(series?.total) || 0, series?.episodes?.length || 0);
