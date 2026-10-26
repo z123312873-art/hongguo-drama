@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPublicDetails: (seriesId, vid) => ipcRenderer.invoke('get-public-details', seriesId, vid),
+  getPublicRatings: (ids) => ipcRenderer.invoke('get-public-ratings', ids),
   getEpisodeComments: options => ipcRenderer.invoke('get-episode-comments', options),
   getEpisodeDanmaku: options => ipcRenderer.invoke('get-episode-danmaku', options),
   setStealthMode: enabled => ipcRenderer.invoke('set-stealth-mode', enabled),

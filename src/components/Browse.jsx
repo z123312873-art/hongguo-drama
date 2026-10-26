@@ -3,7 +3,9 @@ import useDialogKeyboard from './useDialogKeyboard';
 import './Browse.css';
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
-import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search } from './icons';
+import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search, Heart } from './icons';
+import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
+import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseTags } from '../catalogTags.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
@@ -12,8 +14,34 @@ import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
 
 const pageCache = new Map();
-const PAGE_CACHE_TTL_MS = 60_000;
+// Category and rank clicks swap this snapshot. A fresh one is not downloaded again.
+// The refresh button, a larger window that still needs more pages, or this age starts an update.
+const PAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
 const LIST_TIMEOUT_MS = 25_000;
+
+function snapshotKey(source, category, genre, page) {
+  return JSON.stringify([source, category || '', genre || '', Number(page) || 1]);
+}
+
+function readSnapshot(source, category, genre, page) {
+  const cached = pageCache.get(snapshotKey(source, category, genre, page));
+  return cached?.results?.length ? cached : null;
+}
+
+function needsPublicScore(results, ratings, id) {
+  const item = results.find(entry => String(entry?.series_id) === id);
+  if (item?.rating != null) return false;
+  const known = Number(ratings?.[id]);
+  return !(Number.isFinite(known) && known > 0 && known <= 10);
+}
+
+function writeSnapshot(source, category, genre, page, entry) {
+  const key = snapshotKey(source, category, genre, page);
+  pageCache.delete(key);
+  pageCache.set(key, entry);
+  if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+}
 
 // Window size only. The live grid's top moves when genre chips, skeletons, or
 // scrolling appear, and that was flipping a full window between one and two source pages.
@@ -47,10 +75,17 @@ function readPosterCapacity(reservedRows = 0) {
  */
 function Browse({ onNavigate, active = true }) {
   const [source, setSource] = useState('hongguo');
-  const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
+  const { sources: mediaSources, loading: sourcesLoading, error: sourcesError } = useMediaSources();
+  const sourceIds = mediaSources.map(item => item.id).join('|');
   const [categories, setCategories] = useState([]);
   const [category, setCategory] = useState('real-drama');
   const [genre, setGenre] = useState('');
+  const [tagLabels, setTagLabels] = useState([]);
+  const [genreCatalog, setGenreCatalog] = useState({});
+  const [library, setLibrary] = useState(readLocalLibrary);
+  const [ratings, setRatings] = useState({});
+  const ratingRequest = useRef(0);
+  const ratingsRef = useRef({});
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
@@ -74,6 +109,8 @@ function Browse({ onNavigate, active = true }) {
   const toastTimer = useRef(null);
   const pageSpan = useRef(1);
   const spanWidth = useRef(0);
+  const reserveRowsRef = useRef(0);
+  const seenSourceIds = useRef(sourceIds);
 
   const invalidateList = useCallback(() => {
     listRequest.current++;
@@ -105,6 +142,9 @@ function Browse({ onNavigate, active = true }) {
   const [heroReady, setHeroReady] = useState(false);
   const heroRequest = useRef(0);
   const reserveRows = source === 'hongguo' && (!heroReady || heroItems.length > 0) ? HERO_RESERVED_ROWS : 0;
+  reserveRowsRef.current = reserveRows;
+
+  useEffect(() => subscribeLocalLibrary(setLibrary), []);
 
   const showToast = useCallback((text, type = 'success') => {
     setToast({ text, type });
@@ -142,27 +182,56 @@ function Browse({ onNavigate, active = true }) {
     async (cat, gen, pg, forceRefresh = false) => {
       invalidateList();
       const request = listRequest.current;
-      const capacity = readPosterCapacity(reserveRows);
+      const capacity = readPosterCapacity(reserveRowsRef.current);
       const slots = cushionedSlots(capacity.slots, capacity.columns);
-      const key = JSON.stringify([sourceRevision, source, cat, gen, pg, slots, pageSpan.current]);
+      const key = snapshotKey(source, cat, gen, pg);
       const cached = pageCache.get(key);
+      const haveCards = Boolean(cached?.results?.length);
       const fallbackUrl = source === 'hongguo'
         ? `https://hongguoduanju.com/${cat.startsWith('hot-') ? 'rank' : 'category'}/${encodeURIComponent(cat)}${gen ? `/${encodeURIComponent(gen)}` : ''}${pg > 1 ? `?page=${pg}` : ''}` : '';
       setUnsupported(false);
       setError('');
-      setResults(cached?.results || []);
-      setMeta(cached?.meta || { total: 0, totalPages: 0, genres: [] });
-      setSourceUrl(cached?.sourceUrl || fallbackUrl);
-      if (!forceRefresh && cached && Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS) {
+      const keepGenres = (list) => {
+        if (source !== 'hongguo' || !Array.isArray(list) || !list.length) return;
+        setGenreCatalog(current => {
+          const previous = current[cat] || {};
+          let changed = false;
+          const next = { ...previous };
+          for (const item of list) {
+            if (!item?.label || !item?.slug || next[item.label] === item.slug) continue;
+            next[item.label] = item.slug;
+            changed = true;
+          }
+          return changed ? { ...current, [cat]: next } : current;
+        });
+      };
+      if (haveCards) {
+        pageSpan.current = cached.pageSpan || 1;
+        setResults(cached.results);
+        setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(cached.sourceUrl || fallbackUrl);
+        keepGenres(cached.meta?.genres);
+      } else {
+        setResults([]);
+        setMeta({ total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(fallbackUrl);
+      }
+      const neededSpan = haveCards && pg === 1
+        ? pagesToFill(slots, cached.perPage || cached.results.length, cached.sourcePages || 1)
+        : 1;
+      const stale = !haveCards || Date.now() - cached.savedAt >= PAGE_CACHE_TTL_MS;
+      // A category click keeps the posters it already has. Only a short first page of a fresh list grows.
+      if (haveCards && !forceRefresh && (stale || neededSpan <= (cached.pageSpan || 1))) {
         setLoading(false);
         return;
       }
       setLoading(true);
       listTimer.current = setTimeout(() => {
         if (request !== listRequest.current) return;
+        if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
         invalidateList();
         setLoading(false);
-        setError(cached ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
+        setError(haveCards ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
       }, LIST_TIMEOUT_MS);
       try {
         const planned = sourcePageWindow(pg, pageSpan.current, Number.MAX_SAFE_INTEGER);
@@ -199,26 +268,28 @@ function Browse({ onNavigate, active = true }) {
           meta: { total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: res.hasMore === true && windowed.count < 2 },
           sourceUrl: res.sourceUrl || fallbackUrl,
           savedAt: Date.now(),
+          pageSpan: pageSpan.current,
+          perPage: firstResults.length,
+          sourcePages: reportedPages,
         };
-        if (!next.results.length && cached && res.unsupported !== true) {
+        if (!next.results.length && haveCards && res.unsupported !== true) {
           throw new Error(res.emptyMessage || '来源这次没有返回片单，请稍后重试。');
         }
         rememberCatalogTitles(next.results);
         setResults(next.results);
         setMeta(next.meta);
         setSourceUrl(next.sourceUrl);
-        if (next.results.length) {
-          pageCache.delete(key);
-          pageCache.set(key, next);
-          if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
-        } else {
+        keepGenres(next.meta.genres);
+        if (next.results.length) writeSnapshot(source, cat, gen, pg, next);
+        else {
           pageCache.delete(key);
           setUnsupported(res.unsupported === true);
           setError(res.emptyMessage || '这一页没有取到内容，可重新加载或换分类。');
         }
       } catch (e) {
         if (request !== listRequest.current) return;
-        setError(`${cached ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
+        if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
+        setError(`${haveCards ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
       } finally {
         if (request === listRequest.current) {
           clearTimeout(listTimer.current);
@@ -226,7 +297,7 @@ function Browse({ onNavigate, active = true }) {
         }
       }
     },
-    [invalidateList, source, sourceRevision, reserveRows]
+    [invalidateList, source]
   );
 
   useEffect(() => {
@@ -236,16 +307,85 @@ function Browse({ onNavigate, active = true }) {
   useEffect(() => { if (active) loadDownloadedMap(); }, [active, loadDownloadedMap]);
 
   useEffect(() => {
-    invalidateList(); closeDetail(); pageCache.clear();
-    pageSpan.current = 1; spanWidth.current = 0;
-    setGenre(''); setPage(1); setResults([]); setMeta({ total: 0, totalPages: 0, genres: [] });
-    if (!mediaSources.some(item => item.id === source)) { setSource('hongguo'); setCategory('real-drama'); }
-  }, [sourceRevision, mediaSources, invalidateList, closeDetail]);
+    if (seenSourceIds.current === sourceIds) return;
+    seenSourceIds.current = sourceIds;
+    invalidateList();
+    closeDetail();
+    pageCache.clear();
+    heroRequest.current += 1;
+    pageSpan.current = 1;
+    spanWidth.current = 0;
+    setGenre('');
+    setPage(1);
+    setResults([]);
+    setMeta({ total: 0, totalPages: 0, genres: [] });
+    setSourceUrl('');
+    setError('');
+    setHeroItems([]);
+    setHeroReady(false);
+    if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory('real-drama'); }
+  }, [sourceIds, source, invalidateList, closeDetail]);
+
+  const rankingView = source === 'hongguo' && String(category).startsWith('hot-');
+  const serverSlug = source === 'hongguo' && tagLabels.length === 1 && !rankingView
+    ? (genreCatalog[category]?.[tagLabels[0]] || '') : '';
+  useEffect(() => {
+    if (source !== 'hongguo' || serverSlug === genre) return;
+    setGenre(serverSlug);
+  }, [source, serverSlug, genre]);
+
+  ratingsRef.current = ratings;
+  useEffect(() => {
+    if (source !== 'hongguo' || !window.electronAPI?.getPublicRatings) return undefined;
+    const pendingIds = () => results
+      .map(item => String(item?.series_id || ''))
+      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, id));
+    if (!pendingIds().length) return undefined;
+    const request = ++ratingRequest.current;
+    let cancelled = false;
+    let retryTimer;
+    const pull = async (attempt) => {
+      const ids = pendingIds();
+      if (!ids.length || cancelled || request !== ratingRequest.current) return;
+      for (let index = 0; index < ids.length; index += 8) {
+        if (cancelled || request !== ratingRequest.current) return;
+        try {
+          const response = await window.electronAPI.getPublicRatings(ids.slice(index, index + 8));
+          if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) continue;
+          const numeric = {};
+          for (const [id, value] of Object.entries(response.ratings)) {
+            const score = Number(value);
+            if (Number.isFinite(score) && score > 0 && score <= 10) numeric[id] = Math.round(score * 10) / 10;
+          }
+          if (Object.keys(numeric).length) {
+            ratingsRef.current = { ...ratingsRef.current, ...numeric };
+            setRatings(ratingsRef.current);
+          }
+        } catch { /* The next group still runs. A miss is retried below. */ }
+      }
+      if (cancelled || request !== ratingRequest.current || attempt >= 2 || !pendingIds().length) return;
+      retryTimer = setTimeout(() => { pull(attempt + 1); }, attempt === 0 ? 4000 : 12000);
+    };
+    pull(0);
+    return () => { cancelled = true; clearTimeout(retryTimer); };
+  }, [source, results]);
 
   useEffect(() => {
-    if (active && !sourcesLoading && mediaSources.some(item => item.id === source)) loadList(category, genre, page);
+    if (!active || !sourceIds.split('|').includes(source)) return undefined;
+    loadList(category, genre, page);
     return invalidateList;
-  }, [active, category, genre, page, loadList, sourcesLoading, mediaSources, invalidateList]);
+  }, [active, category, genre, page, loadList, source, sourceIds, invalidateList]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      const cached = readSnapshot(source, category, genre, page);
+      if (!cached || cached.holdUntil > Date.now() || Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS) return;
+      loadList(category, genre, page, true);
+    }, CATALOG_REFRESH_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [active, source, category, genre, page, loadList]);
 
   useEffect(() => {
     if (source !== 'hongguo') {
@@ -254,22 +394,41 @@ function Browse({ onNavigate, active = true }) {
       setHeroReady(true);
       return undefined;
     }
+    const cached = readSnapshot('hongguo', 'hot-drama', '', 1);
+    const lineup = heroLineup(cached?.results);
+    const fresh = lineup.length > 0 && Date.now() - cached.savedAt < PAGE_CACHE_TTL_MS && !(cached.holdUntil > Date.now());
+    if (lineup.length) {
+      setHeroItems(lineup);
+      setHeroReady(true);
+      if (fresh) return undefined;
+    } else setHeroReady(false);
     const request = ++heroRequest.current;
-    setHeroReady(false);
     let cancelled = false;
     (async () => {
       try {
-        const res = await window.electronAPI.browseList({ source: 'hongguo', category: 'hot-drama', page: 1 });
+        const res = await window.electronAPI.browseList({ source: 'hongguo', category: 'hot-drama', page: 1, forceRefresh: lineup.length > 0 });
         if (cancelled || request !== heroRequest.current) return;
-        setHeroItems(heroLineup(res?.success ? res.results : []));
+        const results = res?.success && Array.isArray(res.results) ? res.results : [];
+        if (results.length) {
+          writeSnapshot('hongguo', 'hot-drama', '', 1, {
+            results,
+            meta: { total: res.total || results.length, totalPages: Number(res.totalPages) || 0, genres: [], hasMore: false },
+            sourceUrl: res.sourceUrl || 'https://hongguoduanju.com/rank/hot-drama',
+            savedAt: Date.now(),
+            pageSpan: 1,
+            perPage: results.length,
+            sourcePages: Number(res.totalPages) || 1,
+          });
+          setHeroItems(heroLineup(results));
+        } else if (!lineup.length) setHeroItems([]);
       } catch {
-        if (!cancelled && request === heroRequest.current) setHeroItems([]);
+        if (!cancelled && request === heroRequest.current && !lineup.length) setHeroItems([]);
       } finally {
         if (!cancelled && request === heroRequest.current) setHeroReady(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [source, sourceRevision]);
+  }, [source, sourceIds]);
 
   useEffect(() => {
     if (!active || page !== 1 || !results.length) return undefined;
@@ -289,6 +448,18 @@ function Browse({ onNavigate, active = true }) {
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
   }, [active, page, results.length, category, genre, loadList, meta.totalPages, reserveRows]);
 
+  const showSnapshot = (nextSource, cat, gen, pg) => {
+    const snap = readSnapshot(nextSource, cat, gen, pg);
+    if (snap?.pageSpan) pageSpan.current = snap.pageSpan;
+    else { pageSpan.current = 1; spanWidth.current = 0; }
+    setResults(snap?.results || []);
+    setMeta(snap?.meta || { total: 0, totalPages: 0, genres: [] });
+    setSourceUrl(snap?.sourceUrl || '');
+    setUnsupported(false);
+    setError('');
+    setLoading(!snap?.results?.length);
+  };
+
   const switchSource = (next) => {
     if (next === source) return;
     invalidateList();
@@ -296,33 +467,27 @@ function Browse({ onNavigate, active = true }) {
     setSource(next);
     setCategory('real-drama');
     setGenre('');
+    setTagLabels([]);
     setPage(1);
-    setResults([]);
-    setMeta({ total: 0, totalPages: 0, genres: [] });
-    setSourceUrl('');
-    setError('');
-    pageSpan.current = 1;
-    spanWidth.current = 0;
+    showSnapshot(next, 'real-drama', '', 1);
   };
 
   const switchCategory = (slug) => {
     if (slug === category) return;
     invalidateList();
-    setError('');
-    setMeta({ total: 0, totalPages: 0, genres: [] });
     setCategory(slug);
     setGenre('');
+    setTagLabels([]);
     setPage(1);
-    setResults([]);
+    showSnapshot(source, slug, '', 1);
   };
 
   const switchGenre = (slug) => {
     if (slug === genre) return;
     invalidateList();
-    setError('');
     setGenre(slug);
     setPage(1);
-    setResults([]);
+    showSnapshot(source, category, slug, 1);
   };
 
   const gotoPage = (p) => {
@@ -330,8 +495,8 @@ function Browse({ onNavigate, active = true }) {
     const next = Math.min(Math.max(1, p), max);
     if (next === page) return;
     invalidateList();
-    setError('');
     setPage(next);
+    showSnapshot(source, category, genre, next);
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -440,7 +605,25 @@ function Browse({ onNavigate, active = true }) {
 
   useDialogKeyboard(active && (!!detail || detailLoading), closeDetail, '.browse-drawer');
 
-  const visibleResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
+  const chooseTags = (label) => {
+    setTagLabels(toggleBrowseTags(tagLabels, label));
+    setPage(1);
+  };
+  const clientTagFilter = source === 'hongguo' && (tagLabels.length > 1 || (tagLabels.length === 1 && !serverSlug));
+  const completionResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
+  const visibleResults = clientTagFilter ? completionResults.filter(item => posterMatchesTags(item.tags, tagLabels)) : completionResults;
+  const favoriteIds = new Set((library.items || []).filter(item => item.favorite).map(item => item.id));
+  const toggleFavorite = (event, item) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = String(item.series_id || '');
+    const saved = saveLocalSeries({
+      id, title: item.series_title, cover: typeof item.cover === 'string' ? item.cover : '',
+      published_at: item.published_at, favorite: !favoriteIds.has(id),
+    });
+    if (saved.error) showToast(saved.error, 'error');
+    else setLibrary(saved);
+  };
   const totalPages = meta.totalPages || 0;
   const pageNumbers = useMemo(() => {
     if (!totalPages) return [];
@@ -501,8 +684,16 @@ function Browse({ onNavigate, active = true }) {
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
-      {/* 题材 chips */}
-      {meta.genres.length > 0 && (
+      {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
+      {source === 'hongguo' && (
+        <div className="browse-genres" role="group" aria-label="标签筛选，可左右滑动，最多同时选择两个">
+          <button type="button" className={`genre-chip ${tagLabels.length === 0 ? 'active' : ''}`} aria-pressed={tagLabels.length === 0} onClick={() => chooseTags('全部')}>全部</button>
+          {SHARED_BROWSE_TAGS.map((label) => (
+            <button type="button" key={label} className={`genre-chip ${tagLabels.includes(label) ? 'active' : ''}`} aria-pressed={tagLabels.includes(label)} onClick={() => chooseTags(label)}>{label}</button>
+          ))}
+        </div>
+      )}
+      {source !== 'hongguo' && meta.genres.length > 0 && (
         <div className="browse-genres">
           <button
             className={`genre-chip ${genre === '' ? 'active' : ''}`}
@@ -532,7 +723,7 @@ function Browse({ onNavigate, active = true }) {
         <span id="browse-completion-hint">仅筛选当前页；状态未注明的剧集只在“全部”显示。</span>
         {completion !== 'all' && <span role="status">本页 {visibleResults.length} / {results.length} 部</span>}
       </div>
-      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status"><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></div>}
+      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status">{clientTagFilter ? <><p>本页没有同时带有所选标签的剧集。</p><button className="btn btn-outline" onClick={() => chooseTags('全部')}>显示本页全部</button></> : <><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></>}</div>}
 
       {error && results.length > 0 && <div className="alert alert-error browse-update-error" role="alert">
         <span>{error}</span><button className="btn btn-outline btn-sm" disabled={loading || sourcesLoading} onClick={() => loadList(category, genre, page, true)}>重试</button>
@@ -557,11 +748,24 @@ function Browse({ onNavigate, active = true }) {
               >
                 <div className="browse-cover">
                   {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
+                  {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
                   {item.cover ? (
                     <img src={item.cover} alt={item.series_title} loading="lazy" />
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>
                   )}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className={`browse-fav ${favoriteIds.has(String(item.series_id)) ? 'is-on' : ''}`}
+                    aria-label={favoriteIds.has(String(item.series_id)) ? `取消收藏 ${item.series_title}` : `收藏 ${item.series_title}`}
+                    aria-pressed={favoriteIds.has(String(item.series_id))}
+                    onClick={(event) => toggleFavorite(event, item)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      toggleFavorite(event, item);
+                    }}
+                  ><Heart size={15} /></span>
                   {(item.episode_label || item.episode_count > 0) && (
                     <span className="browse-ep-badge">{item.episode_label || `${item.episode_count} 集`}</span>
                   )}
@@ -582,7 +786,7 @@ function Browse({ onNavigate, active = true }) {
                 {item.heat && <div className="browse-card-heat">{item.heat}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">
-                    {item.tags.slice(0, 2).map((t) => (
+                    {[...item.tags].sort((a, b) => Number(tagLabels.includes(b)) - Number(tagLabels.includes(a))).slice(0, 3).map((t) => (
                       <span key={t} className="browse-tag">{t}</span>
                     ))}
                   </div>

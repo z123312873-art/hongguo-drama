@@ -10,6 +10,7 @@ import { useDanmakuWarmup } from './danmakuWarmup.mjs';
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
 import SequelFinder from './SequelFinder';
+import * as nextSeason from '../native/next-season.mjs';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
@@ -113,6 +114,11 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const lastSavedRef = useRef(0);
   const stateRef = useRef({ currentIndex, autoNext, activeSeriesId });
   stateRef.current = { currentIndex, autoNext, activeSeriesId, waitingFor, downloadQuality, onlineQuality, qualityLoading, detail };
+  const episodesRef = useRef([]);
+  const seasonLookupRef = useRef('');
+  const seasonReadyRef = useRef(null);
+  const seasonOpeningRef = useRef(false);
+  const [seasonHandoff, setSeasonHandoff] = useState(null);
   const selectedSeriesRef = useRef('');
   const selectionVersion = useRef(0);
   const onlineRequestRef = useRef(null);
@@ -527,6 +533,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   }, [active, activeSeriesId, waitingFor, loadDetail, currentPosition, isCurrentFallback, usableLocal, resumeLocal]);
 
   const episodes = detail ? detail.episodes : [];
+  episodesRef.current = episodes;
   const current = useMemo(
     () => episodes.find((e) => e.vid_index === currentIndex) || null,
     [episodes, currentIndex]
@@ -691,6 +698,31 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         tryAutoCompat(idx);
       }
     }, 2600);
+    const finale = nextSeason.seasonFinaleIndex?.(episodesRef.current) || 0;
+    if (finale && idx === finale) {
+      const token = `${stateRef.current.activeSeriesId}:${idx}`;
+      if (seasonLookupRef.current !== token) {
+        seasonLookupRef.current = token;
+        seasonReadyRef.current = null;
+        const seriesId = stateRef.current.activeSeriesId;
+        const title = stateRef.current.detail?.series_title || '';
+        window.electronAPI.findSeriesSequels?.(seriesId).then((result) => {
+          if (seasonLookupRef.current !== token) return;
+          const picked = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, result?.results || []);
+          if (!picked) return;
+          seasonReadyRef.current = picked;
+          window.electronAPI.searchResolve?.(picked.series_id).then((resolved) => {
+            if (seasonLookupRef.current !== token || !resolved?.success || String(resolved.data?.series_id) !== picked.series_id) return;
+            const confirmed = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, [{
+              ...picked,
+              series_title: resolved.data.series_title || picked.series_title,
+              cover: resolved.data.cover || picked.cover,
+            }]);
+            if (confirmed) seasonReadyRef.current = confirmed;
+          }).catch(() => {});
+        }).catch(() => {});
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, tryAutoCompat, playbackVersion, canPlay, videoSrc, persistPosition]);
 
@@ -780,6 +812,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (!ep || ep.locked) return;
       fallbackAttemptRef.current = null;
       reconnectAttemptRef.current = null;
+      if (vidIndex !== stateRef.current.currentIndex) setSeasonHandoff(null);
       if (!usableLocal(ep, String(activeSeriesId))) {
         startOnlinePlay(vidIndex, resumeAt);
         return;
@@ -885,9 +918,13 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       lastVideoSrcRef.current = '';
       setCompatMap(previous => { const result = { ...previous }; delete result[ci]; return result; });
     }
+    const finale = nextSeason.seasonFinaleIndex?.(episodes) || 0;
+    const prepared = seasonReadyRef.current;
     if (next) {
       goToEpisode(next.vid_index, 0);
       setAutoAdvancing(true);
+    } else if (an && finale && ci === finale && prepared?.series_id) {
+      setSeasonHandoff({ ...prepared, seconds: prepared.seconds || 5, phase: 'prompt' });
     } else {
       if (autoDelete && sid) {
         resetPlayback(false);
@@ -1024,7 +1061,30 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     };
   }, [active, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast, shortcuts, toggleFullscreen]);
 
+  const openNextSeason = useCallback(async (target) => {
+    if (!target?.series_id || seasonOpeningRef.current) return;
+    seasonOpeningRef.current = true;
+    try {
+      let result = await window.electronAPI.playSeries?.({ seriesId: target.series_id, vidIndex: 1 });
+      if (!result?.success && result?.code === 'SERIES_NOT_FOUND') {
+        const resolved = await window.electronAPI.searchResolve?.(target.series_id);
+        if (!resolved?.success) throw new Error(resolved?.error || '下一季详情暂不可用');
+        const episode = resolved.data?.episodes?.find(item => !item.locked);
+        if (!episode) throw new Error('下一季暂时没有可播放的分集');
+        result = await window.electronAPI.playSeries?.({ seriesId: target.series_id, vidIndex: episode.vid_index });
+      }
+      if (!result?.success) throw new Error(result?.error || '无法打开下一季');
+    } catch (error) {
+      showToast(error.message || '切换下一季失败，请重试');
+    } finally {
+      seasonOpeningRef.current = false;
+    }
+  }, [showToast]);
+
   const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false, autoplay = true) => {
+    seasonLookupRef.current = '';
+    seasonReadyRef.current = null;
+    setSeasonHandoff(null);
     persistPosition(true);
     const version = ++selectionVersion.current;
     selectedSeriesRef.current = String(sid);
@@ -1211,6 +1271,25 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   }, [active, portrait, episodesOpen, loading, showToast]);
   useEffect(() => () => { window.electronAPI.setEpisodePanelOpen?.(false).catch(() => {}); }, []);
 
+  useEffect(() => {
+    if (!autoNext) setSeasonHandoff(null);
+  }, [autoNext]);
+
+  useEffect(() => {
+    if (seasonHandoff?.phase !== 'prompt') return undefined;
+    if (seasonHandoff.seconds <= 0) {
+      const target = seasonHandoff;
+      setSeasonHandoff(null);
+      openNextSeason(target);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setSeasonHandoff((current) => current?.phase === 'prompt' && current.series_id === seasonHandoff.series_id
+        ? { ...current, seconds: current.seconds - 1 } : current);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [seasonHandoff, openNextSeason]);
+
   // ===== 渲染 =====
   if (loading) {
     return <div className="player-container"><div className="player-empty">加载中…</div></div>;
@@ -1265,8 +1344,16 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         <div className="player-title">
           <Play size={22} />
           <h2>我的剧库</h2>
+          <button
+            aria-expanded={pickerOpen}
+            className={`btn btn-primary series-picker-btn ${pickerOpen ? 'open' : ''}`}
+            onClick={() => setPickerOpen((v) => !v)}
+          >
+            切换短剧
+            <span className="series-count">{seriesList.length}</span>
+            <ChevronDown size={16} />
+          </button>
         </div>
-        <p className="player-download-quality-hint" id="player-online-quality-hint">自动、720P、1080P 都会保留。某一集片源不够时只临时播放该集的实际画面，自动播放下一集仍按所选清晰度重新取源。</p>
         <div className="player-header-right">
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
           <button aria-pressed={cacheNext} className={`btn btn-outline ${cacheNext ? 'btn-autonext-on' : ''}`}
@@ -1304,7 +1391,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <label className="player-download-quality">
             <span>在线播放清晰度</span>
             <select className="input-field" aria-label="在线播放清晰度" value={onlineQuality}
-              disabled={!supportsOnlineQuality} aria-describedby="player-online-quality-hint"
+              disabled={!supportsOnlineQuality}
               onChange={event => changeOnlineQuality(event.target.value)}>
               <option value="auto">{supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定'}</option>
               <option value="720p">720P</option>
@@ -1320,15 +1407,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <span className="player-series-name" title={detail ? detail.series_title : ''}>
             {detail ? detail.series_title : '—'}
           </span>
-          <button
-            aria-expanded={pickerOpen}
-            className={`btn btn-outline series-picker-btn ${pickerOpen ? 'open' : ''}`}
-            onClick={() => setPickerOpen((v) => !v)}
-          >
-            切换短剧
-            <span className="series-count">{seriesList.length}</span>
-            <ChevronDown size={16} />
-          </button>
+          <SequelFinder seriesId={activeSeriesId} active={active && !actionsHidden} />
         </div>
         <div className="player-series-actions">
           <button className="btn btn-outline player-download-jump" aria-controls="player-management"
@@ -1481,6 +1560,22 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       {/* 播放区 */}
       <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} data-picture-mode={pictureMode} ref={stageRef}>
           {rateNotice !== null && <div className="player-rate-notice" role="status" aria-live="polite">{rateNotice}×</div>}
+          {seasonHandoff?.phase === 'prompt' && (
+            <div className="season-handoff" role="dialog" aria-modal="true" aria-label="即将播放下一季" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSeasonHandoff(null); } }}>
+              <div className="season-handoff-card">
+                {seasonHandoff.cover ? <img src={seasonHandoff.cover} alt="" /> : null}
+                <div>
+                  <p>本季已播完</p>
+                  <h3>{seasonHandoff.series_title}</h3>
+                  <p>{seasonHandoff.seconds > 0 ? `${seasonHandoff.seconds} 秒后自动播放下一季第 1 集` : '正在打开下一季'}</p>
+                  <div className="season-handoff-actions">
+                    <button type="button" className="btn btn-primary" onClick={() => { const target = seasonHandoff; setSeasonHandoff(null); openNextSeason(target); }}>立即播放</button>
+                    <button type="button" className="btn btn-outline" onClick={() => setSeasonHandoff(null)}>留在本季</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <video
             ref={videoRef}
             crossOrigin="anonymous"
@@ -1773,11 +1868,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       </div>
 
       <div className="player-footer" hidden={actionsHidden}>
-        {/^[0-9]{6,30}$/.test(String(activeSeriesId)) ? (
-          <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} cover={detail?.cover || ''}>
-            <SequelFinder seriesId={activeSeriesId} active={active && !actionsHidden} />
-          </CommunityPanel>
-        ) : <SequelFinder seriesId={activeSeriesId} active={active && !actionsHidden} />}
+        {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && (
+          <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} cover={detail?.cover || ''} />
+        )}
       </div>
       {toast && <div className="dm-toast dm-toast-success" onClick={() => setToast(null)}>{toast}</div>}
 

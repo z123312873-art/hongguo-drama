@@ -35,10 +35,25 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, chil
     (async () => {
       try {
         if (!window.electronAPI?.getPublicDetails) throw new Error('当前环境暂不支持读取公开剧评');
-        const data = await window.electronAPI.getPublicDetails(id, episodeId || undefined);
+        // Series reviews come from the detail page. The player page answers locked episodes with HTTP 302.
+        const data = await window.electronAPI.getPublicDetails(id);
         if (!data?.success) throw new Error(data?.error || '公开剧评暂时无法加载');
+        let episodeReviews = null;
+        let episodeNotice = '';
+        if (episodeId && window.electronAPI.getEpisodeComments) {
+          const comments = await window.electronAPI.getEpisodeComments({ seriesId: id, episodeId, cursor: null, limit: 30 });
+          if (cancelled) return;
+          if (comments?.success) {
+            episodeReviews = {
+              total: typeof comments.total === 'number' ? comments.total : null,
+              items: (Array.isArray(comments.items) ? comments.items : [])
+                .filter(item => item && typeof item.content === 'string' && item.content.trim())
+                .map(item => ({ content: item.content, author: '', created_at: null, likes: null, rating: null })),
+            };
+          } else episodeNotice = comments?.error || '当前集评论暂时无法加载，可稍后重试';
+        }
         if (cancelled) return;
-        setResult({ key: requestKey, data });
+        setResult({ key: requestKey, data: { ...data, episode_reviews: episodeReviews, episodeNotice } });
         setLibrary(saveLocalSeries({ id, title, cover, published_at: data.published_at }));
       } catch (failure) {
         if (!cancelled) setError(failure.message || '公开剧评暂时无法加载');
@@ -94,7 +109,7 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, chil
           <div className="community-review-meta"><strong>{typeof review.author === 'string' && review.author.trim() ? review.author : '公开用户'}</strong><span>{reviewDate(review.created_at)}</span></div>
           <p>{review.content}</p>
           <div className="community-review-foot">{review.rating != null && <span>评分 {count(review.rating)}</span>}{review.likes != null && <span>公开点赞 {count(review.likes)}</span>}</div>
-        </li>)}</ul> : <p className="community-status">{episodeScope && !reviews ? '当前片源未提供单集评论。' : '本次未返回公开评论。'}</p>}
+        </li>)}</ul> : <p className="community-status" role="status">{episodeScope && detail?.episodeNotice ? detail.episodeNotice : episodeScope && !reviews ? '当前片源未提供单集评论。' : '本次未返回公开评论。'}</p>}
         <p className="community-note">展示服务返回的公开内容，可能仅含部分评论；不代表完整评论列表。</p>
       </>}
     </div>}

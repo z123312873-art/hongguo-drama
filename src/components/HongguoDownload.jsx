@@ -5,6 +5,7 @@ import SearchPanel from './SearchPanel';
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
+import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 
 
 function HongguoDownload({ onNavigate, active = true }) {
@@ -24,12 +25,14 @@ function HongguoDownload({ onNavigate, active = true }) {
   const [qualityLoading, setQualityLoading] = useState(true);
   const [openingPlayer, setOpeningPlayer] = useState(false);
   const playPending = useRef(false);
+  const [library, setLibrary] = useState(readLocalLibrary);
   const firstPlayable = seriesData?.episodes.find((ep) => !ep.locked);
   const resolveRequest = useRef(0);
   const pendingResolve = useRef(null);
   const searchVersion = resolveRequest.current;
 
   useEffect(() => () => { resolveRequest.current++; }, []);
+  useEffect(() => subscribeLocalLibrary(setLibrary), []);
   useEffect(() => {
     resolveRequest.current++; pendingResolve.current = null; setLoading(false);
     setSeriesData(current => current?.series_id?.startsWith('custom:') ? null : current);
@@ -55,18 +58,40 @@ function HongguoDownload({ onNavigate, active = true }) {
     setTab(next);
   };
 
-  // 搜索选中一部剧后：复用既有的选集下载界面
+  const clearResolvedSeries = () => {
+    setRangeInput('');
+    setErrorMsg('');
+    setSuccessMsg('');
+    setSeriesData(null);
+    setSelectedVids(new Set());
+  };
+
+  // 搜索选中一部剧后仍留在搜索页，复用既有的选集下载界面。
   const handleSeriesFromSearch = (data) => {
     if (searchVersion !== resolveRequest.current) return;
     resolveRequest.current++;
     setLoading(false);
     setRangeInput('');
     setErrorMsg('');
-    setTab('input');
     setSeriesData(data);
     setSelectedVids(new Set());
     setSuccessMsg(`已打开《${data.series_title}》共 ${data.total} 集。立即播放为在线观看；要下载请先勾选集数`);
-    document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const seriesFavorite = !!(seriesData && (library.items || []).some(item => item.id === String(seriesData.series_id) && item.favorite));
+  const toggleSeriesFavorite = () => {
+    if (!seriesData?.series_id || !seriesData.series_title) return;
+    const saved = saveLocalSeries({
+      id: String(seriesData.series_id),
+      title: seriesData.series_title,
+      cover: typeof seriesData.cover === 'string' ? seriesData.cover : '',
+      favorite: !seriesFavorite,
+    });
+    if (saved.error) setErrorMsg(saved.error);
+    else {
+      setLibrary(saved);
+      setErrorMsg('');
+    }
   };
 
   // 解析红果短剧
@@ -246,6 +271,7 @@ function HongguoDownload({ onNavigate, active = true }) {
         <SearchPanel
           active={active && tab === 'search'}
           onSelectSeries={handleSeriesFromSearch}
+          onSelectStart={clearResolvedSeries}
           onSwitchToInput={() => switchTab('input')}
         />
       </div>
@@ -319,12 +345,17 @@ function HongguoDownload({ onNavigate, active = true }) {
                 </div>
               )}
               <div className="series-meta">
-                <h3 className="series-title">《{seriesData.series_title}》</h3>
-                <div className="series-tags">
-                  <span className="badge">{mediaSourceLabel(seriesData.series_id, mediaSources)}</span>
-                  <span className="badge">共 {seriesData.total} 集</span>
-                  <span className="badge badge-secondary">已选 {selectedVids.size} 集</span>
+                <div className="series-meta-copy">
+                  <h3 className="series-title">《{seriesData.series_title}》</h3>
+                  <div className="series-tags">
+                    <span className="badge">{mediaSourceLabel(seriesData.series_id, mediaSources)}</span>
+                    <span className="badge">共 {seriesData.total} 集</span>
+                    <span className="badge badge-secondary">已选 {selectedVids.size} 集</span>
+                  </div>
                 </div>
+                <button type="button" className="btn btn-primary series-favorite-btn" aria-pressed={seriesFavorite} onClick={toggleSeriesFavorite}>
+                  {seriesFavorite ? '已加入收藏清单' : '加入收藏清单'}
+                </button>
               </div>
             </div>
 

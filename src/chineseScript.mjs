@@ -1,13 +1,28 @@
-// Display-only Traditional Chinese. Search requests, filenames, and stored titles stay untouched.
+// Display conversion is traditional-only. Search matching uses a separate simplified key
+// and never rewrites the typed query, filenames, or stored titles.
 import * as OpenCC from 'opencc-js/cn2t';
+import * as OpenCCToSimplified from 'opencc-js/t2cn';
 
 const converter = OpenCC.Converter({ from: 'cn', to: 'twp' });
+const toSimplifiedRaw = OpenCCToSimplified.Converter({ from: 'twp', to: 'cn' });
 const cache = new Map();
 const HAN = /[\u3400-\u9fff]/;
 
 // OpenCC maps 质量 to 質量 (mass). In this app the word means media quality.
 function protectSenses(text) {
   return text.includes('质量') ? text.replaceAll('质量', '品質') : text;
+}
+
+export function toSimplified(value) {
+  const text = String(value ?? '');
+  if (!text || !HAN.test(text)) return text;
+  try { return toSimplifiedRaw(text); }
+  catch { return text; }
+}
+
+// One comparison key for simplified and traditional titles.
+export function canonicalTitle(value) {
+  return toSimplified(value).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 }
 
 export function toTraditional(value) {

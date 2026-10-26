@@ -1,15 +1,23 @@
 const axios = require('axios');
 const { net } = require('electron');
+const { rememberWebEpisodes } = require('./episode-prelude');
 
 const SITE = 'https://hongguoduanju.com';
 const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
 const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama', 'hot-ai-drama']);
 const TIMEOUT_MS = 10000;
 const MAX_PAGE_BYTES = 8 * 1024 * 1024;
-// 分类页与热播页共用同一份目录缓存；30 秒过短会让每次切页都直连来源。
-const CACHE_MS = 120000;
+// Same window as the discover page. A manual refresh still bypasses this.
+const CACHE_MS = 10 * 60 * 1000;
 const cache = new Map();
 const pending = new Map();
+
+function ratingNumber(value) {
+  const match = String(value ?? '').match(/(\d+(?:\.\d+)?)/);
+  const number = typeof value === 'number' ? value : Number(match?.[1]);
+  if (!Number.isFinite(number) || number <= 0 || number > 10) return null;
+  return Math.round(number * 10) / 10;
+}
 
 function publicMetadata(item) {
   const episode_label = typeof item?.episode_right_text === 'string' ? item.episode_right_text.trim().slice(0, 80) : '';
@@ -57,13 +65,17 @@ function parseCatalog(html, category, page, sourceUrl) {
     if (!/^\d{6,}$/.test(item?.series_id) || typeof item.series_name !== 'string' || !item.series_name.trim() || seen.has(String(item.series_id))) return false;
     seen.add(String(item.series_id));
     return true;
-  }).map(item => ({
-    series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
-    episode_count: Number(item.episode_cnt) || 0,
-    tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
-    ...publicMetadata(item),
-    url: `${SITE}/detail?series_id=${item.series_id}`,
-  }));
+  }).map(item => {
+    rememberWebEpisodes(item.series_id, item);
+    return {
+      series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
+      episode_count: Number(item.episode_cnt) || 0,
+      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
+      rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
+      ...publicMetadata(item),
+      url: `${SITE}/detail?series_id=${item.series_id}`,
+    };
+  });
   const genres = (Array.isArray(data.selectorList) ? data.selectorList : []).flatMap(row => Array.isArray(row?.items) ? row.items : [])
     .filter(item => /^[a-z0-9-]+$/.test(item?.selector_item_id) && typeof item.show_name === 'string')
     .map(item => ({ slug: item.selector_item_id, label: item.show_name }));
@@ -114,7 +126,8 @@ function parseRanking(html, category, page, sourceUrl) {
     return { series_id: id, series_title: title,
       cover: typeof item.cover === 'string' && /^https?:\/\//.test(item.cover) ? item.cover : '',
       episode_count: Array.isArray(item.episodeVids) ? item.episodeVids.length : 0,
-      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
+      tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
+      rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
       introduction: cleanIntroduction(item.description || item.intro || item.series_intro || item.abstract),
       ...publicMetadata(item),
@@ -141,6 +154,7 @@ function parseRanking(html, category, page, sourceUrl) {
         heatText: text(article).match(/[\d.,]+\s*[万亿]?\s*热度/)?.[0] || '',
         cover: cover ? decodeHtml(cover[1] ?? cover[2]) : '',
         description: introduction,
+        rating: text(article).match(/评分\s*(\d+(?:\.\d+)?)/)?.[1],
         tags: tags ? Array.from(tags[1].matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi), tag => text(tag[1])) : [],
       });
       if (item) results.push(item);
@@ -237,4 +251,4 @@ async function browseList(options = {}, proxyLogin) {
   return task;
 }
 
-module.exports = { browseList, readRouterData, publicMetadata };
+module.exports = { browseList, parseCatalog, readRouterData, publicMetadata };

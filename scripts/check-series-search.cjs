@@ -90,6 +90,22 @@ function searchModule() { assert.ok(fs.existsSync(file), 'bounded search module 
     }
     assert.equal(calls, 0);
   });
+  await check('traditional titles search the simplified base and do not treat a later season as the next one', async () => {
+    const { immediateNextSeason } = require('../src/native/next-season');
+    const calls = [];
+    const current = { series_id: '10000011', series_title: '誰讓這個文盲修仙的' };
+    const result = await searchModule().findSeriesSequels(current, [], async kw => {
+      calls.push(kw);
+      return ok(kw.includes('第二') || kw.includes('第2')
+        ? [{ series_id: '10000012', series_title: '谁让这个文盲修仙的第二季', cover: 'https://img.example/2.jpg' }]
+        : [{ series_id: '10000015', series_title: '谁让这个文盲修仙的第五季' }]);
+    });
+    assert.equal(calls[0], '谁让这个文盲修仙的');
+    assert.ok(calls.includes('谁让这个文盲修仙的第二季'));
+    assert.deepEqual(result.results.map(item => item.series_id), ['10000012', '10000015']);
+    assert.equal(immediateNextSeason(current, result.results).series_id, '10000012');
+    assert.equal(immediateNextSeason(current, result.results.filter(item => item.series_id === '10000015')), null);
+  });
   await check('merged UI results rank exact and contained titles, dedupe within source and retain other sources', () => {
     const module = { exports: {} };
     const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/SearchPanel.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;

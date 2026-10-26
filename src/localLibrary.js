@@ -7,7 +7,7 @@ export function readLocalLibrary() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const items = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(items) || items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || typeof item.favorite !== 'boolean' || (item.published_at !== null && !validPublishedAt(item.published_at)))) {
+    if (!Array.isArray(items) || items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || typeof item.favorite !== 'boolean' || (item.published_at !== null && !validPublishedAt(item.published_at)) || (item.favorited_at != null && !validPublishedAt(item.favorited_at)))) {
       throw new Error('保存的数据格式不正确');
     }
     return { items, error: '' };
@@ -22,17 +22,22 @@ export function saveLocalSeries({ id, title, published_at, favorite, cover }) {
   const seriesId = String(id || '').trim();
   if (!seriesId || !String(title || '').trim()) return { ...current, error: '缺少剧集名称或编号，无法保存到本机。' };
   const previous = current.items.find(item => item.id === seriesId);
+  const nextFavorite = typeof favorite === 'boolean' ? favorite : previous?.favorite ?? false;
+  const favoritedAt = nextFavorite
+    ? (previous?.favorite && validPublishedAt(previous.favorited_at) ? previous.favorited_at : Date.now())
+    : null;
   const next = {
     id: seriesId,
     title: String(title).trim(),
     published_at: validPublishedAt(published_at) ? published_at : previous?.published_at ?? null,
-    favorite: typeof favorite === 'boolean' ? favorite : previous?.favorite ?? false,
+    favorite: nextFavorite,
+    favorited_at: favoritedAt,
     cover: typeof cover === 'string' && /^https?:\/\//i.test(cover) ? cover : previous?.cover || '',
   };
   const items = [...current.items.filter(item => item.id !== seriesId), next];
   try {
-    // Persist public metadata and the local favorite flag, never reviews.
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, cover: item.cover || '' }))));
+    // Persist public metadata and the heart-click time, never reviews.
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, favorited_at: validPublishedAt(item.favorited_at) ? item.favorited_at : null, cover: item.cover || '' }))));
     window.dispatchEvent(new Event(CHANGE_EVENT));
     return { items, error: '' };
   } catch (error) {

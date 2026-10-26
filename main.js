@@ -33,10 +33,10 @@ const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
 const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const seriesSearch = require('./src/native/series-search');
-const { fitWindowBounds, getWindowScale, saveWindowZoom } = require('./src/native/window-layout');
+const { fitWindowBounds, getWindowScale, saveWindowZoom, initialWindowSize, revealMaximized } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
 const { availableRelease, LATEST_API, LATEST_PAGE, RELEASES_URL, updateRedirectTag } = require('./src/native/app-update');
-const { fetchPublicDetails } = require('./src/native/public-details');
+const { fetchPublicDetails, fetchPublicRatings } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
 const mediaAccess = require('./src/native/media-access').createMediaAccess(process.env.VITE_DEV_SERVER_URL);
@@ -1126,12 +1126,13 @@ const BROWSE_META_JS = `(() => {
 })()`;
 
 /** 隐藏搜索窗口串行嗅探；整个任务（含加载和读取）共用超时。 */
-async function runSniffOnUrl(url, label) {
+async function runSniffOnUrl(url, label, timeoutMs = SEARCH_TIMEOUT_MS) {
+  const budget = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : SEARCH_TIMEOUT_MS;
   // 同一窗口串行执行，避免并发导航互相打断
   const task = async () => {
     const win = getSearchWindow(true);
     // Reserve the last part of the deadline for empty-page details.
-    const pollDeadline = Date.now() + SEARCH_TIMEOUT_MS * 0.8;
+    const pollDeadline = Date.now() + budget * 0.8;
     let expired = false;
     const timeoutError = new Error('搜索超时，请稍后重试');
     const assertActive = () => {
@@ -1150,7 +1151,7 @@ async function runSniffOnUrl(url, label) {
         expired = true;
         if (!win.isDestroyed()) win.destroy();
         reject(timeoutError);
-      }, SEARCH_TIMEOUT_MS);
+      }, budget);
     });
     const sniff = async () => {
       console.log(`[${label}] 打开:`, url);
@@ -1211,7 +1212,9 @@ async function runSniffOnUrl(url, label) {
 }
 
 async function runSearchSniff(keyword) {
-  return runSniffOnUrl(`${SEARCH_SITE}/search/${encodeURIComponent(keyword)}`, 'Search');
+  return require('./src/native/hongguo-catalog-search').searchHongguoCatalog(keyword, {
+    sniff: (query) => runSniffOnUrl(`${SEARCH_SITE}/search/${encodeURIComponent(query)}`, 'Search', 8000),
+  });
 }
 
 // ===== 浏览：分类页（含题材筛选与分页）=====
@@ -1275,10 +1278,16 @@ ipcMain.handle('browse-list', (_event, options) =>
       else callback();
     }));
 
+function catalogQuery(keyword) {
+  const typed = String(keyword || '').trim();
+  const simplified = require('./src/native/script-query').toSimplified(typed).trim();
+  return simplified || typed;
+}
+
 async function searchAtSource(keyword, options = {}) {
   if (String(options?.source).startsWith('custom:')) return require('./src/native/custom-source').searchSeries(keyword, options);
-  if (options?.source === 'hema') return require('./src/native/hema').search(keyword);
-  if (options?.source === 'xifan') return require('./src/native/xifan').search(keyword);
+  if (options?.source === 'hema') return require('./src/native/hema').search(catalogQuery(keyword));
+  if (options?.source === 'xifan') return require('./src/native/xifan').search(catalogQuery(keyword));
   if (options?.source && options.source !== 'hongguo') throw new Error('不支持的搜索来源');
   return runSearchSniff(keyword);
 }
@@ -3891,6 +3900,10 @@ ipcMain.handle('get-public-details', async (event, seriesId, vid) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
   return fetchPublicDetails(seriesId, vid);
 });
+ipcMain.handle('get-public-ratings', async (event, ids) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
+  return fetchPublicRatings(ids);
+});
 ipcMain.handle('get-episode-comments', async (event, options) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return { success: false, error: 'Window unavailable' };
   return fetchEpisodeComments(options);
@@ -3994,11 +4007,13 @@ ipcMain.handle('set-window-layout', async (event, mode) => {
 function createWindow() {
   windowLayout = 'landscape';
   landscapeBounds = null;
+  const workArea = screen?.getPrimaryDisplay?.()?.workArea;
+  const limits = initialWindowSize(workArea);
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 750,
-    minWidth: 900,
-    minHeight: 620,
+    width: limits.width,
+    height: limits.height,
+    minWidth: limits.minWidth,
+    minHeight: limits.minHeight,
     title: APP_TITLE,
     ...(process.platform === 'darwin' ? {
       titleBarStyle: 'hiddenInset',
@@ -4006,15 +4021,18 @@ function createWindow() {
     } : {}),
     autoHideMenuBar: true,
     backgroundColor: '#f5f6fa',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       zoomMode: 'isolated',
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      paintWhenInitiallyHidden: true,
     },
   });
 
+  mainWindow.once('ready-to-show', () => revealMaximized(mainWindow));
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on('resize', syncMainWindowScale);
   mainWindow.on('enter-full-screen', syncMainWindowScale);

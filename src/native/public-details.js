@@ -82,4 +82,54 @@ async function fetchPublicDetails(seriesId, vid = '') {
   return request;
 }
 
-module.exports = { fetchPublicDetails, parsePublicDetails };
+const ratingCache = new Map();
+const ratingPending = new Map();
+let ratingActive = 0;
+const ratingWait = [];
+
+function withRatingSlot(task) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      ratingActive += 1;
+      task().then(resolve, reject).finally(() => {
+        ratingActive -= 1;
+        const next = ratingWait.shift();
+        if (next) next();
+      });
+    };
+    if (ratingActive < 4) run();
+    else ratingWait.push(run);
+  });
+}
+
+async function loadPublicRating(id) {
+  const cached = ratingCache.get(id);
+  if (cached && cached.expires > Date.now() && cached.rating != null) return cached.rating;
+  if (ratingPending.has(id)) return ratingPending.get(id);
+  const task = (async () => {
+    try {
+      const rating = await require('./hongguo').fetchPublicScore(id, 8000);
+      if (rating != null) {
+        ratingCache.set(id, { rating, expires: Date.now() + 10 * 60 * 1000 });
+        if (ratingCache.size > 240) ratingCache.delete(ratingCache.keys().next().value);
+      }
+      return rating ?? null;
+    } catch {
+      return null;
+    } finally {
+      ratingPending.delete(id);
+    }
+  })();
+  ratingPending.set(id, task);
+  return task;
+}
+
+async function fetchPublicRatings(ids) {
+  const unique = [...new Set((Array.isArray(ids) ? ids : []).map(id => String(id || '')))]
+    .filter(id => /^\d{6,30}$/.test(id)).slice(0, 24);
+  const ratings = {};
+  await Promise.all(unique.map(id => withRatingSlot(async () => { ratings[id] = await loadPublicRating(id); })));
+  return { success: true, ratings };
+}
+
+module.exports = { fetchPublicDetails, parsePublicDetails, fetchPublicRatings };

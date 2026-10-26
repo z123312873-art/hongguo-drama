@@ -51,7 +51,11 @@ test('one search history term is removed and a failed write keeps stored history
 
 test('favorite poster survives toggle and removal preserves other records and corrupt storage', () => {
   const h = fixture(), library = h.load('localLibrary.js');
-  library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, cover: 'https://fixture.invalid/poster.jpg' });
+  const first = library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, cover: 'https://fixture.invalid/poster.jpg', published_at: 1700000000000 });
+  const stamp = first.items.find(item => item.id === 'a').favorited_at;
+  assert.equal(typeof stamp, 'number');
+  assert.notEqual(stamp, 1700000000000, 'the heart date is not the public release date');
+  assert.equal(library.saveLocalSeries({ id: 'a', title: '甲', favorite: true }).items.find(item => item.id === 'a').favorited_at, stamp);
   library.saveLocalSeries({ id: 'b', title: '乙', favorite: true });
   let saved = library.saveLocalSeries({ id: 'a', title: '甲', favorite: false });
   assert.equal(saved.items.find(item => item.id === 'a').cover, 'https://fixture.invalid/poster.jpg');

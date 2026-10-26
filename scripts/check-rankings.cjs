@@ -11,7 +11,7 @@ async function main() {
   const context = { module: { exports: {} }, require: name => name === 'axios' ? { get: async (url, options) => {
     calls.push({ url, options });
     return { data: response ?? read(url.split('/rank/')[1].replace('?page=2', '-page-2')) };
-  } } : require(name), AbortController, setTimeout, clearTimeout, URL };
+  } } : require(name.startsWith('.') ? path.join(root, 'src/native', name) : name), AbortController, setTimeout, clearTimeout, URL };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'src/native/catalog.js'), 'utf8'), context);
   const { browseList } = context.module.exports;
   for (const [category, id, title, heat] of [
@@ -34,6 +34,7 @@ async function main() {
     }
     if (category === 'hot-drama') assert.match(data.results[0].introduction, /聚宝盆/, 'rendered ranking cards keep their description');
     assert.equal(data.results[0].url, `https://hongguoduanju.com/detail?series_id=${id}`);
+    assert.ok(data.results[0].rating >= 1 && data.results[0].rating <= 10, `${category} keeps the public score`);
     assert.equal(data.totalPages, 5);
     assert.equal(data.page, 1);
     assert.equal(data.genres.length, 0);

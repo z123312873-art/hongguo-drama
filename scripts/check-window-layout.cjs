@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { fitWindowBounds, getWindowScale, saveWindowZoom } = require('../src/native/window-layout');
+const { fitWindowBounds, getWindowScale, saveWindowZoom, initialWindowSize, revealMaximized } = require('../src/native/window-layout');
 const screen = { x: 0, y: 25, width: 1440, height: 850 };
 const current = { x: 100, y: 100, width: 1100, height: 750 };
 const portrait = fitWindowBounds('portrait', current, screen);
@@ -37,6 +37,27 @@ const beforeFailure = saved;
 assert.throws(() => saveWindowZoom({ ...store, saveSettings() { throw Error('disk full'); } }, 'out'), /disk full/);
 assert.equal(saved, beforeFailure, 'failed zoom save does not mutate existing settings');
 assert.throws(() => saveWindowZoom(store, 'invalid'), /Invalid/);
+const fullHd = initialWindowSize({ width: 1920, height: 1080 });
+assert.deepEqual(fullHd, { width: 1100, height: 750, minWidth: 900, minHeight: 620 });
+const win10Laptop = initialWindowSize({ width: 1366, height: 728 });
+assert.equal(win10Laptop.width, 1100);
+assert.equal(win10Laptop.height, 728);
+assert.ok(win10Laptop.minHeight <= 728);
+const win11Scaled = initialWindowSize({ width: 1280, height: 640 });
+assert.ok(win11Scaled.width <= 1280 && win11Scaled.height <= 640);
+assert.ok(win11Scaled.minWidth <= win11Scaled.width && win11Scaled.minHeight <= win11Scaled.height);
+const fourK = initialWindowSize({ width: 3840, height: 2160 });
+assert.deepEqual(fourK, fullHd);
+const calls = [];
+const hidden = {
+  isDestroyed: () => false,
+  isVisible: () => false,
+  isMaximized: () => false,
+  show() { calls.push('show'); this.visible = true; },
+  maximize() { calls.push('maximize'); },
+};
+assert.deepEqual(revealMaximized(hidden), ['show', 'maximize']);
+assert.deepEqual(calls, ['show', 'maximize']);
 console.log('PASS window layout: portrait, round trip, moved display, small display, invalid mode');
 console.log('PASS font size uses only the saved user zoom preference');
 console.log('PASS user zoom: activation, resize/fullscreen, layout, reload, latest-setting merge, bounds, reset and save failure');

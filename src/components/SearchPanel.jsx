@@ -6,9 +6,12 @@ import { readSearchHistory, saveSearchTerm, removeSearchTerm, clearSearchHistory
 
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
+import { canonicalTitle } from '../chineseScript.mjs';
 
 export function rankSearchResults(results, keyword) {
-  const normalize = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const normalize = value => typeof canonicalTitle === 'function'
+    ? canonicalTitle(value)
+    : String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
   const query = normalize(keyword), seen = new Set();
   return results.filter(item => {
     const key = `${item.source}:${item.series_id}`;
@@ -24,7 +27,7 @@ export function rankSearchResults(results, keyword) {
  * SearchPanel —— 按所选来源搜索短剧
  * 拿到 series_id 后交给父组件走既有的「拉全集 + 选集下载」流程。
  */
-function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
+function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = true }) {
   const [source, setSource] = useState('all');
   const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const requestVersion = useRef(0);
@@ -34,6 +37,8 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
   const [history, setHistory] = useState(readSearchHistory);
   const [historyError, setHistoryError] = useState('');
   const inputRef = useRef(null);
+  const suggestWrapRef = useRef(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestions = getSearchSuggestions(keyword, history);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null); // null=未搜索, []=无结果
@@ -48,8 +53,25 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
       pendingSearch.current = null;
       setPickingId('');
       setLoading(false);
+      setSuggestOpen(false);
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!suggestOpen) return undefined;
+    const close = (event) => {
+      const target = event.target;
+      if (target && suggestWrapRef.current?.contains?.(target)) return;
+      setSuggestOpen(false);
+    };
+    const onKey = (event) => { if (event.key === 'Escape') setSuggestOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [suggestOpen]);
 
   useEffect(() => {
     requestVersion.current++; pendingSearch.current = null;
@@ -103,6 +125,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
   const doSearch = async () => {
     if (sourcesLoading) return;
     const kw = keyword.trim();
+    setSuggestOpen(false);
     if (!kw) {
       setError('请输入剧名关键词');
       return;
@@ -163,6 +186,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
     const request = ++requestVersion.current;
     setPickingId(item.series_id);
     setError('');
+    onSelectStart?.(item);
     try {
       const res = await window.electronAPI.searchResolve(item.series_id);
       if (request !== requestVersion.current) return;
@@ -195,19 +219,39 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
 
       {sourcesError && <p className="settings-hint" role="status">来源列表更新失败，暂用上次列表；可在设置重新保存来源后重试。</p>}
       <div className="input-group">
+        <div className="search-suggest-wrap" ref={suggestWrapRef}>
         <input
           type="text"
           className="input-field"
           aria-label="搜索短剧名称"
           aria-describedby="search-suggestions-hint"
+          aria-autocomplete="list"
+          aria-expanded={suggestOpen && suggestions.length > 0}
+          aria-controls="local-search-suggestions"
           ref={inputRef}
-          list="local-search-suggestions"
           autoComplete="off"
           placeholder="输入剧名，例如：一村人养一个神"
           value={keyword}
-          onChange={(e) => changeKeyword(e.target.value)}
-          onKeyDown={(e) => isSubmitKey(e) && doSearch()}
+          onFocus={() => setSuggestOpen(true)}
+          onBlur={(event) => {
+            if (event?.relatedTarget && suggestWrapRef.current?.contains?.(event.relatedTarget)) return;
+            setSuggestOpen(false);
+          }}
+          onChange={(e) => { changeKeyword(e.target.value); setSuggestOpen(true); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { setSuggestOpen(false); return; }
+            if (isSubmitKey(e)) { setSuggestOpen(false); doSearch(); }
+          }}
         />
+        {suggestOpen && suggestions.length > 0 && <ul className="search-suggest-list" id="local-search-suggestions" role="listbox" aria-label="搜索联想">
+          {suggestions.map(({ term, source: origin }) => <li key={term}>
+            <button type="button" role="option" onMouseDown={(event) => { event.preventDefault(); changeKeyword(term); setSuggestOpen(false); }}>
+              <span>{term}</span>
+              <small>{origin}</small>
+            </button>
+          </li>)}
+        </ul>}
+        </div>
         <button className="btn btn-primary" onClick={doSearch} disabled={loading || sourcesLoading}>
           {loading ? (
             <>
@@ -222,10 +266,7 @@ function SearchPanel({ onSelectSeries, onSwitchToInput, active = true }) {
           )}
         </button>
       </div>
-      <datalist id="local-search-suggestions">
-        {suggestions.map(({ term, source: origin }) => <option key={term} value={term} label={origin} />)}
-      </datalist>
-      <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">本机联想：匹配搜索历史和本次浏览过的真实剧名。</p>
+      <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">本机联想：匹配搜索历史和本次浏览过的真实剧名。显示随界面繁简变化，搜索仍使用原来的剧名。离开输入框、开始搜索或按 Esc 会收起。</p>
       {history.length > 0 && <div className="search-history">
         <div className="search-history-heading"><span>本机搜索历史</span><button type="button" className="btn-chip" onClick={clearHistory}>清除历史</button></div>
         <div className="search-history-terms">{history.map((term) => <span className="search-history-term" key={term}><button type="button" className="btn-chip" title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button><button type="button" className="search-history-remove" aria-label={`删除搜索历史：${term}`} title="删除这条搜索历史" onClick={() => removeHistory(term)}>×</button></span>)}</div>

@@ -330,6 +330,39 @@ async function mount(file, api, props = {}) {
       assert.equal(realCalls, callsAfterRefresh, 'empty refresh must not delete a still-fresh cache');
     } finally { ui.unmount(); }
   });
+  await test('browse keeps posters when switching categories and does not refetch a fresh list', async () => {
+    const calls = [];
+    const ui = await mount('Browse', {
+      getSeriesList: async () => [],
+      browseCategories: async () => [
+        { slug: 'real-drama', label: '真人剧' },
+        { slug: 'comic-drama', label: '漫剧' },
+        { slug: 'hot-drama', label: '综合热播榜' },
+      ],
+      browseList: async request => {
+        calls.push(request.category);
+        const title = request.category === 'hot-drama' ? '热播片' : request.category === 'comic-drama' ? '漫剧片' : '真人片';
+        return { success: true, results: [{ series_id: '1000001', series_title: title, rank: request.category === 'hot-drama' ? 1 : undefined }], total: 1, totalPages: 1 };
+      },
+    });
+    const count = (category) => calls.filter(item => item === category).length;
+    try {
+      await ui.flush();
+      assert.equal(count('real-drama'), 1, 'opening fetches the visible category once');
+      assert.equal(count('hot-drama'), 1, 'the banner uses one hot-rank request');
+      assert.ok(ui.text().includes('真人片'));
+      ui.button('漫剧').props.onClick(); await ui.flush();
+      assert.ok(ui.text().includes('漫剧片'));
+      assert.equal(ui.find(n => n.props.className === 'browse-loading-state'), undefined);
+      ui.button('真人剧').props.onClick(); await ui.flush();
+      assert.ok(ui.text().includes('真人片'));
+      assert.equal(ui.find(n => n.props.className === 'poster-skeletons'), undefined, 'a cached category must not blank the posters');
+      assert.equal(count('real-drama'), 1, 'returning to a fresh category must not fetch again');
+      ui.button('综合热播榜').props.onClick(); await ui.flush();
+      assert.ok(ui.text().includes('热播片'));
+      assert.equal(count('hot-drama'), 1, 'the hot rank loaded for the banner is reused');
+    } finally { ui.unmount(); }
+  });
   await test('closing a loading detail ignores its late result', async () => {
     const pending = deferred();
     const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: async () => ({ success: true, results: [{ series_id: 'A', series_title: 'A' }] }), searchResolve: () => pending.promise, getSeriesEpisodes: async () => ok(detail('A')) });
@@ -365,7 +398,10 @@ async function mount(file, api, props = {}) {
   await test('browse navigation prepares the requested missing episode without waiting for a download', async () => {
     const requested = [];
     const ui = await mount('Player', { getSeriesList: async () => [{ series_id: 'A' }], getSeriesEpisodes: async () => ok(detail('A')), getPlaybackPosition: async () => null, prepareOnlinePlay: async p => { requested.push(p); return { success: true, url: 'hongguo-stream://target' }; } }, { target: { seriesId: 'A', vidIndex: 2, ts: 123 } });
-    await ui.flush(); assert.equal(requested.length, 1); assert.equal(requested[0].vidIndex, 2); ui.unmount();
+    await ui.flush(); assert.equal(requested.length, 1); assert.equal(requested[0].vidIndex, 2);
+    assert.match(ui.button('切换短剧').props.className, /\bbtn-primary\b/);
+    assert.doesNotMatch(ui.button('切换短剧').props.className, /\bbtn-outline\b/);
+    ui.unmount();
   });
   await test('download latest parse wins over a late earlier parse', async () => {
     const first = deferred(), second = deferred(); let count = 0;
@@ -477,7 +513,7 @@ async function mount(file, api, props = {}) {
     const old = deferred(), opened = [], pages = []; let calls = 0;
     const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: p => p.source === 'xifan' ? (pages.push(p.page), Promise.resolve({ success: true, results: [{ series_id: 'X', series_title: '西饭片单' }], genres: [{ slug: '68', label: '都市' }], total: 0, totalPages: 0, hasMore: p.page === 1 })) : ++calls === 1 ? Promise.resolve({ success: true, results: [{ series_id: 'H', series_title: '红果片单' }], sourceUrl: 'https://www.hongguoduanju.com/category/real-drama' }) : old.promise, searchWindowShow: async (...args) => opened.push(args) });
     await ui.flush(); await ui.button('打开来源页面').props.onClick();
-    assert.equal(opened[0][1], 'https://hongguoduanju.com/category/real-drama');
+    assert.equal(opened[0][1], 'https://www.hongguoduanju.com/category/real-drama', 'the opened page is the list that finished loading');
     ui.button('刷新片单').props.onClick(); ui.render();
     const source = ui.find(n => n.props['aria-label'] === '短剧来源'); assert.ok(source, 'source selector missing');
     source.props.onChange({ target: { value: 'xifan' } }); await ui.flush();
@@ -514,6 +550,31 @@ async function mount(file, api, props = {}) {
     assert.ok(ui.text().includes('补充搜索未完成：连接超时')); assert.ok(ui.find(n => n.props.role === 'status'));
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '新的剧名' } }); ui.render();
     assert.ok(!ui.text().includes('补充搜索未完成')); ui.unmount();
+  });
+  await test('search suggestions close on blur, escape and search so they do not cover results', async () => {
+    const ui = await mount('SearchPanel', { searchSeries: async () => ({ success: true, results: [
+      { series_id: '7675302847793089560', series_title: '青铜门' },
+      { series_id: '7660777963603889177', series_title: '青铜门后' },
+    ] }) });
+    const input = () => ui.find(n => n.props['aria-label'] === '搜索短剧名称');
+    const list = () => ui.find(n => n.props.id === 'local-search-suggestions');
+    try {
+      assert.equal(list(), undefined, 'suggestions stay hidden before the field is used');
+      input().props.onFocus(); ui.render();
+      input().props.onChange({ target: { value: '青铜' } }); ui.render();
+      assert.equal(list(), undefined, 'typing before any remembered title does not invent a list');
+      input().props.onKeyDown({ key: 'Enter' }); await ui.flush();
+      assert.equal(list(), undefined, 'starting a search closes the list');
+      assert.ok(ui.text().includes('青铜门'));
+      input().props.onFocus(); ui.render();
+      assert.ok(list(), 'focusing the field shows remembered titles');
+      input().props.onBlur({}); ui.render();
+      assert.equal(list(), undefined, 'leaving the field removes the list');
+      assert.ok(ui.text().includes('青铜门'), 'closing suggestions keeps the result cards');
+      input().props.onFocus(); ui.render();
+      input().props.onKeyDown({ key: 'Escape' }); ui.render();
+      assert.equal(list(), undefined, 'escape closes the list');
+    } finally { ui.unmount(); }
   });
   await test('all-source search keeps successful results when the other source fails', async () => {
     for (const failure of [{ success: false, error: '来源暂不可用' }, new Error('连接超时')]) {
@@ -602,6 +663,52 @@ async function mount(file, api, props = {}) {
     assert.equal(player().props.target, target, 'background navigation must not reset playback initialization');
     ui.button('我的剧库').props.onClick(); ui.render();
     assert.equal(player().props.target, target, 'returning must keep the same playback target');
+    ui.unmount();
+  });
+  await test('search pick clears the previous series, stays on search, and favorites by click', async () => {
+    const ui = await mount('HongguoDownload', {});
+    await ui.flush();
+    const panel = () => ui.find(n => n.props.onSelectSeries);
+    panel().props.onSelectSeries(detail('旧剧')); ui.render();
+    assert.ok(ui.button('下载选中集数 (0/2)'), 'an open series is visible before the next search pick');
+    assert.ok(ui.button('搜索剧集').props.className.includes('active'));
+    panel().props.onSelectStart(); ui.render();
+    assert.equal(ui.button('下载选中集数 (0/2)'), undefined, 'the previous series leaves as soon as episode loading starts');
+    assert.ok(panel(), 'search stays mounted while the next series is loading');
+    assert.ok(ui.button('搜索剧集').props.className.includes('active'), 'episode loading stays on search');
+    assert.equal(ui.button('粘贴链接').props.className.includes('active'), false);
+    panel().props.onSelectSeries(detail('新剧')); ui.render();
+    assert.ok(ui.button('搜索剧集').props.className.includes('active'), 'a searched series stays on the search tab');
+    assert.equal(ui.button('粘贴链接').props.className.includes('active'), false);
+    assert.ok(ui.button('下载选中集数 (0/2)'));
+    const favorite = () => ui.button('收藏清单');
+    assert.equal(favorite().props['aria-pressed'], false);
+    favorite().props.onClick(); ui.render();
+    assert.equal(favorite().props['aria-pressed'], true);
+    assert.ok(ui.text().includes('已加入收藏清单'));
+    favorite().props.onClick(); ui.render();
+    assert.equal(favorite().props['aria-pressed'], false, 'the same button removes the favorite without inventing another date');
+    ui.unmount();
+  });
+  await test('search card tells the parent to clear before episodes return', async () => {
+    const pending = deferred();
+    const started = [];
+    const ui = await mount('SearchPanel', {
+      searchSeries: async () => ({ success: true, results: [{ series_id: '1234567', series_title: '新剧' }] }),
+      searchResolve: () => pending.promise,
+    }, { onSelectStart: item => started.push(item.series_id) });
+    await ui.flush();
+    ui.find(n => n.props['aria-label'] === '搜索短剧名称').props.onChange({ target: { value: '新剧' } }); ui.render();
+    ui.button('搜索').props.onClick();
+    await ui.flush();
+    ui.nodes().filter(n => n.props.className?.startsWith('search-card '))[0].props.onClick();
+    ui.render();
+    assert.deepEqual(started, ['1234567']);
+    assert.ok(ui.text().includes('正在拉取分集'));
+    pending.resolve({ success: false, error: '来源暂时受限' });
+    await ui.flush();
+    assert.ok(ui.text().includes('来源暂时受限'));
+    assert.equal(ui.text().includes('正在拉取分集'), false);
     ui.unmount();
   });
   await test('download keeps its search panel mounted while selecting episodes', async () => {
