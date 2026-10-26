@@ -84,6 +84,7 @@ function Browse({ onNavigate, active = true }) {
   const [library, setLibrary] = useState(readLocalLibrary);
   const [ratings, setRatings] = useState({});
   const ratingRequest = useRef(0);
+  const ratingsRef = useRef({});
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
@@ -332,21 +333,32 @@ function Browse({ onNavigate, active = true }) {
     setGenre(serverSlug);
   }, [source, serverSlug, genre]);
 
+  ratingsRef.current = ratings;
   useEffect(() => {
-    if (source !== 'hongguo') return undefined;
+    if (source !== 'hongguo' || !window.electronAPI?.getPublicRatings) return undefined;
     const ids = results
       .map(item => String(item?.series_id || ''))
-      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratings, id))
+      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, id))
       .slice(0, 24);
-    if (!ids.length || !window.electronAPI?.getPublicRatings) return undefined;
+    if (!ids.length) return undefined;
     const request = ++ratingRequest.current;
     let cancelled = false;
-    window.electronAPI.getPublicRatings(ids).then(response => {
-      if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) return;
-      setRatings(current => ({ ...current, ...response.ratings }));
-    }).catch(() => {});
+    (async () => {
+      for (let index = 0; index < ids.length; index += 8) {
+        if (cancelled || request !== ratingRequest.current) return;
+        try {
+          const response = await window.electronAPI.getPublicRatings(ids.slice(index, index + 8));
+          if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) return;
+          setRatings(current => {
+            const next = { ...current, ...response.ratings };
+            ratingsRef.current = next;
+            return next;
+          });
+        } catch { return; }
+      }
+    })();
     return () => { cancelled = true; };
-  }, [source, results, ratings]);
+  }, [source, results]);
 
   useEffect(() => {
     if (!active || !sourceIds.split('|').includes(source)) return undefined;
@@ -671,7 +683,6 @@ function Browse({ onNavigate, active = true }) {
           ))}
         </div>
       )}
-      {source === 'hongguo' && <p className="browse-tag-hint">左右滑动选择标签。只选一个时仍按该分类原有片单；再选一个时，海报上的分类要同时包含这两个标签。</p>}
       {source !== 'hongguo' && meta.genres.length > 0 && (
         <div className="browse-genres">
           <button

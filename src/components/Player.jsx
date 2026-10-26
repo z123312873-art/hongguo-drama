@@ -1354,7 +1354,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
             <ChevronDown size={16} />
           </button>
         </div>
-        <p className="player-download-quality-hint" id="player-online-quality-hint">自动、720P、1080P 都会保留。某一集片源不够时只临时播放该集的实际画面，自动播放下一集仍按所选清晰度重新取源。</p>
         <div className="player-header-right">
           <span className="player-stat">已下载 {playableCount} / {episodes.length || 0} 集</span>
           <button aria-pressed={cacheNext} className={`btn btn-outline ${cacheNext ? 'btn-autonext-on' : ''}`}
@@ -1392,7 +1391,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <label className="player-download-quality">
             <span>在线播放清晰度</span>
             <select className="input-field" aria-label="在线播放清晰度" value={onlineQuality}
-              disabled={!supportsOnlineQuality} aria-describedby="player-online-quality-hint"
+              disabled={!supportsOnlineQuality}
               onChange={event => changeOnlineQuality(event.target.value)}>
               <option value="auto">{supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定'}</option>
               <option value="720p">720P</option>

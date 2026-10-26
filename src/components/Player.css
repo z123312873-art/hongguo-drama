@@ -7,7 +7,7 @@
 .player-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 14px;
@@ -28,8 +28,10 @@
 
 .player-header-right {
   display: flex;
-  width: 100%;
+  width: auto;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
 }
@@ -823,8 +825,8 @@
 .player-online-quality-row[hidden] { display: none; }
 .player-online-quality-row .player-download-quality { flex-wrap: nowrap; }
 .layout-landscape .player-online-quality-row { margin-block: 12px 24px; }
-.player-header .player-header-right { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr)); gap: 8px; }
+.player-header .player-header-right { display: flex; flex-wrap: wrap; width: auto; flex: 1 1 auto; justify-content: flex-start; gap: 8px; }
 .player-header-right .player-series-actions { display: contents; }
-.player-header .player-header-right .btn { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 12px; gap: 7px; justify-content: center; white-space: normal; }
+.player-header .player-header-right .btn { width: auto; min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 12px; gap: 7px; justify-content: center; white-space: nowrap; }
 .player-header-right .btn svg { width: 15px; height: 15px; flex-shrink: 0; }
 .player-header-right .series-count { font-size: inherit; min-width: 0; padding: 0 .35em; }

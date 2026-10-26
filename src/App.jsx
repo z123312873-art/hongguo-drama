@@ -19,7 +19,7 @@ const MENU = [
   { id: 'download', label: '搜索与下载', icon: Search },
   { id: 'player', label: '我的剧库', icon: Play },
   { id: 'history', label: '观看记录', icon: Clock },
-  { id: 'calendar', label: '收藏与上新', icon: Clock },
+  { id: 'calendar', label: '收藏清单', icon: Clock },
   { id: 'manager', label: '下载管理', icon: Download },
   { id: 'settings', label: '设置', icon: Settings },
 ];

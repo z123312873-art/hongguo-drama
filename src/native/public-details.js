@@ -96,7 +96,7 @@ function withRatingSlot(task) {
         if (next) next();
       });
     };
-    if (ratingActive < 2) run();
+    if (ratingActive < 4) run();
     else ratingWait.push(run);
   });
 }
@@ -107,10 +107,8 @@ async function loadPublicRating(id) {
   let rating = null;
   let ttl = 60 * 1000;
   try {
-    const response = await axios.get(`${SITE}/detail?series_id=${id}`, { timeout: 10000, signal: AbortSignal.timeout(10000),
-      maxRedirects: 0, responseType: 'text', maxContentLength: 8 * 1024 * 1024,
-      headers: { 'User-Agent': UA, Referer: `${SITE}/` } });
-    rating = parsePublicDetails(response.data, id).rating;
+    const html = await require('./hongguo').fetchSiteHtml(`${SITE}/detail?series_id=${id}`, 8000);
+    rating = parsePublicDetails(html, id).rating;
     if (rating != null) ttl = 10 * 60 * 1000;
   } catch { rating = null; }
   ratingCache.set(id, { rating, expires: Date.now() + ttl });

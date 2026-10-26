@@ -182,31 +182,59 @@ function pickJsonString(text, key) {
   return m ? m[1].replace(/\\u002F/g, '/').replace(/\\u0026/g, '&') : '';
 }
 
-/** 拉取官网页面 HTML */
+const sitePages = new Map();
+const sitePending = new Map();
+
+/** 拉取官网页面 HTML。同一地址共享进行中的请求，并在短时间内复用结果。 */
 async function fetchSiteHtml(url, timeout = 30000) {
-  const res = await axios.get(url, {
-    headers: {
-      'User-Agent': WEB_UA,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9',
-      'Referer': WEB_REFERER,
-    },
-    timeout,
-    responseType: 'text',
-    maxRedirects: 5,
-  });
-  return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+  // Only detail pages are reused. Playback pages change per episode and must not stick.
+  const reusable = String(url).includes('/detail?series_id=');
+  const cached = reusable ? sitePages.get(url) : null;
+  if (cached && cached.expires > Date.now()) return cached.html;
+  if (reusable && sitePending.has(url)) return sitePending.get(url);
+  const task = (async () => {
+    let last;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await axios.get(url, {
+          headers: {
+            'User-Agent': WEB_UA,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Referer': WEB_REFERER,
+          },
+          timeout,
+          responseType: 'text',
+          maxRedirects: 5,
+        });
+        const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        if (reusable) {
+          sitePages.set(url, { html, expires: Date.now() + 60000 });
+          if (sitePages.size > 40) sitePages.delete(sitePages.keys().next().value);
+        }
+        return html;
+      } catch (error) {
+        last = error;
+        const status = Number(error?.response?.status);
+        if (attempt === 0 && status >= 500) continue;
+        if (status >= 500) throw new Error(`来源暂时受限（HTTP ${status}），请稍后重试`);
+        throw error;
+      }
+    }
+    throw last;
+  })();
+  if (reusable) sitePending.set(url, task);
+  try { return await task; }
+  finally { if (reusable) sitePending.delete(url); }
 }
 
 /**
  * 从官网 player 页内嵌 JSON 取完整分集列表
  * vid_list 按下标即集数顺序（下标 i → 第 i+1 集）
  */
-async function fetchEpisodeListFromWeb(seriesId) {
-  const html = await fetchSiteHtml(`${SITE_ORIGIN}/player/${encodeURIComponent(seriesId)}`);
-
-  const m = html.match(/"vid_list"\s*:\s*\[([^\]]*)\]/);
-  if (!m) throw new Error('官网页面未找到分集数据（vid_list）');
+function episodeListFromHtml(html, seriesId) {
+  const m = String(html || '').match(/"vid_list"\s*:\s*\[([^\]]*)\]/);
+  if (!m) return null;
 
   const vids = m[1]
     .split(',')
@@ -238,6 +266,19 @@ async function fetchEpisodeListFromWeb(seriesId) {
     episodes,
     source: 'web', // 标记来源，便于排查
   };
+}
+
+async function fetchEpisodeListFromWeb(seriesId) {
+  const encoded = encodeURIComponent(seriesId);
+  const urls = [`${SITE_ORIGIN}/detail?series_id=${encoded}`, `${SITE_ORIGIN}/player/${encoded}`];
+  let last = new Error('官网页面未找到分集数据（vid_list）');
+  for (const url of urls) {
+    try {
+      const parsed = episodeListFromHtml(await fetchSiteHtml(url), seriesId);
+      if (parsed) return parsed;
+    } catch (error) { last = error; }
+  }
+  throw last;
 }
 
 /**
@@ -1006,6 +1047,7 @@ module.exports = {
   resolveSeriesId,
   fetchEpisodeList,
   fetchEpisodeListFromWeb,
+  fetchSiteHtml,
   fetchPlayUrlSingle,
   fetchPlayUrlFromWeb,
   deriveKey,

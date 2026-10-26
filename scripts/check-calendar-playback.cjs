@@ -60,7 +60,7 @@ function fixture({ exists = true, dismissed = false, saveError = '', resolveErro
   };
   const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } };
   render();
-  find(node => node.type === 'button' && node.children.some(child => child?.children?.includes('收藏与上新'))).props.onClick();
+  find(node => node.type === 'button' && node.children.some(child => child?.children?.includes('收藏清单'))).props.onClick();
   render();
   return { registry, requests, resolutions, find, flush,
     go: label => find(node => node.type === 'button' && node.children.some(child => child?.children?.includes(label))).props.onClick(),
@@ -184,7 +184,7 @@ for (const returnToCalendar of [false, true]) test(`leaving calendar during arch
   const pending = deferred(), app = fixture({ exists: false, resolveGate: pending.promise });
   const playing = app.play(); await app.flush();
   app.go('发现短剧'); await app.flush();
-  if (returnToCalendar) { app.go('收藏与上新'); await app.flush(); }
+  if (returnToCalendar) { app.go('收藏清单'); await app.flush(); }
   pending.resolve(); await playing;
   assert.equal(app.requests.length, 1, 'stale resolution must not issue a second navigation');
   assert.equal(app.target(), undefined);
