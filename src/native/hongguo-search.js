@@ -154,6 +154,7 @@ async function defaultRequest(keyword, page, { timeout }) {
   let response;
   try {
     response = await axios.get(SEARCH_ENDPOINT, {
+      ...require('./direct-connect').directAxiosOptions(),
       params: { aid: '8662', query: keyword, page },
       headers: {
         'User-Agent': SEARCH_UA,

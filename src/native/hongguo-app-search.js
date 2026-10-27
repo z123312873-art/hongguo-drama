@@ -1,5 +1,6 @@
 // Optional signed App search (hongguoTV reference) with website API fallback.
 const { signedSearchRequest, parseSearchInteger, requestJson } = require('./app-source');
+const { getPlaybackDevice } = require('./playback-device');
 
 const SEARCH_TAB = 11;
 const DEFAULT_TIMEOUT_MS = 4000;
@@ -20,6 +21,17 @@ function appCover(value) {
   if (!/^https?:\/\//i.test(url)) return '';
   // The App returns HEIC variants that Chromium may not decode; leave them blank rather than a broken card.
   return /\.heic(?:\?|$)/i.test(url) ? '' : url;
+}
+
+function catalogCover(value) {
+  const compatible = appCover(value);
+  try {
+    const url = new URL(value);
+    if (!/\.heic$/i.test(url.pathname)) return compatible;
+    if (!['http:', 'https:'].includes(url.protocol) || !/(^|\.)(fqnovelpic\.com|byteimg\.com)$/i.test(url.hostname) ||
+        !url.pathname.startsWith('/novel-pic/') || !url.pathname.includes('~')) return '';
+    return `https://p3-novel.byteimg.com${url.pathname.split('~', 1)[0]}~tplv-shrink:640:0.image`;
+  } catch (_) { return compatible; }
 }
 
 async function defaultRequest(signed, deadline) {
@@ -90,9 +102,14 @@ async function searchApp(keyword, { page = 1, cursor = null, deadline = 0, reque
   }
   const budget = Number(deadline) > 0 ? deadline : Date.now() + DEFAULT_TIMEOUT_MS;
   if (budget <= Date.now()) throw appError('App 搜索超时，已回退官网', 'APP_TIMEOUT');
-  const signed = signedSearchRequest({ keyword: kw, page: pg, cursor });
+  // Custom request stubs skip device registration so offline tests stay local.
+  let identity = null;
+  if (request === defaultRequest) {
+    try { identity = await getPlaybackDevice(requestJson); } catch (_) { identity = null; }
+  }
+  const signed = signedSearchRequest({ keyword: kw, page: pg, cursor, identity });
   const payload = await request(signed, budget);
   return parseSearchPayload(payload, { page: pg });
 }
 
-module.exports = { searchApp, parseSearchPayload, cleanTitle, appCover, DEFAULT_TIMEOUT_MS };
+module.exports = { searchApp, parseSearchPayload, cleanTitle, appCover, catalogCover, DEFAULT_TIMEOUT_MS };

@@ -295,7 +295,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     && intent.selection === selectionVersion.current && intent.media === mediaVersion.current
     && intent.seriesId === selectedSeriesRef.current && intent.vidIndex === stateRef.current.currentIndex, []);
 
-  const recoverOnlineFailure = useCallback(async (ep, message) => {
+  const recoverOnlineFailure = useCallback(async (ep, message, options = {}) => {
     const seekTo = currentPosition();
     const autoplay = loadedMediaRef.current ? !loadedMediaRef.current.element.paused : pendingAutoplayRef.current;
     resetPlayback(autoplay);
@@ -310,6 +310,14 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       const latest = data?.episodes.find(item => item.vid_index === intent.vidIndex && item.vid === intent.vid);
       if (!latest || latest.locked) throw new Error(latest?.locked ? '该集已锁定，请在来源平台确认' : '无法刷新本集状态，请重试');
       if (usableLocal(latest, intent.seriesId)) { resumeLocal(latest, intent.seekTo, intent.autoplay); return; }
+      // Empty or unreadable App data will fail a download the same way. Stay on online retry.
+      if (options.download === false) {
+        intent.submitting = false;
+        fallbackRef.current = null;
+        setWaitingFor(null);
+        setPlaybackError(message);
+        return;
+      }
       const key = `${intent.selection}:${intent.seriesId}:${intent.vid}`;
       if (fallbackAttemptRef.current === key) throw new Error('本集已尝试下载，请在下载管理检查或手动重试下载');
       const settings = stateRef.current.qualityLoading ? await window.electronAPI.getSettings() : null;
@@ -783,7 +791,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         }
         if (!res || !res.success) {
           if (res?.code === 'MEDIA_TOO_LARGE') showToast(res.error);
-          await recoverOnlineFailure(ep, (res && res.error) || '在线播放准备失败');
+          const sourceDead = Array.isArray(res?.sources) && res.sources.length > 0
+            && res.sources.every(item => ['EMPTY_RESPONSE', 'INVALID_RESPONSE', 'DEVICE_REGISTRATION_FAILED'].includes(item?.code));
+          await recoverOnlineFailure(ep, (res && res.error) || '在线播放准备失败', { download: !sourceDead });
           return;
         }
         usePrepared(res);

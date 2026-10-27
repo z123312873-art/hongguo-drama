@@ -10,7 +10,7 @@ const webPage = (vid = '11', sid = '1', extra = {}) => `<script>window._ROUTER_D
     publicVideoSeo: { available: true, itemId: vid, seriesId: sid }, ...extra },
 } })}</script><script type="application/ld+json">${JSON.stringify({ '@type': 'VideoObject', url: `https://hongguoduanju.com/player/${sid}/${vid}`, contentUrl: media('web') })}</script>`;
 function load(file, dependencies) {
-  const context = { Buffer, URL, URLSearchParams, AbortSignal, process: { env: {} }, module: { exports: {} },
+  const context = { Buffer, URL, URLSearchParams, AbortSignal, AbortController, process: { env: {} }, module: { exports: {} },
     console: { warn() {} }, setTimeout: fn => fn(),
     require: name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name.startsWith('.') ? path.join(nativeDir, name) : name) };
   vm.runInNewContext(fs.readFileSync(path.join(nativeDir, file), 'utf8'), context);
@@ -136,6 +136,9 @@ const checks = [
     assert.deepEqual(apiTimeouts, [6000], 'legacy playback lookup must not repeat after timeout');
     webAvailable = true; webTimeouts.length = 0;
     assert.equal((await f.fetchEpisodeListFromWeb('1')).series_id, '1');
+    assert.deepEqual(webTimeouts, [1500, 1500, 3500, 3500, 3500, 3500], 'a synchronous test timer still starts the episode hedge');
+    webTimeouts.length = 0;
+    await f.fetchSiteHtml('https://hongguoduanju.com/detail?series_id=9');
     assert.deepEqual(webTimeouts, [30000], 'non-playback web defaults must stay unchanged');
   }],
   ['Web rejects wrong or missing current episode identity even when vid_list contains the request', async () => {
@@ -227,7 +230,9 @@ const checks = [
     try {
       const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
       const context = vm.createContext({ URL, axios: require('axios'), hongguo: { UA: 'test', WEB_UA: 'browser', VIDEO_REFERER: 'https://novelquickapp.com/', WEB_REFERER: 'https://hongguoduanju.com/' },
-        checkCustomAccess() {}, require: () => ({ webMediaRequestOptions: () => ({}) }) });
+        checkCustomAccess() {}, require: name => String(name).includes('direct-connect')
+          ? { directAxiosOptions: () => ({}) }
+          : { webMediaRequestOptions: () => ({}) } });
       vm.runInContext(main.slice(main.indexOf('async function requestMedia('), main.indexOf('function awaitMediaOperation(')), context);
       const base = `http://127.0.0.1:${server.address().port}`;
       for (const source of ['app', 'api']) {

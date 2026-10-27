@@ -6,6 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const http = require('node:http');
 const { EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
 const { createRequire } = require('node:module');
 const source = path.resolve(__dirname, '../main.js'), req = createRequire(source);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-app-media-'));
@@ -22,10 +23,19 @@ function load(url, mode = 'ok', key = contentKey) {
     assert.equal(file, '/bundled/ffmpeg');
     assert.equal(args[args.indexOf('-decryption_key') + 1], contentKey);
     assert.ok(args.includes('copy'), 'remux without lossy transcode');
-    const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
-    child.kill = () => { child.killed = true; setImmediate(() => child.emit('close', null, 'SIGTERM')); return true; };
+    const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new EventEmitter();
+    child.kill = () => { child.killed = true; child.stdout.end(); setImmediate(() => child.emit('close', null, 'SIGTERM')); return true; };
     children.push(child);
     const output = args.at(-1);
+    if (output === 'pipe:1') {
+      if (mode !== 'wait') setImmediate(() => {
+        if (mode !== 'fail') child.stdout.end(clearBytes);
+        else child.stdout.end();
+        if (mode === 'fail') child.stderr.emit('data', Buffer.from('bad media ' + contentKey));
+        child.emit('close', mode === 'fail' ? 1 : 0);
+      });
+      return child;
+    }
     if (mode === 'wait') fs.writeFileSync(output, 'partial');
     else setImmediate(() => {
       fs.writeFileSync(output, mode === 'fail' ? 'partial' : clearBytes);
@@ -49,11 +59,14 @@ function load(url, mode = 'ok', key = contentKey) {
   const url = `http://127.0.0.1:${server.address().port}/media`;
   let failures = 0;
   async function check(name, fn) { try { await fn(); console.log('PASS ' + name); } catch (e) { failures++; console.error('FAIL ' + name + ': ' + e.message.replaceAll(contentKey, '[test-key]')); } }
-  await check('app prepare decrypts with bundled ffmpeg before exposing media', async () => {
+  await check('app prepare returns a decrypted stream instead of the encrypted URL', async () => {
     const h = load(url); const p = await h.handlers['prepare-online-play']({}, { vid: 'app' });
-    assert.equal(p.success, true); assert.equal(p.streaming, false, 'contentKey is encrypted, not a plain proxy source');
+    assert.equal(p.success, true); assert.equal(p.streaming, true);
+    assert.ok(!p.url.includes('127.0.0.1'), 'renderer must not receive the encrypted media URL');
+    assert.equal(h.children.length, 0, 'ffmpeg starts when playback reads the stream');
     const response = await h.protocols['hongguo-stream'](new Request(p.url));
     assert.equal(await response.text(), clearBytes.toString()); assert.equal(h.children.length, 1);
+    assert.ok(!JSON.stringify(response.headers).includes(contentKey));
     assert.deepEqual(fs.readdirSync(h.dir), [], 'prepare temporary files must be removed');
     h.context.clearOnlineCache();
   });
@@ -64,16 +77,23 @@ function load(url, mode = 'ok', key = contentKey) {
     assert.deepEqual(fs.readdirSync(h.dir), ['final.mp4']);
   });
   await check('cancel during native decryption kills child and removes partial output', async () => {
-    const h = load(url, 'wait'); const pending = h.handlers['prepare-online-play']({}, { vid: 'cancel', requestId: 'cancel' });
+    const h = load(url, 'wait'); const prepared = await h.handlers['prepare-online-play']({}, { vid: 'cancel', requestId: 'cancel' });
+    assert.equal(prepared.success, true);
+    const pending = h.protocols['hongguo-stream'](new Request(prepared.url));
     for (let i=0; i<30 && !h.children.length; i++) await sleep(5);
-    assert.equal(h.children.length, 1, 'encrypted preparation must start ffmpeg');
+    assert.equal(h.children.length, 1, 'encrypted playback must start ffmpeg');
     await h.handlers['release-online-play']({}, { requestId: 'cancel' });
-    assert.equal((await pending).success, false); assert.equal(h.children[0].killed, true);
+    assert.equal(h.children[0].killed, true);
+    await pending.catch(() => {});
     assert.deepEqual(fs.readdirSync(h.dir), []);
   });
   await check('native failure does not expose keys or retain partial output', async () => {
     const h = load(url, 'fail'); const p = await h.handlers['prepare-online-play']({}, { vid: 'fail' });
-    assert.equal(p.success, false); assert.ok(!p.error.includes(contentKey)); assert.deepEqual(fs.readdirSync(h.dir), []);
+    assert.equal(p.success, true);
+    const response = await h.protocols['hongguo-stream'](new Request(p.url));
+    const body = await response.text();
+    assert.ok(!body.includes(contentKey)); assert.ok(!String(p.error || '').includes(contentKey));
+    assert.deepEqual(fs.readdirSync(h.dir), []);
   });
   await check('invalid content key is rejected before launching native code', async () => {
     const h = load(url, 'ok', 'invalid'); const p = await h.handlers['prepare-online-play']({}, { vid: 'invalid' });

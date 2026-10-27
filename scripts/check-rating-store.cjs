@@ -1,0 +1,40 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { createRatingStore } = require('../src/native/rating-store');
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-rating-store-'));
+const file = path.join(dir, 'nested', 'ratings-cache.json');
+let now = 1_000_000;
+const store = createRatingStore({ file, now: () => now, ttl: 1000, maxEntries: 2 });
+assert.equal(store.get('1234567'), undefined);
+assert.equal(store.set('1234567', 8.25), true);
+assert.equal(store.set('2234567', null), true);
+assert.equal(store.set('3234567', 11), false);
+assert.equal(store.set('bad', 8), false);
+assert.equal(store.set('3234567', 9), true);
+assert.equal(store.get('1234567'), undefined, 'the oldest score drops after the cap');
+assert.equal(store.get('2234567'), null);
+store.save();
+const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+assert.equal(saved.version, 1);
+assert.equal(saved.entries['3234567'].rating, 9);
+assert.equal(saved.entries['1234567'], undefined);
+assert.equal(Object.keys(saved.entries).length, 2);
+
+now = saved.entries['2234567'].expires + 1;
+const restarted = createRatingStore({ file, now: () => now, ttl: 1000 });
+assert.equal(restarted.get('2234567'), undefined, 'expired disk entries are not reused');
+assert.equal(restarted.get('3234567'), undefined);
+
+fs.writeFileSync(file, '{');
+const broken = createRatingStore({ now: () => now });
+broken.load(file);
+assert.equal(broken.get('1234567'), undefined);
+fs.writeFileSync(file, JSON.stringify({ entries: { '1234567': { rating: 'hot', expires: now + 1000 }, '12': { rating: 9, expires: now + 1000 } } }));
+broken.load(file);
+assert.equal(broken.get('1234567'), undefined);
+assert.equal(broken.get('12'), undefined);
+fs.rmSync(dir, { recursive: true, force: true });
+console.log('PASS rating store: disk roundtrip, expiry, invalid values and a broken file');

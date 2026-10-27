@@ -23,14 +23,17 @@ function httpsUrl(value) {
   } catch (_) { return ''; }
 }
 
-async function request(apiPath, params) {
+async function request(apiPath, params, options = {}) {
+  const remaining = Number(options.deadline) > 0 ? options.deadline - Date.now() : 10000;
+  if (remaining <= 0) throw new Error('西饭加载超时，请重试');
+  const timeout = Math.min(10000, remaining);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
     const { data } = await axios.get(API + apiPath, {
       params: { ...params, version: 2001001, androidVersionCode: 28 },
       headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
-      timeout: 10000, signal: controller.signal, maxRedirects: 0, maxContentLength: 8 * 1024 * 1024,
+      timeout, signal: controller.signal, maxRedirects: 0, maxContentLength: 8 * 1024 * 1024,
     });
     if (data?.ret !== 0 || !data.result || typeof data.result !== 'object') throw new Error('invalid result');
     return data.result;
@@ -85,12 +88,12 @@ async function browseList(options = {}) {
   } catch (error) { return { success: false, error: error.message }; }
 }
 
-async function search(keyword, page = 1) {
+async function search(keyword, page = 1, options = {}) {
   try {
     const kw = String(keyword || '').trim();
     if (!kw) throw new Error('请输入搜索关键词');
     const pg = Math.max(1, Number.parseInt(page, 10) || 1);
-    return normalizeList(await request('/xifan/search/getSearchList', { keyword: kw, pageIndex: pg }), pg);
+    return normalizeList(await request('/xifan/search/getSearchList', { keyword: kw, pageIndex: pg }, options), pg);
   } catch (error) { return { success: false, error: error.message }; }
 }
 

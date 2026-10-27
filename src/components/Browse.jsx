@@ -6,6 +6,7 @@ import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search, Heart } from './icons';
 import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseTags } from '../catalogTags.mjs';
+import { applyPublicRatings } from '../publicRatings.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
@@ -29,11 +30,13 @@ function readSnapshot(source, category, genre, page) {
   return cached?.results?.length ? cached : null;
 }
 
-function needsPublicScore(results, ratings, id) {
+const SCORE_MEMORY_MS = 6 * 60 * 60 * 1000;
+
+function needsPublicScore(results, ratings, checkedAt, id, now = Date.now()) {
   const item = results.find(entry => String(entry?.series_id) === id);
   if (item?.rating != null) return false;
-  const known = Number(ratings?.[id]);
-  return !(Number.isFinite(known) && known > 0 && known <= 10);
+  const seen = checkedAt?.get(id) || 0;
+  return !seen || now - seen >= SCORE_MEMORY_MS;
 }
 
 function writeSnapshot(source, category, genre, page, entry) {
@@ -86,6 +89,7 @@ function Browse({ onNavigate, active = true }) {
   const [ratings, setRatings] = useState({});
   const ratingRequest = useRef(0);
   const ratingsRef = useRef({});
+  const scoreCheckedAt = useRef(new Map());
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
@@ -339,7 +343,7 @@ function Browse({ onNavigate, active = true }) {
     if (source !== 'hongguo' || !window.electronAPI?.getPublicRatings) return undefined;
     const pendingIds = () => results
       .map(item => String(item?.series_id || ''))
-      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, id));
+      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, scoreCheckedAt.current, id));
     if (!pendingIds().length) return undefined;
     const request = ++ratingRequest.current;
     let cancelled = false;
@@ -352,15 +356,9 @@ function Browse({ onNavigate, active = true }) {
         try {
           const response = await window.electronAPI.getPublicRatings(ids.slice(index, index + 8));
           if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) continue;
-          const numeric = {};
-          for (const [id, value] of Object.entries(response.ratings)) {
-            const score = Number(value);
-            if (Number.isFinite(score) && score > 0 && score <= 10) numeric[id] = Math.round(score * 10) / 10;
-          }
-          if (Object.keys(numeric).length) {
-            ratingsRef.current = { ...ratingsRef.current, ...numeric };
-            setRatings(ratingsRef.current);
-          }
+          const numeric = applyPublicRatings(scoreCheckedAt.current, response, ids.slice(index, index + 8));
+          ratingsRef.current = { ...ratingsRef.current, ...numeric };
+          setRatings(ratingsRef.current);
         } catch { /* The next group still runs. A miss is retried below. */ }
       }
       if (cancelled || request !== ratingRequest.current || attempt >= 2 || !pendingIds().length) return;

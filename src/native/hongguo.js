@@ -94,6 +94,7 @@ async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
     const signal = {}; // 供错误信息回溯（HTTP 状态 / 字节数 / CDN logid）
     try {
       const res = await axios.post(API + apiPath, body, {
+        ...require('./direct-connect').directAxiosOptions(),
         params: q,
         headers: HEADERS,
         timeout,
@@ -188,17 +189,27 @@ const sitePages = new Map();
 const sitePending = new Map();
 
 /** 拉取官网页面 HTML。同一地址共享进行中的请求，并在短时间内复用结果。 */
-async function fetchSiteHtml(url, timeout = 30000) {
+async function fetchSiteHtml(url, timeout = 30000, signal, { trustedOfficialDns = false } = {}) {
   // Only detail pages are reused. Playback pages change per episode and must not stick.
-  const reusable = String(url).includes('/detail?series_id=');
+  const reusable = !signal && String(url).includes('/detail?series_id=');
   const cached = reusable ? sitePages.get(url) : null;
   if (cached && cached.expires > Date.now()) return cached.html;
   if (reusable && sitePending.has(url)) return sitePending.get(url);
+  let guarded = {};
+  if (trustedOfficialDns) {
+    try {
+      if (new URL(url).origin === SITE_ORIGIN) {
+        guarded = { ...webMediaRequestOptions(url, { trustedOfficialDns: true }), adapter: 'http' };
+      }
+    } catch (_) { /* a malformed URL is rejected by axios below */ }
+  }
   const task = (async () => {
     let last;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await axios.get(url, {
+          ...require('./direct-connect').directAxiosOptions(),
+          ...guarded,
           headers: {
             'User-Agent': WEB_UA,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -208,6 +219,7 @@ async function fetchSiteHtml(url, timeout = 30000) {
           timeout,
           responseType: 'text',
           maxRedirects: 5,
+          signal,
         });
         const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
         if (reusable) {
@@ -314,6 +326,7 @@ async function fetchPublicScore(seriesId, timeout = 8000) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await axios.get(url, {
+        ...require('./direct-connect').directAxiosOptions(),
         headers: scoreRequestHeaders(),
         timeout,
         responseType: 'stream',
@@ -333,19 +346,65 @@ async function fetchPublicScore(seriesId, timeout = 8000) {
   throw last;
 }
 
-async function fetchEpisodeListFromWeb(seriesId) {
+function describeWebLoadError(error) {
+  const message = String(error?.message || '');
+  if (error?.code === 'ERR_CANCELED' || /aborted|canceled|timeout|ECONNABORTED|ETIMEDOUT/i.test(message)) {
+    return '加载超时或连接中断';
+  }
+  return message || '加载失败';
+}
+
+async function fetchEpisodeListFromWeb(seriesId, deadline = 0) {
   const prelude = takeWebEpisodes(seriesId);
   if (prelude) return prelude;
-  const encoded = encodeURIComponent(seriesId);
-  const urls = [`${SITE_ORIGIN}/detail?series_id=${encoded}`, `${SITE_ORIGIN}/player/${encoded}`];
-  let last = new Error('官网页面未找到分集数据（vid_list）');
-  for (const url of urls) {
-    try {
-      const parsed = episodeListFromHtml(await fetchSiteHtml(url), seriesId);
-      if (parsed) return parsed;
-    } catch (error) { last = error; }
+  // Some player pages hang on a bad CDN edge while the detail page is healthy.
+  // Race both, then hedge with ordinary DNS if the first attempt is still waiting.
+  const id = String(seriesId);
+  const race = async (timeout, trustedOfficialDns) => {
+    const budget = deadline ? Math.min(timeout, deadline - Date.now()) : timeout;
+    if (budget <= 0) throw new Error('加载超时或连接中断');
+    const controller = new AbortController();
+    const attempts = [
+      `${SITE_ORIGIN}/detail?series_id=${encodeURIComponent(id)}`,
+      `${SITE_ORIGIN}/player/${encodeURIComponent(id)}`,
+    ].map(url => fetchSiteHtml(url, budget, controller.signal, { trustedOfficialDns })
+      .then(html => {
+        const parsed = episodeListFromHtml(html, id);
+        if (!parsed) throw new Error('官网页面未找到分集数据（vid_list）');
+        return parsed;
+      }));
+    attempts.forEach(promise => promise.catch(() => {}));
+    try { return await Promise.any(attempts); }
+    catch (aggregate) { throw aggregate.errors?.[0] || aggregate; }
+    finally { controller.abort(); }
+  };
+  let firstValue = null;
+  let firstError = null;
+  const first = race(1500, true).then(value => {
+    firstValue = value;
+    return value;
+  }, error => {
+    firstError = error;
+    throw error;
+  });
+  const hedge = (async () => {
+    // A page that has already arrived should not open another round of requests.
+    for (let i = 0; i < 4 && !firstValue && !firstError; i += 1) await Promise.resolve();
+    if (firstValue) return firstValue;
+    if (firstError) throw firstError;
+    const wait = deadline ? Math.min(600, Math.max(0, deadline - Date.now())) : 600;
+    await new Promise(resolve => setTimeout(resolve, wait));
+    if (firstValue) return firstValue;
+    if (firstError) throw firstError;
+    if (deadline && Date.now() >= deadline) throw new Error('加载超时或连接中断');
+    return Promise.any([race(3500, true), race(3500, false)]);
+  })();
+  try { return await Promise.any([first, hedge]); }
+  catch (aggregate) {
+    const nested = (aggregate.errors || [aggregate]).flatMap(error => error?.errors || [error]);
+    const second = nested.find(error => error !== firstError) || nested[0] || aggregate;
+    throw new Error(`${describeWebLoadError(firstError)}；重试失败：${describeWebLoadError(second)}`);
   }
-  throw last;
 }
 
 /**
@@ -650,6 +709,8 @@ function sourceFailure(source, error) {
   if (code === 'PREVIEW_ONLY') return { source, code, message: '网页仅提供预览，未作为完整片源' };
   if (code === 'BUSINESS_REJECTED') return { source, code, message: '接口暂时拒绝本次请求' };
   if (code === 'MISSING_MODEL' || /未返回目录数据/.test(message)) return { source, code: 'MISSING_MODEL', message: '接口未返回本集片源模型' };
+  if (code === 'DEVICE_REGISTRATION_FAILED') return { source, code, message: '播放设备注册失败，请重试在线播放' };
+  if (code === 'EMPTY_RESPONSE') return { source, code: 'EMPTY_RESPONSE', message: '片源服务没有返回数据，请重试在线播放' };
   if (code === 'INVALID_RESPONSE' || /空响应|有效数据|目录数据不完整|JSON/.test(message)) return { source, code: 'INVALID_RESPONSE', message: '片源数据无法解析' };
   if (/未降级|尺寸可确认|H\.264\/HEVC/.test(message)) return { source, code: 'NO_PLAYABLE_SOURCE', message };
   return { source, code: 'NO_PLAYABLE_SOURCE', message: '暂未取得有效片源' };

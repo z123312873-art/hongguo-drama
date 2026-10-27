@@ -82,10 +82,20 @@ async function fetchPublicDetails(seriesId, vid = '') {
   return request;
 }
 
-const ratingCache = new Map();
+const { createRatingStore } = require('./rating-store');
+const ratingStore = createRatingStore();
 const ratingPending = new Map();
 let ratingActive = 0;
 const ratingWait = [];
+let scoreSource = (id, timeout) => require('./hongguo').fetchPublicScore(id, timeout);
+
+function initRatingStore(file) {
+  ratingStore.load(file);
+}
+
+function useScoreSource(reader) {
+  scoreSource = typeof reader === 'function' ? reader : (id, timeout) => require('./hongguo').fetchPublicScore(id, timeout);
+}
 
 function withRatingSlot(task) {
   return new Promise((resolve, reject) => {
@@ -103,19 +113,17 @@ function withRatingSlot(task) {
 }
 
 async function loadPublicRating(id) {
-  const cached = ratingCache.get(id);
-  if (cached && cached.expires > Date.now() && cached.rating != null) return cached.rating;
+  const cached = ratingStore.get(id);
+  if (cached !== undefined) return { rating: cached, confirmed: true };
   if (ratingPending.has(id)) return ratingPending.get(id);
   const task = (async () => {
     try {
-      const rating = await require('./hongguo').fetchPublicScore(id, 8000);
-      if (rating != null) {
-        ratingCache.set(id, { rating, expires: Date.now() + 10 * 60 * 1000 });
-        if (ratingCache.size > 240) ratingCache.delete(ratingCache.keys().next().value);
-      }
-      return rating ?? null;
+      const rating = await scoreSource(id, 8000);
+      const value = rating ?? null;
+      ratingStore.set(id, value);
+      return { rating: value, confirmed: true };
     } catch {
-      return null;
+      return { rating: null, confirmed: false };
     } finally {
       ratingPending.delete(id);
     }
@@ -128,8 +136,16 @@ async function fetchPublicRatings(ids) {
   const unique = [...new Set((Array.isArray(ids) ? ids : []).map(id => String(id || '')))]
     .filter(id => /^\d{6,30}$/.test(id)).slice(0, 24);
   const ratings = {};
-  await Promise.all(unique.map(id => withRatingSlot(async () => { ratings[id] = await loadPublicRating(id); })));
-  return { success: true, ratings };
+  const pending = [];
+  await Promise.all(unique.map(id => withRatingSlot(async () => {
+    const result = await loadPublicRating(id);
+    ratings[id] = result.rating;
+    if (!result.confirmed) pending.push(id);
+  })));
+  ratingStore.save();
+  return { success: true, ratings, pending };
 }
 
-module.exports = { fetchPublicDetails, parsePublicDetails, fetchPublicRatings };
+module.exports = {
+  fetchPublicDetails, parsePublicDetails, fetchPublicRatings, initRatingStore, useScoreSource,
+};

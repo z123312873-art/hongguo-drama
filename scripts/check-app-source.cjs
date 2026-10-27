@@ -37,6 +37,9 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
     assert.equal(config.maxRedirects, 0);
     assert.ok(config.timeout > 0 && config.timeout <= 12000);
     assert.ok(config.signal);
+    if (String(config.url).includes('device_register')) {
+      return { status: 200, headers: {}, data: JSON.stringify({ code: 1 }) };
+    }
     if (config.method === 'POST') {
       assert.ok(config.headers['x-medusa']);
       assert.ok(config.headers['x-gorgon']);
@@ -53,7 +56,9 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
     require: name => {
       if (name === 'axios') return axios;
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
+      if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
+      if (name === './direct-connect') return require(path.join(nativeDir, 'direct-connect'));
       if (name === 'node:crypto') return { ...crypto, createHash(name, ...args) {
         assert.notEqual(name.toLowerCase(), 'sm3', 'must not depend on OpenSSL SM3');
         return crypto.createHash(name, ...args);
@@ -69,6 +74,21 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
     };
   `, context);
   return { fetch: context.module.exports.fetchAppPlayUrl, calls, signedDeviceIds };
+}
+function loadFetch(axios) {
+  const context = { Buffer, URL, AbortSignal, module: { exports: {} },
+    require: name => {
+      if (name === 'axios') return axios;
+      if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
+      if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
+      if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
+      if (name === './direct-connect') return require(path.join(nativeDir, 'direct-connect'));
+      if (name === 'node:crypto') return crypto;
+      throw new Error(`Unexpected dependency: ${name}`);
+    },
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'app-source.js'), 'utf8'), context);
+  return context.module.exports.fetchAppPlayUrl;
 }
 
 function nativeFixture() {
@@ -93,15 +113,16 @@ const checks = [
     await f.fetch('11');
     await f.fetch('11');
     await Promise.all([f.fetch('11'), f.fetch('11'), f.fetch('11')]);
-    const requests = f.calls.filter(call => call.method === 'POST');
+    const requests = f.calls.filter(call => call.method === 'POST' && String(call.url).includes('multi_video_model'));
     assert.equal(requests.length, 5, 'one model request per lookup; no retry loop');
+    assert.equal(f.calls.filter(call => String(call.url).includes('device_register')).length, 1, 'anonymous playback registration is attempted once');
     for (const field of ['iid', 'device_id']) {
       const ids = requests.map(call => new URL(call.url).searchParams.get(field));
       assert.ok(ids.every(id => /^\d{16}$/.test(id)), `${field} must stay a valid synthetic identifier`);
       assert.equal(new Set(ids).size, requests.length, `${field} must not be reused across lookups`);
       if (field === 'device_id') assert.deepEqual(ids, f.signedDeviceIds, 'URL and signed device fields must match');
     }
-    assert.equal(f.calls.length, 10, 'each lookup retains its two-stage flow');
+    assert.equal(f.calls.length, 11, 'each lookup retains its two-stage flow after one registration attempt');
   }],
   ['App H264 takes priority over higher-resolution HEVC', async () => {
     const result = await appRows({ hd: { main_url: mediaUrl('hevc'), codec_type: 'hevc', quality_desc: '1080P' },
@@ -199,6 +220,87 @@ const checks = [
     await assert.rejects(fetch('11'));
     assert.equal(calls.length, 2);
     await assert.rejects(fixture({ media: 'https://127.0.0.1/video' }).fetch('11'));
+  }],
+  ['empty signed response registers once more and then plays, a second empty response stops', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    const media = 'https://v3-reading.qznovelvod.com/video.mp4';
+    const model = { code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: media, codec_type: 'h264', quality_desc: '720P', vwidth: 720, vheight: 1280 },
+    ] }) } } };
+    const run = async (secondRegister) => {
+      device.resetPlaybackDevice();
+      const calls = [];
+      const fetch = loadFetch(async config => {
+        calls.push(config);
+        assert.equal(config.maxRedirects, 0);
+        assert.ok(config.signal);
+        if (String(config.url).includes('device_register')) {
+          const count = calls.filter(call => String(call.url).includes('device_register')).length;
+          if (count === 1 || secondRegister === 'fail') return { status: 200, headers: {}, data: JSON.stringify({ code: 1 }) };
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: '1234567890123456', install_id_str: '6543210987654321', code: 0 }) };
+        }
+        if (config.method === 'POST') {
+          const count = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length;
+          if (count === 1) {
+            assert.ok(config.headers['x-gorgon'], 'the unregistered attempt keeps the old signature');
+            return { status: 200, headers: {}, data: '' };
+          }
+          assert.equal(config.headers['x-gorgon'], undefined, 'the fresh device uses the unsigned playback request');
+          return { status: 200, headers: {}, data: JSON.stringify(model) };
+        }
+        throw new Error('unexpected request');
+      });
+      return { fetch, calls };
+    };
+    try {
+      const healed = await run('ok');
+      const result = await healed.fetch('11', { quality: '1080p' });
+      assert.equal(result.url, media);
+      assert.equal(result.codec, 'h264');
+      assert.equal(healed.calls.filter(call => String(call.url).includes('device_register')).length, 2);
+      assert.equal(healed.calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length, 2);
+      const stopped = await run('fail');
+      await assert.rejects(stopped.fetch('11'), error => error.code === 'EMPTY_RESPONSE');
+      assert.equal(stopped.calls.filter(call => String(call.url).includes('device_register')).length, 2);
+      assert.equal(stopped.calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length, 1);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
+  ['empty unsigned playback signs the same device once and does not register again', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    device.resetPlaybackDevice();
+    const media = 'https://v3-reading.qznovelvod.com/video.mp4';
+    const model = { code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: media, codec_type: 'h264', quality_desc: '1080P', vwidth: 1080, vheight: 1920 },
+    ] }) } } };
+    const calls = [];
+    try {
+      const fetch = loadFetch(async config => {
+        calls.push(config);
+        if (String(config.url).includes('device_register')) {
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: '1234567890123456', install_id_str: '6543210987654321', code: 0 }) };
+        }
+        const videos = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register'));
+        if (videos.length === 1) {
+          assert.equal(config.headers['x-gorgon'], undefined);
+          return { status: 200, headers: {}, data: '' };
+        }
+        assert.ok(config.headers['x-gorgon']);
+        assert.equal(new URL(config.url).searchParams.get('device_id'), '1234567890123456');
+        assert.equal(new URL(config.url).searchParams.get('iid'), '6543210987654321');
+        return { status: 200, headers: {}, data: JSON.stringify(model) };
+      });
+      const result = await fetch('11', { quality: '1080p' });
+      assert.equal(result.url, media);
+      assert.equal(result.quality, '1080p');
+      assert.equal(calls.filter(call => String(call.url).includes('device_register')).length, 1);
+      assert.equal(calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length, 2);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
   }],
   ['invalid input and invalid key rejected', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'app-source.js')), 'app source missing');

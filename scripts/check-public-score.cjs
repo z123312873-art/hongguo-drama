@@ -44,6 +44,13 @@ function metering(text, size = 4096) {
     assert.equal(readPublicScore('"seriesSocialInfo":{"rating":11}'), null);
     assert.equal(readPublicScore('评分9', { partial: true }), null);
     assert.equal(readPublicScore('评分9.1</span>', { partial: true }), 9.1);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"hot_score_data":{"score":45524479,"text":"4552万热度"},"rating":8.4,"reviews":{"reviews":[{"rating":10}]}}'), 8.4);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"hot_score_data":{"rating":9.9},"rating":8.2}'), 8.2);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"series_like_count":"29000","hot_score_data":{"score":45524479,"text":"4552万热度"},"reviews":{"total_count":"98","reviews":[{"rating":10}]}}'), null);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"rating":"7.5","series_like_count":"1"}'), 7.5);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"series_like_count":"1","hot_score_', { partial: true }), null);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"rating":8.2', { partial: true }), null);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"rating":8.2'), 8.2);
   });
 
   await check('only a complete catalog episode list can skip the detail request', async () => {
@@ -106,6 +113,22 @@ function metering(text, size = 4096) {
     assert.equal(calls, 1, 'timeouts are not retried');
     const plain = load('hongguo.js', { axios: { get: async () => ({ data: '评分<!-- -->7.2</span>' }) } });
     assert.equal(await plain.fetchPublicScore('1234567'), 7.2);
+  });
+
+  await check('a fast episode page does not open the hedge round', async () => {
+    let gets = 0;
+    const html = `<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+      detail_page: { isSuccess: true, seriesDetail: { series_id: '1234567', series_name: '甲', vid_list: ['100001', '100002'] } },
+    } })}</script>`;
+    const native = load('hongguo.js', { axios: { get: async (_url, options) => {
+      gets += 1;
+      assert.equal(options.timeout, 1500);
+      return { data: html };
+    } } });
+    const list = await native.fetchEpisodeListFromWeb('1234567');
+    await new Promise(resolve => setTimeout(resolve, 700));
+    assert.equal(list.total, 2);
+    assert.equal(gets, 2, 'detail and player start together, and a fast result skips the later hedge');
   });
 
   if (failures) process.exitCode = 1;

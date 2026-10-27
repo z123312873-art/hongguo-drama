@@ -15,6 +15,8 @@ function guardedAgent(Agent) {
 }
 const httpAgent = guardedAgent(http.Agent);
 const httpsAgent = guardedAgent(https.Agent);
+// A trusted-DNS request must not reuse a socket opened through ordinary DNS.
+const trustedOfficialHttpsAgent = guardedAgent(https.Agent);
 
 const blocked = new BlockList();
 for (const [address, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
@@ -97,15 +99,17 @@ function resolveOfficialAddress() {
   return officialDnsPending;
 }
 
-function webMediaRequestOptions(value) {
+function webMediaRequestOptions(value, { trustedOfficialDns = false } = {}) {
   if (!isPublicMediaUrl(value)) throw blockedAddress();
   const initial = new URL(value);
+  if (trustedOfficialDns && initial.origin !== 'https://hongguoduanju.com') throw blockedAddress();
   const hosts = new Map([[initial.hostname.toLowerCase(), initial]]);
   return {
     maxRedirects: 5,
     // Reuse only this guard's sockets; new connections still run the request's checked lookup.
     httpAgent,
-    httpsAgent,
+    httpsAgent: trustedOfficialDns ? trustedOfficialHttpsAgent : httpsAgent,
+    ...(trustedOfficialDns ? { proxy: false } : {}),
     lookup(hostname, options, callback) {
       const settings = typeof options === 'number' ? { family: options } : options || {};
       const finish = addresses => {
@@ -113,6 +117,11 @@ function webMediaRequestOptions(value) {
         else if (addresses.length) callback(null, addresses[0].address, addresses[0].family);
         else callback(new Error('片源域名未解析到地址'));
       };
+      if (trustedOfficialDns && hosts.get(hostname.toLowerCase())?.origin === 'https://hongguoduanju.com') {
+        if (settings.family === 6) return callback(blockedAddress());
+        resolveOfficialAddress().then(finish, callback);
+        return;
+      }
       dns.lookup(hostname, { ...settings, all: true }, (error, addresses) => {
         if (error) return callback(error);
         const target = hosts.get(hostname.toLowerCase());
