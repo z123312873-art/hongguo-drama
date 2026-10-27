@@ -113,6 +113,19 @@ function fixture({ prepare, transcode, enqueue, quality = '720p', initial = 'mis
     assert.equal(source(f.ui), 'file:///A-1.mp4'); assert.equal(f.ui.media.currentTime, 29);
     assert.equal(f.ui.media.paused, true); f.ui.unmount();
   });
+  await test('empty app source stays on online retry and does not enqueue a download', async () => {
+    const f = fixture({ prepare: async () => ({ success: false, code: 'SOURCE_UNAVAILABLE',
+      error: '本集取源失败：App：片源服务没有返回数据，请重试在线播放',
+      sources: [{ source: 'app', code: 'EMPTY_RESPONSE', message: '片源服务没有返回数据，请重试在线播放' }] }) });
+    await f.ui.flush();
+    const text = node => typeof node === 'string' ? node : node?.children?.map(text).join('') || '';
+    assert.equal(f.downloads.length, 0);
+    assert.equal(f.ui.button('取消等待'), undefined);
+    assert.match(text(alert(f.ui)), /片源服务没有返回数据/);
+    assert.ok(f.ui.button('重试本集'));
+    assert.ok(f.ui.button('重新连接片源'));
+    f.ui.unmount();
+  });
   await test('known bad local media is not selected again after online fallback fails', async () => {
     const f = fixture({ initial: 'completed', enqueue: async () => ({ success: false, error: '已有文件保留' }) });
     await f.ui.flush(); f.ui.metadata(); f.ui.media.currentTime = 18; f.ui.error(2); await f.ui.flush();

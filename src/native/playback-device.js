@@ -10,6 +10,7 @@ const { gzipSync } = require('node:zlib');
 const REGISTER_URL = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
 let registration;
+let refreshing = null;
 
 function responseId(response, name) {
     const preferred = response?.[`${name}_str`];
@@ -72,4 +73,21 @@ function getPlaybackDevice(requestJson) {
     return registration;
 }
 
-module.exports = { getPlaybackDevice };
+// The signed video API now answers an unregistered device with an empty 200.
+// Drop a rejected or rejected-by-the-server identity so the next play can register once more.
+function refreshPlaybackDevice(requestJson) {
+    if (refreshing) return refreshing;
+    registration = null;
+    const run = getPlaybackDevice(requestJson);
+    refreshing = run;
+    // The caller handles `run`. This side chain only clears the single-flight slot.
+    run.finally(() => { if (refreshing === run) refreshing = null; }).catch(() => {});
+    return run;
+}
+
+function resetPlaybackDevice() {
+    registration = null;
+    refreshing = null;
+}
+
+module.exports = { getPlaybackDevice, refreshPlaybackDevice, resetPlaybackDevice };

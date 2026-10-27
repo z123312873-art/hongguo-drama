@@ -6,7 +6,7 @@
 // bounded HTTPS transport; exact episode matching; supported codec selection.
 // Crypto tables and SDK protocol constants below are not user credentials.
 const crypto = require('node:crypto');
-const { getPlaybackDevice } = require('./playback-device');
+const { getPlaybackDevice, refreshPlaybackDevice } = require('./playback-device');
 const sm3 = require('./sm3');
 const { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
@@ -327,10 +327,21 @@ async function fetchAppPlayUrl(vid, options = {}) {
         biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
         mixed_video_id_map: { '1004': [vid] },
     });
+    const postModel = (signed) => requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
     let identity = null;
     try { identity = await getPlaybackDevice(requestJson); } catch (_) { identity = null; }
-    const signed = identity ? playbackRequest(payload, identity) : signedVideoRequest(payload);
-    const response = await requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+    let response;
+    try {
+        response = await postModel(identity ? playbackRequest(payload, identity) : signedVideoRequest(payload));
+    } catch (error) {
+        // An empty 200 is the unregistered signature path, or a device the server dropped.
+        // One fresh registration retries playback; a second empty response stops there.
+        if (error?.code !== 'EMPTY_RESPONSE') throw error;
+        let fresh = null;
+        try { fresh = await refreshPlaybackDevice(requestJson); } catch (_) { fresh = null; }
+        if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) throw error;
+        response = await postModel(playbackRequest(payload, fresh));
+    }
     if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
     const entry = response.data?.[vid];
     const model = typeof entry?.video_model === 'string' ? jsonBody(entry.video_model) : entry?.video_model;

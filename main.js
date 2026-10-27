@@ -2572,7 +2572,10 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
       cached, streaming: !!entry.playInfo, notice: entry.notice || '' };
   } catch (error) {
     releaseOnlineSession(streamId);
-    return { success: false, error: error.message, code: error.code };
+    const sources = Array.isArray(error.sources) ? error.sources.map(item => ({
+      source: item?.source, code: item?.code, message: item?.message,
+    })) : undefined;
+    return { success: false, error: error.message, code: error.code, ...(sources ? { sources } : {}) };
   }
 });
 

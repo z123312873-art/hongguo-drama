@@ -11,7 +11,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, 'playback-device.js'), 'utf8');
 const endpoint = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const failureMessage = '匿名播放设备注册失败，请重启应用后重试';
-function load() {
+function loadModule() {
     const module = { exports: {} };
     vm.runInNewContext(source, {
         module, Buffer, AbortSignal,
@@ -21,8 +21,9 @@ function load() {
         },
         console: { log() { assert.fail('no logging'); }, warn() { assert.fail('no logging'); }, error() { assert.fail('no logging'); } },
     }, { filename: 'playback-device.js' });
-    return module.exports.getPlaybackDevice;
+    return module.exports;
 }
+function load() { return loadModule().getPlaybackDevice; }
 
 test('lazy registration shares one promise and one exact identity across concurrent and later playback', async () => {
     const get = load();
@@ -172,6 +173,35 @@ test('zero, unsafe, malformed or missing IDs reject safely and cannot create a r
         await assert.rejects(load()(async () => ({ device_id: '123', install_id: '456', [`${name}_str`]: '1'.repeat(31) })), { code: 'DEVICE_REGISTRATION_FAILED' });
     }
     await assert.rejects(load()(async () => null), { code: 'DEVICE_REGISTRATION_FAILED' });
+});
+
+test('refresh replaces one rejected registration and concurrent callers share that attempt', async () => {
+    const { getPlaybackDevice: get, refreshPlaybackDevice: refresh, resetPlaybackDevice: reset } = loadModule();
+    let calls = 0;
+    await assert.rejects(get(async () => { calls++; return { code: 1 }; }), { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal(calls, 1);
+    assert.equal(get(() => assert.fail('rejected registration stays cached')), get(() => assert.fail('still cached')));
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const request = async () => {
+        calls++;
+        await gate;
+        return { device_id_str: '123456', install_id_str: '654321', code: 0 };
+    };
+    const first = refresh(request);
+    const second = refresh(() => assert.fail('second refresh must share the attempt'));
+    assert.equal(first, second);
+    for (let i = 0; i < 8 && calls < 2; i += 1) await Promise.resolve();
+    assert.equal(calls, 2);
+    release();
+    const identity = await first;
+    assert.equal(identity.device_id, '123456');
+    assert.equal(identity.iid, '654321');
+    assert.equal(await get(() => assert.fail('successful refresh must be reused')), identity);
+    reset();
+    let again = 0;
+    await assert.rejects(get(async () => { again++; return null; }), { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal(again, 1);
 });
 
 test('business rejection cannot be accepted even if IDs are present', async () => {
