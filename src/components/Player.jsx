@@ -792,7 +792,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         if (!res || !res.success) {
           if (res?.code === 'MEDIA_TOO_LARGE') showToast(res.error);
           const sourceDead = Array.isArray(res?.sources) && res.sources.length > 0
-            && res.sources.every(item => item?.code === 'EMPTY_RESPONSE' || item?.code === 'INVALID_RESPONSE');
+            && res.sources.every(item => ['EMPTY_RESPONSE', 'INVALID_RESPONSE', 'DEVICE_REGISTRATION_FAILED'].includes(item?.code));
           await recoverOnlineFailure(ep, (res && res.error) || '在线播放准备失败', { download: !sourceDead });
           return;
         }

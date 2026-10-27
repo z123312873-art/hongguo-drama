@@ -7,7 +7,9 @@
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 
-const REGISTER_URL = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
+const REGISTER_QUERY = 'tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
+const REGISTER_HOSTS = ['log5-applog-lf.fqnovel.com', 'log5-applog-hl.fqnovel.com', 'log0-applog-lf.fqnovel.com'];
+const REGISTER_URLS = REGISTER_HOSTS.map(host => `https://${host}/service/2/device_register/?${REGISTER_QUERY}`);
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
 let registration;
 let refreshing = null;
@@ -50,21 +52,26 @@ function getPlaybackDevice(requestJson) {
             const cipher = crypto.createCipheriv('aes-128-cbc', derived.subarray(0, 16), derived.subarray(16, 32));
             const plaintext = Buffer.concat([crypto.createHash('sha512').update(compressed).digest(), compressed]);
             const data = Buffer.concat([Buffer.from('746305100000', 'hex'), random, cipher.update(plaintext), cipher.final()]);
-            const response = await requestJson(REGISTER_URL, {
-                method: 'POST',
-                headers: {
-                    'User-Agent': 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
-                    Accept: 'application/json', 'Content-Type': 'application/octet-stream;tt-data=a',
-                    'log-encode-type': 'gzip', 'x-ss-dp': '8662', 'x-ss-req-ticket': String(now),
-                    'x-vc-bdturing-sdk-version': '4.0.3.cn', lc: '101', 'sdk-version': '2',
-                    'passport-sdk-version': '5051452', 'x-neptune': '-8|50:51:59:30:40:47:49:39',
-                    'x-ss-stub': crypto.createHash('md5').update(data).digest('hex').toUpperCase(),
-                },
-                data,
-            }, Date.now() + 8000, AbortSignal.timeout(8000));
+            const headers = {
+                'User-Agent': 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
+                Accept: 'application/json', 'Content-Type': 'application/octet-stream;tt-data=a',
+                'log-encode-type': 'gzip', 'x-ss-dp': '8662', 'x-ss-req-ticket': String(now),
+                'x-vc-bdturing-sdk-version': '4.0.3.cn', lc: '101', 'sdk-version': '2',
+                'passport-sdk-version': '5051452', 'x-neptune': '-8|50:51:59:30:40:47:49:39',
+                'x-ss-stub': crypto.createHash('md5').update(data).digest('hex').toUpperCase(),
+            };
+            const deadline = Date.now() + 8000;
+            let response = null;
+            for (const url of REGISTER_URLS) {
+                if (deadline <= Date.now()) break;
+                try {
+                    response = await requestJson(url, { method: 'POST', headers, data }, deadline, AbortSignal.timeout(Math.max(1, deadline - Date.now())));
+                    break;
+                } catch (_) { response = null; }
+            }
             const device_id = responseId(response, 'device_id');
             const iid = responseId(response, 'install_id');
-            if (!device_id || !iid || Number(response?.code ?? response?.Code ?? 0) !== 0) throw new Error('Invalid registration');
+            if (!response || !device_id || !iid || Number(response?.code ?? response?.Code ?? 0) !== 0) throw new Error('Invalid registration');
             return Object.freeze({ device_id, iid, cdid });
         } catch (_) {
             throw Object.assign(new Error('匿名播放设备注册失败，请重启应用后重试'), { code: 'DEVICE_REGISTRATION_FAILED' });

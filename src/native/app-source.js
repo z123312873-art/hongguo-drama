@@ -125,9 +125,11 @@ function helios(khronos) {
 }
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
-function signedVideoRequest(payload) {
-    // Keep the request's synthetic identity consistent across URL and signature.
-    const device = { ...DEVICE, iid: localId(), device_id: localId() };
+function signedVideoRequest(payload, identity) {
+    // A registered device is signed with its own ids. Tests and the last-resort path keep a synthetic identity.
+    const registered = identity && [identity.device_id, identity.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value));
+    const device = { ...DEVICE, iid: registered ? identity.iid : localId(), device_id: registered ? identity.device_id : localId(),
+        ...(registered && identity.cdid ? { cdid: identity.cdid } : {}) };
     const khronos = Math.floor(Date.now() / 1000); const body = Buffer.from(payload); const ticketBase = Date.now(); let requestTicket = ticketBase; let query = ''; let url = '';
     // branch 1 的签名变体服务端不认：抖动 _rticket 找一个可用的 branch（最多试 32 秒偏移）
     for (let offset = 0; offset < 32; offset += 1) { requestTicket = ticketBase + offset; const values = { ...device, ts: String(khronos), _rticket: String(requestTicket) }; query = pythonUrlEncode(values); url = `${VIDEO_API}?${query}`; if (branchOf(url, body, khronos) !== 1) break; }
@@ -328,19 +330,31 @@ async function fetchAppPlayUrl(vid, options = {}) {
         mixed_video_id_map: { '1004': [vid] },
     });
     const postModel = (signed) => requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+    // Unsigned playback works from some networks. Others return an empty 200 unless the same device is signed.
+    const readModel = async (identity) => {
+        const attempts = identity ? [playbackRequest(payload, identity), signedVideoRequest(payload, identity)] : [signedVideoRequest(payload)];
+        let lastError;
+        for (const signed of attempts) {
+            try { return await postModel(signed); }
+            catch (error) {
+                lastError = error;
+                if (error?.code !== 'EMPTY_RESPONSE') throw error;
+            }
+        }
+        throw lastError;
+    };
     let identity = null;
     try { identity = await getPlaybackDevice(requestJson); } catch (_) { identity = null; }
     let response;
     try {
-        response = await postModel(identity ? playbackRequest(payload, identity) : signedVideoRequest(payload));
+        response = await readModel(identity);
     } catch (error) {
-        // An empty 200 is the unregistered signature path, or a device the server dropped.
-        // One fresh registration retries playback; a second empty response stops there.
+        // One fresh registration, then both playback styles. A second empty response stops.
         if (error?.code !== 'EMPTY_RESPONSE') throw error;
         let fresh = null;
         try { fresh = await refreshPlaybackDevice(requestJson); } catch (_) { fresh = null; }
         if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) throw error;
-        response = await postModel(playbackRequest(payload, fresh));
+        response = await readModel(fresh);
     }
     if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
     const entry = response.data?.[vid];

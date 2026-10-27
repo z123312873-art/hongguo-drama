@@ -131,7 +131,7 @@ test('synchronous and asynchronous failures remain cached and expose only a safe
             return Promise.reject(unsafe);
         });
         const results = await Promise.allSettled(Array.from({ length: 10 }, () => get(() => assert.fail('no retry'))));
-        assert.equal(calls, 1);
+        assert.equal(calls, 3, 'a transport failure tries the backup registration hosts once');
         assert.ok(results.every(result => result.status === 'rejected' && result.reason === results[0].reason));
         const error = results[0].reason;
         assert.equal(error.code, 'DEVICE_REGISTRATION_FAILED');

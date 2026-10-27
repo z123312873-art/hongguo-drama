@@ -37,6 +37,9 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
     assert.equal(config.maxRedirects, 0);
     assert.ok(config.timeout > 0 && config.timeout <= 12000);
     assert.ok(config.signal);
+    if (String(config.url).includes('device_register')) {
+      return { status: 200, headers: {}, data: JSON.stringify({ code: 1 }) };
+    }
     if (config.method === 'POST') {
       assert.ok(config.headers['x-medusa']);
       assert.ok(config.headers['x-gorgon']);
@@ -258,6 +261,40 @@ const checks = [
       await assert.rejects(stopped.fetch('11'), error => error.code === 'EMPTY_RESPONSE');
       assert.equal(stopped.calls.filter(call => String(call.url).includes('device_register')).length, 2);
       assert.equal(stopped.calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length, 1);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
+  ['empty unsigned playback signs the same device once and does not register again', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    device.resetPlaybackDevice();
+    const media = 'https://v3-reading.qznovelvod.com/video.mp4';
+    const model = { code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: media, codec_type: 'h264', quality_desc: '1080P', vwidth: 1080, vheight: 1920 },
+    ] }) } } };
+    const calls = [];
+    try {
+      const fetch = loadFetch(async config => {
+        calls.push(config);
+        if (String(config.url).includes('device_register')) {
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: '1234567890123456', install_id_str: '6543210987654321', code: 0 }) };
+        }
+        const videos = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register'));
+        if (videos.length === 1) {
+          assert.equal(config.headers['x-gorgon'], undefined);
+          return { status: 200, headers: {}, data: '' };
+        }
+        assert.ok(config.headers['x-gorgon']);
+        assert.equal(new URL(config.url).searchParams.get('device_id'), '1234567890123456');
+        assert.equal(new URL(config.url).searchParams.get('iid'), '6543210987654321');
+        return { status: 200, headers: {}, data: JSON.stringify(model) };
+      });
+      const result = await fetch('11', { quality: '1080p' });
+      assert.equal(result.url, media);
+      assert.equal(result.quality, '1080p');
+      assert.equal(calls.filter(call => String(call.url).includes('device_register')).length, 1);
+      assert.equal(calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length, 2);
     } finally {
       device.resetPlaybackDevice();
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
