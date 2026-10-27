@@ -108,5 +108,21 @@ function metering(text, size = 4096) {
     assert.equal(await plain.fetchPublicScore('1234567'), 7.2);
   });
 
+  await check('a fast episode page does not open the hedge round', async () => {
+    let gets = 0;
+    const html = `<script>window._ROUTER_DATA=${JSON.stringify({ loaderData: {
+      detail_page: { isSuccess: true, seriesDetail: { series_id: '1234567', series_name: '甲', vid_list: ['100001', '100002'] } },
+    } })}</script>`;
+    const native = load('hongguo.js', { axios: { get: async (_url, options) => {
+      gets += 1;
+      assert.equal(options.timeout, 1500);
+      return { data: html };
+    } } });
+    const list = await native.fetchEpisodeListFromWeb('1234567');
+    await new Promise(resolve => setTimeout(resolve, 700));
+    assert.equal(list.total, 2);
+    assert.equal(gets, 2, 'detail and player start together, and a fast result skips the later hedge');
+  });
+
   if (failures) process.exitCode = 1;
 })();

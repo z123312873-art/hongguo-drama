@@ -2,6 +2,7 @@
 // The hidden page sniff is only a fallback when the public API shape changes.
 const { searchHongguo, HongguoSearchError } = require('./hongguo-search');
 const { searchApp } = require('./hongguo-app-search');
+const { searchNewReleasesDetailed } = require('./hongguo-app-new');
 const { toSimplified } = require('./script-query');
 
 const WEB_BUDGET_MS = 8000;
@@ -37,6 +38,25 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function comparableTitle(value) {
+  return String(value || '').normalize('NFKC').replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase();
+}
+
+async function addNewReleases(query, results, deadline, now, searchNew) {
+  const wanted = comparableTitle(query);
+  if (wanted.length < 2 || results.some(item => comparableTitle(item.series_title) === wanted)) return results;
+  if (deadline - now() < 900) return results;
+  try {
+    const detailed = await searchNew(query, {
+      deadline: Math.min(deadline, now() + (results.length ? 2500 : 8000)),
+    });
+    const extras = Array.isArray(detailed?.results) ? detailed.results : Array.isArray(detailed) ? detailed : [];
+    return mergeResults(results, extras);
+  } catch (_) {
+    return results;
+  }
+}
+
 function settledWeb(query, searchWeb, deadline, now) {
   return searchWeb(query, { deadline, timeout: Math.max(1000, deadline - now()), retries: 0 }).then(
     (value) => ({ ok: true, value }),
@@ -44,7 +64,7 @@ function settledWeb(query, searchWeb, deadline, now) {
   );
 }
 
-async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo, searchSigned = searchApp, now = Date.now } = {}) {
+async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo, searchSigned = searchApp, searchNew = searchNewReleasesDetailed, now = Date.now } = {}) {
   const typed = String(keyword || '').trim();
   const query = toSimplified(typed).trim();
   if (!query || query.length > 200) return { success: false, results: [], error: '请输入 1 至 200 字的搜索词' };
@@ -73,6 +93,7 @@ async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo,
     if (original.ok) results = mergeResults(results, original.value.results);
   }
   if (results.length || web?.ok) {
+    results = await addNewReleases(query, results, deadline, now, searchNew);
     const channel = web?.ok && web.value.results?.length ? 'web' : 'app';
     return { ...pack(web?.ok ? web.value : { results, keyword: query }, channel), results, keyword: query };
   }

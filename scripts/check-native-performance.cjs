@@ -29,7 +29,7 @@ function fixture({ web = true, api = false, app = false, blockedVids = [], html 
     },
   };
   const context = {
-    module: { exports: {} }, Buffer, process: { env: {} },
+    module: { exports: {} }, Buffer, AbortController, AbortSignal, process: { env: {} },
     require: name => name === 'axios' ? axios : name === './app-source' ? { fetchAppPlayUrl: async () => { state.appCalls++; if (!state.app) throw Error('app unavailable'); return { url: 'https://media.example/app.mp4', contentKey: '01'.repeat(16), source: 'app' }; } } : require(name.startsWith('.') ? path.join(path.dirname(sourcePath), name) : name),
     Date: class extends Date { static now() { return now; } },
     setTimeout: fn => { state.waits++; fn(); },
@@ -55,7 +55,7 @@ const checks = [
     assert.equal(results[0].total, 2);
     await native.fetchEpisodeList('1');
     assert.equal(state.post, 0, '有效网页不应等待 API');
-    assert.equal(state.get, 1, '相同分集只取一次');
+    assert.equal(state.get, 6, '同一次分集加载里的页面竞速只发生一遍');
   }],
   ['播放地址网页优先、并发合并、短期复用', async () => {
     const { native, state } = fixture();
@@ -72,20 +72,20 @@ const checks = [
     advance(29999);
     await native.fetchEpisodeList('1');
     await native.fetchPlayUrlSingle('11', '1');
-    assert.equal(state.get, 2, '未到期不重复访问');
+    assert.equal(state.get, 7, '未到期不重复访问');
     advance(2);
     await native.fetchPlayUrlSingle('11', '1');
-    assert.equal(state.get, 3, '播放地址到期后刷新');
+    assert.equal(state.get, 8, '播放地址到期后刷新');
     advance(30000);
     await native.fetchEpisodeList('1');
-    assert.equal(state.get, 4, '分集到期后刷新');
+    assert.equal(state.get, 14, '分集到期后刷新');
   }],
   ['空响应不退避重试，失败不缓存', async () => {
     const { native, state } = fixture({ web: false });
     await assert.rejects(native.fetchEpisodeList('1'));
     assert.equal((await native.fetchPlayUrlSingle('11', '1')).url, null);
     assert.equal(state.post, 2, '每个失败链路只访问一次空响应 API');
-    assert.equal(state.waits, 0, '空响应不进入重试等待');
+    assert.equal(state.waits, 1, '分集失败只排一次短重试，播放空响应不再额外等待');
     state.web = true;
     assert.equal((await native.fetchEpisodeList('1')).total, 2);
     assert.equal((await native.fetchPlayUrlSingle('11', '1')).source, 'web');

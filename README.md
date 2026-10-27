@@ -33,6 +33,7 @@
 - 一般使用只需要這個安裝檔。`latest.yml` 與 `.blockmap` 給更新程式用。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
 - 已安裝的 3.3 會看到下方四條摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
+- 4.0 是預發佈，不會取代 3.4 的自動更新。想先試上游的分集競速、註冊身份取片，以及官網失敗時的 App 搜尋與上新補搜，用 [4.0 預發佈](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.0-traditional-pre)。介面與彈幕維持這版的樣子。
 
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 

@@ -61,6 +61,19 @@ test('a changed website payload falls back to one sniff and other failures do no
   assert.match(timeout.error, /超时/);
 });
 
+test('a longer old title does not hide an exact new release from the supplement', async () => {
+  const result = await searchHongguoCatalog('接班', {
+    searchSigned: async () => ({ success: true, results: [], page: 1 }),
+    searchWeb: async () => ({ results: [row('1', '接班人的考题')], page: 1, total: 1, hasMore: false }),
+    searchNew: async (keyword) => {
+      assert.equal(keyword, '接班');
+      return { results: [row('2', '接班')], partial: false };
+    },
+    sniff: async () => { throw new Error('sniff must not run'); },
+  });
+  assert.deepEqual(result.results.map(item => item.series_id), ['1', '2']);
+});
+
 test('blank and oversized queries fail before any request', async () => {
   let calls = 0;
   const search = async () => { calls++; return { results: [] }; };

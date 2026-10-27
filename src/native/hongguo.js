@@ -188,17 +188,26 @@ const sitePages = new Map();
 const sitePending = new Map();
 
 /** 拉取官网页面 HTML。同一地址共享进行中的请求，并在短时间内复用结果。 */
-async function fetchSiteHtml(url, timeout = 30000) {
+async function fetchSiteHtml(url, timeout = 30000, signal, { trustedOfficialDns = false } = {}) {
   // Only detail pages are reused. Playback pages change per episode and must not stick.
-  const reusable = String(url).includes('/detail?series_id=');
+  const reusable = !signal && String(url).includes('/detail?series_id=');
   const cached = reusable ? sitePages.get(url) : null;
   if (cached && cached.expires > Date.now()) return cached.html;
   if (reusable && sitePending.has(url)) return sitePending.get(url);
+  let guarded = {};
+  if (trustedOfficialDns) {
+    try {
+      if (new URL(url).origin === SITE_ORIGIN) {
+        guarded = { ...webMediaRequestOptions(url, { trustedOfficialDns: true }), adapter: 'http' };
+      }
+    } catch (_) { /* a malformed URL is rejected by axios below */ }
+  }
   const task = (async () => {
     let last;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await axios.get(url, {
+          ...guarded,
           headers: {
             'User-Agent': WEB_UA,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -208,6 +217,7 @@ async function fetchSiteHtml(url, timeout = 30000) {
           timeout,
           responseType: 'text',
           maxRedirects: 5,
+          signal,
         });
         const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
         if (reusable) {
@@ -333,19 +343,65 @@ async function fetchPublicScore(seriesId, timeout = 8000) {
   throw last;
 }
 
-async function fetchEpisodeListFromWeb(seriesId) {
+function describeWebLoadError(error) {
+  const message = String(error?.message || '');
+  if (error?.code === 'ERR_CANCELED' || /aborted|canceled|timeout|ECONNABORTED|ETIMEDOUT/i.test(message)) {
+    return '加载超时或连接中断';
+  }
+  return message || '加载失败';
+}
+
+async function fetchEpisodeListFromWeb(seriesId, deadline = 0) {
   const prelude = takeWebEpisodes(seriesId);
   if (prelude) return prelude;
-  const encoded = encodeURIComponent(seriesId);
-  const urls = [`${SITE_ORIGIN}/detail?series_id=${encoded}`, `${SITE_ORIGIN}/player/${encoded}`];
-  let last = new Error('官网页面未找到分集数据（vid_list）');
-  for (const url of urls) {
-    try {
-      const parsed = episodeListFromHtml(await fetchSiteHtml(url), seriesId);
-      if (parsed) return parsed;
-    } catch (error) { last = error; }
+  // Some player pages hang on a bad CDN edge while the detail page is healthy.
+  // Race both, then hedge with ordinary DNS if the first attempt is still waiting.
+  const id = String(seriesId);
+  const race = async (timeout, trustedOfficialDns) => {
+    const budget = deadline ? Math.min(timeout, deadline - Date.now()) : timeout;
+    if (budget <= 0) throw new Error('加载超时或连接中断');
+    const controller = new AbortController();
+    const attempts = [
+      `${SITE_ORIGIN}/detail?series_id=${encodeURIComponent(id)}`,
+      `${SITE_ORIGIN}/player/${encodeURIComponent(id)}`,
+    ].map(url => fetchSiteHtml(url, budget, controller.signal, { trustedOfficialDns })
+      .then(html => {
+        const parsed = episodeListFromHtml(html, id);
+        if (!parsed) throw new Error('官网页面未找到分集数据（vid_list）');
+        return parsed;
+      }));
+    attempts.forEach(promise => promise.catch(() => {}));
+    try { return await Promise.any(attempts); }
+    catch (aggregate) { throw aggregate.errors?.[0] || aggregate; }
+    finally { controller.abort(); }
+  };
+  let firstValue = null;
+  let firstError = null;
+  const first = race(1500, true).then(value => {
+    firstValue = value;
+    return value;
+  }, error => {
+    firstError = error;
+    throw error;
+  });
+  const hedge = (async () => {
+    // A page that has already arrived should not open another round of requests.
+    for (let i = 0; i < 4 && !firstValue && !firstError; i += 1) await Promise.resolve();
+    if (firstValue) return firstValue;
+    if (firstError) throw firstError;
+    const wait = deadline ? Math.min(600, Math.max(0, deadline - Date.now())) : 600;
+    await new Promise(resolve => setTimeout(resolve, wait));
+    if (firstValue) return firstValue;
+    if (firstError) throw firstError;
+    if (deadline && Date.now() >= deadline) throw new Error('加载超时或连接中断');
+    return Promise.any([race(3500, true), race(3500, false)]);
+  })();
+  try { return await Promise.any([first, hedge]); }
+  catch (aggregate) {
+    const nested = (aggregate.errors || [aggregate]).flatMap(error => error?.errors || [error]);
+    const second = nested.find(error => error !== firstError) || nested[0] || aggregate;
+    throw new Error(`${describeWebLoadError(firstError)}；重试失败：${describeWebLoadError(second)}`);
   }
-  throw last;
 }
 
 /**

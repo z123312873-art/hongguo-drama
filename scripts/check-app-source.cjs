@@ -53,6 +53,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
     require: name => {
       if (name === 'axios') return axios;
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
+      if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
       if (name === 'node:crypto') return { ...crypto, createHash(name, ...args) {
         assert.notEqual(name.toLowerCase(), 'sm3', 'must not depend on OpenSSL SM3');
@@ -93,15 +94,16 @@ const checks = [
     await f.fetch('11');
     await f.fetch('11');
     await Promise.all([f.fetch('11'), f.fetch('11'), f.fetch('11')]);
-    const requests = f.calls.filter(call => call.method === 'POST');
+    const requests = f.calls.filter(call => call.method === 'POST' && String(call.url).includes('multi_video_model'));
     assert.equal(requests.length, 5, 'one model request per lookup; no retry loop');
+    assert.equal(f.calls.filter(call => String(call.url).includes('device_register')).length, 1, 'anonymous playback registration is attempted once');
     for (const field of ['iid', 'device_id']) {
       const ids = requests.map(call => new URL(call.url).searchParams.get(field));
       assert.ok(ids.every(id => /^\d{16}$/.test(id)), `${field} must stay a valid synthetic identifier`);
       assert.equal(new Set(ids).size, requests.length, `${field} must not be reused across lookups`);
       if (field === 'device_id') assert.deepEqual(ids, f.signedDeviceIds, 'URL and signed device fields must match');
     }
-    assert.equal(f.calls.length, 10, 'each lookup retains its two-stage flow');
+    assert.equal(f.calls.length, 11, 'each lookup retains its two-stage flow after one registration attempt');
   }],
   ['App H264 takes priority over higher-resolution HEVC', async () => {
     const result = await appRows({ hd: { main_url: mediaUrl('hevc'), codec_type: 'hevc', quality_desc: '1080P' },
