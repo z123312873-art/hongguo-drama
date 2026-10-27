@@ -230,7 +230,9 @@ const checks = [
     try {
       const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
       const context = vm.createContext({ URL, axios: require('axios'), hongguo: { UA: 'test', WEB_UA: 'browser', VIDEO_REFERER: 'https://novelquickapp.com/', WEB_REFERER: 'https://hongguoduanju.com/' },
-        checkCustomAccess() {}, require: () => ({ webMediaRequestOptions: () => ({}) }) });
+        checkCustomAccess() {}, require: name => String(name).includes('direct-connect')
+          ? { directAxiosOptions: () => ({}) }
+          : { webMediaRequestOptions: () => ({}) } });
       vm.runInContext(main.slice(main.indexOf('async function requestMedia('), main.indexOf('function awaitMediaOperation(')), context);
       const base = `http://127.0.0.1:${server.address().port}`;
       for (const source of ['app', 'api']) {

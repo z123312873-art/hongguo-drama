@@ -151,6 +151,28 @@ test('a longer old title does not hide an exact new release from the supplement'
   assert.deepEqual(result.results.map(item => item.series_id), ['1', '2']);
 });
 
+test('a cooled new-release skip does not mark a finished search incomplete', async () => {
+  resetNewReleaseCooldown();
+  await searchHongguoCatalog('没有新剧', {
+    searchSigned: async () => { throw new Error('app down'); },
+    searchWeb: async () => { throw new HongguoSearchError('搜索服务暂不可用（HTTP 502）', 'upstream'); },
+    searchNew: async () => { throw new Error('上新目录超时'); },
+    sniff: async () => { throw new Error('sniff must not run'); },
+  });
+  let supplemented = 0;
+  const result = await searchHongguoCatalog('春日来信第二季', {
+    searchSigned: async () => ({ results: [] }),
+    searchWeb: async () => ({ results: [row('3', '春日来信')], page: 1, total: 1, hasMore: false }),
+    searchNew: async () => { supplemented += 1; throw new Error('must not run during cooldown'); },
+    sniff: async () => { throw new Error('sniff must not run'); },
+  });
+  assert.equal(supplemented, 0);
+  assert.equal(result.success, true);
+  assert.notEqual(result.partial, true);
+  assert.equal(result.results[0].series_id, '3');
+  resetNewReleaseCooldown();
+});
+
 test('blank and oversized queries fail before any request', async () => {
   let calls = 0;
   const search = async () => { calls++; return { results: [] }; };

@@ -55,7 +55,8 @@ async function lookupNewReleases(query, results, deadline, now, searchNew) {
   }
   const current = now();
   if (current < newReleaseCooldownUntil) {
-    return { results, checked: false, error: 'App 上新补搜暂时不可用，请稍后重试' };
+    // A skipped supplement is not a failed search. Sequel checks must not surface this cooldown.
+    return { results, checked: false, error: '' };
   }
   if (deadline - current < 900) return { results, checked: false, error: '' };
   try {
@@ -123,7 +124,7 @@ async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo,
       ...pack(web?.ok ? web.value : { results, keyword: query }, channel),
       results,
       keyword: query,
-      ...(supplemented.error ? { partial: true, error: `补充搜索未完成：${supplemented.error}` } : {}),
+      ...(supplemented.checked && supplemented.error ? { partial: true, error: `补充搜索未完成：${supplemented.error}` } : {}),
     };
   }
   const webError = web?.error;

@@ -327,6 +327,7 @@ function publicProxyError(message, settings, resolved) {
  * 因此红果 API 解析与视频下载都会走代理，无需改动业务代码。
  */
 function applyProxyToEnv(resolved) {
+  require('./src/native/direct-connect').setDirectConnect(resolved.mode === 'direct');
   for (const key of PROXY_ENV_KEYS) {
     if (resolved.mode === 'system') {
       if (originalProxyEnv[key] !== undefined) process.env[key] = originalProxyEnv[key];
@@ -2081,6 +2082,7 @@ async function requestMedia(playInfo, options = {}) {
   const custom = playInfo.source === 'custom';
   const web = playInfo.source === 'web';
   const config = { method: 'GET', url: url.href, responseType: 'stream', timeout: 60000, ...options,
+    ...require('./src/native/direct-connect').directAxiosOptions(),
     ...((web || custom) ? require('./src/native/web-media-guard').webMediaRequestOptions(url.href) : {}),
     headers: { 'User-Agent': playInfo.userAgent || (web ? hongguo.WEB_UA : hongguo.UA), 'Accept-Encoding': 'identity',
       ...((playInfo.referer || web) ? { Referer: playInfo.referer || hongguo.WEB_REFERER } : {}), ...options.headers } };
@@ -2405,20 +2407,67 @@ function registerLocalProtocol() {
 }
 
 /** Play CENC as fragmented MP4 while FFmpeg is still reading the remote file. Never log key/args. */
+async function readMediaRange(playInfo, start, end, signal) {
+  const response = await requestMedia(playInfo, {
+    signal,
+    headers: { Range: `bytes=${start}-${end}` },
+    validateStatus: status => status === 206 || status === 200,
+  });
+  const chunks = [];
+  for await (const chunk of response.data) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+async function feedContentKey(playInfo, stdin, signal) {
+  let total = 0;
+  try {
+    const probe = await requestMedia(playInfo, {
+      signal,
+      headers: { Range: 'bytes=0-0' },
+      validateStatus: status => status === 206 || status === 200,
+    });
+    total = Number(String(probe.headers['content-range'] || '').split('/').pop()) || 0;
+    probe.data.destroy();
+  } catch (_) { total = 0; }
+  const parts = total >= 2 * 1024 * 1024 && total <= ONLINE_MAX_BYTES ? 4 : 1;
+  if (parts === 1) {
+    const response = await requestMedia(playInfo, { signal });
+    await pipeline(response.data, stdin);
+    return;
+  }
+  const span = Math.ceil(total / parts);
+  const pieces = Array.from({ length: parts }, (_, index) => {
+    const start = index * span;
+    const end = Math.min(total - 1, start + span - 1);
+    return readMediaRange(playInfo, start, end, signal);
+  });
+  for (let index = 0; index < parts; index += 1) {
+    if (signal?.aborted) throw new Error('已取消播放');
+    const chunk = await pieces[index];
+    const start = index * span;
+    const end = Math.min(total - 1, start + span - 1);
+    if (chunk.length !== end - start + 1) throw new Error('分片长度不符');
+    if (!stdin.write(chunk)) await new Promise(resolve => stdin.once('drain', resolve));
+  }
+  stdin.end();
+}
+
 function startContentKeyStream(playInfo, signal) {
   if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey || '')) throw new Error('片源解密密钥格式无效');
   const executable = resolveFfmpeg('ffmpeg');
   if (!executable) throw new Error('未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const { spawn } = require('child_process');
   const child = spawn(executable, ['-y', '-hide_banner', '-loglevel', 'error',
-    '-user_agent', playInfo.userAgent || hongguo.UA,
-    '-decryption_key', playInfo.contentKey, '-i', playInfo.url,
+    '-decryption_key', playInfo.contentKey, '-i', 'pipe:0',
     '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1'],
-  { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   const stop = () => { if (!child.killed) child.kill('SIGTERM'); };
   signal?.addEventListener('abort', stop, { once: true });
   child.once('close', () => signal?.removeEventListener('abort', stop));
+  if (child.stdin) {
+    feedContentKey(playInfo, child.stdin, signal).catch(() => { if (!child.killed) child.kill('SIGTERM'); });
+  }
   return child;
 }
 
@@ -3219,7 +3268,8 @@ async function refreshWatchHistory(force = false) {
               keyword => searchAtSource(keyword, { source }));
             if (!response?.success) throw new Error(response?.error || '搜索暂不可用');
             candidates = response.results || [];
-            if (response.partial) sequelError = `新集已检查；续作检查未完成：${response.error || '请稍后重试'}`;
+            const optionalNewRelease = /^补充搜索未完成：App 上新补搜/.test(String(response.error || ''));
+            if (response.partial && !optionalNewRelease) sequelError = `新集已检查；续作检查未完成：${response.error || '请稍后重试'}`;
           } catch (error) { sequelError = `新集已检查；续作检查失败：${error.message}`; }
         }
         // Re-read after network waits: a concurrent player save must not be rolled back.

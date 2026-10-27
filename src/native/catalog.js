@@ -177,6 +177,7 @@ function parseRanking(html, category, page, sourceUrl) {
 async function fetchCatalogPage(url, signal, proxyLogin) {
   // Use the app's Chromium session, with proxy authentication but no site cookies.
   if (!net?.request) return (await axios.get(url, {
+    ...require('./direct-connect').directAxiosOptions(),
     timeout: TIMEOUT_MS, signal, responseType: 'text', maxContentLength: MAX_PAGE_BYTES,
   })).data;
   return new Promise((resolve, reject) => {

@@ -58,6 +58,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
+      if (name === './direct-connect') return require(path.join(nativeDir, 'direct-connect'));
       if (name === 'node:crypto') return { ...crypto, createHash(name, ...args) {
         assert.notEqual(name.toLowerCase(), 'sm3', 'must not depend on OpenSSL SM3');
         return crypto.createHash(name, ...args);
@@ -81,6 +82,7 @@ function loadFetch(axios) {
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
+      if (name === './direct-connect') return require(path.join(nativeDir, 'direct-connect'));
       if (name === 'node:crypto') return crypto;
       throw new Error(`Unexpected dependency: ${name}`);
     },

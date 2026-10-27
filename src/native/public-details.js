@@ -102,17 +102,17 @@ function withRatingSlot(task) {
   });
 }
 
+const RATING_TTL_MS = 6 * 60 * 60 * 1000;
+
 async function loadPublicRating(id) {
   const cached = ratingCache.get(id);
-  if (cached && cached.expires > Date.now() && cached.rating != null) return cached.rating;
+  if (cached && cached.expires > Date.now()) return cached.rating;
   if (ratingPending.has(id)) return ratingPending.get(id);
   const task = (async () => {
     try {
       const rating = await require('./hongguo').fetchPublicScore(id, 8000);
-      if (rating != null) {
-        ratingCache.set(id, { rating, expires: Date.now() + 10 * 60 * 1000 });
-        if (ratingCache.size > 240) ratingCache.delete(ratingCache.keys().next().value);
-      }
+      ratingCache.set(id, { rating: rating ?? null, expires: Date.now() + RATING_TTL_MS });
+      if (ratingCache.size > 500) ratingCache.delete(ratingCache.keys().next().value);
       return rating ?? null;
     } catch {
       return null;

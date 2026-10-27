@@ -94,6 +94,7 @@ async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
     const signal = {}; // 供错误信息回溯（HTTP 状态 / 字节数 / CDN logid）
     try {
       const res = await axios.post(API + apiPath, body, {
+        ...require('./direct-connect').directAxiosOptions(),
         params: q,
         headers: HEADERS,
         timeout,
@@ -207,6 +208,7 @@ async function fetchSiteHtml(url, timeout = 30000, signal, { trustedOfficialDns 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await axios.get(url, {
+          ...require('./direct-connect').directAxiosOptions(),
           ...guarded,
           headers: {
             'User-Agent': WEB_UA,
@@ -324,6 +326,7 @@ async function fetchPublicScore(seriesId, timeout = 8000) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await axios.get(url, {
+        ...require('./direct-connect').directAxiosOptions(),
         headers: scoreRequestHeaders(),
         timeout,
         responseType: 'stream',
