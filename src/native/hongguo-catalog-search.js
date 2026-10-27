@@ -8,6 +8,8 @@ const { toSimplified } = require('./script-query');
 const WEB_BUDGET_MS = 8000;
 const APP_BUDGET_MS = 4000;
 const APP_GRACE_MS = 300;
+const NEW_RELEASE_COOLDOWN_MS = 30 * 1000;
+let newReleaseCooldownUntil = 0;
 
 function pack(value, channel) {
   return {
@@ -42,18 +44,36 @@ function comparableTitle(value) {
   return String(value || '').normalize('NFKC').replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase();
 }
 
-async function addNewReleases(query, results, deadline, now, searchNew) {
+function resetNewReleaseCooldown() {
+  newReleaseCooldownUntil = 0;
+}
+
+async function lookupNewReleases(query, results, deadline, now, searchNew) {
   const wanted = comparableTitle(query);
-  if (wanted.length < 2 || results.some(item => comparableTitle(item.series_title) === wanted)) return results;
-  if (deadline - now() < 900) return results;
+  if (wanted.length < 2 || results.some(item => comparableTitle(item.series_title) === wanted)) {
+    return { results, checked: false, error: '' };
+  }
+  const current = now();
+  if (current < newReleaseCooldownUntil) {
+    return { results, checked: false, error: 'App 上新补搜暂时不可用，请稍后重试' };
+  }
+  if (deadline - current < 900) return { results, checked: false, error: '' };
   try {
     const detailed = await searchNew(query, {
-      deadline: Math.min(deadline, now() + (results.length ? 2500 : 8000)),
+      deadline: Math.min(deadline, current + (results.length ? 2500 : 8000)),
     });
-    const extras = Array.isArray(detailed?.results) ? detailed.results : Array.isArray(detailed) ? detailed : [];
-    return mergeResults(results, extras);
-  } catch (_) {
-    return results;
+    const extras = Array.isArray(detailed?.results) ? detailed.results : [];
+    const partial = detailed?.partial === true;
+    newReleaseCooldownUntil = partial && !extras.length ? current + NEW_RELEASE_COOLDOWN_MS : 0;
+    return {
+      results: mergeResults(results, extras),
+      checked: true,
+      partial,
+      error: partial ? 'App 上新目录只读取到部分分类' : '',
+    };
+  } catch (error) {
+    newReleaseCooldownUntil = current + NEW_RELEASE_COOLDOWN_MS;
+    return { results, checked: true, error: error?.message || 'App 上新补搜失败' };
   }
 }
 
@@ -93,16 +113,38 @@ async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo,
     if (original.ok) results = mergeResults(results, original.value.results);
   }
   if (results.length || web?.ok) {
-    results = await addNewReleases(query, results, deadline, now, searchNew);
+    const supplemented = await lookupNewReleases(query, results, deadline, now, searchNew);
+    results = supplemented.results;
+    if (supplemented.checked && supplemented.error && !results.length) {
+      return { success: false, results: [], keyword: query, error: `补充搜索未完成：${supplemented.error}` };
+    }
     const channel = web?.ok && web.value.results?.length ? 'web' : 'app';
-    return { ...pack(web?.ok ? web.value : { results, keyword: query }, channel), results, keyword: query };
+    return {
+      ...pack(web?.ok ? web.value : { results, keyword: query }, channel),
+      results,
+      keyword: query,
+      ...(supplemented.error ? { partial: true, error: `补充搜索未完成：${supplemented.error}` } : {}),
+    };
   }
   const webError = web?.error;
+  let rescueError = '';
+  if (web && web.ok === false && !['timeout', 'input'].includes(webError?.kind)) {
+    const rescued = await lookupNewReleases(query, [], deadline, now, searchNew);
+    if (rescued.results.length) {
+      const issue = rescued.error ? `；App 上新补搜未完成：${rescued.error}` : '';
+      return {
+        success: true, results: rescued.results, page: 1, total: rescued.results.length, totalPages: 0,
+        hasMore: false, keyword: query, channel: 'app-new', partial: true,
+        error: `官网搜索未完成：${webError.message}${issue}；已显示 App 上新补搜结果`,
+      };
+    }
+    if (rescued.checked && rescued.error) rescueError = `；App 上新补搜未完成：${rescued.error}`;
+  }
   if (webError?.fallback && typeof sniff === 'function') {
     try { return await sniff(query); }
     catch (error) { return { success: false, results: [], error: error?.message || webError.message }; }
   }
-  return { success: false, results: [], error: webError?.message || app?.error?.message || '搜索暂不可用' };
+  return { success: false, results: [], error: webError ? `官网搜索未完成：${webError.message}${rescueError}` : (app?.error?.message || '搜索暂不可用') };
 }
 
-module.exports = { searchHongguoCatalog, mergeResults, WEB_BUDGET_MS, APP_BUDGET_MS };
+module.exports = { searchHongguoCatalog, mergeResults, resetNewReleaseCooldown, WEB_BUDGET_MS, APP_BUDGET_MS };
