@@ -2295,6 +2295,13 @@ function registerStreamProtocol() {
           cleanup(); return diskMediaResponse(request,entry,session);
         }
         // A fallback can change encryption and size; serve Range only after decoding that candidate.
+        if (playInfo.contentKey && !playInfo.spadeA) {
+          if (request.method === 'HEAD') { cleanup(); return new Response(null, { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } }); }
+          const child = startContentKeyStream(playInfo, controller.signal);
+          session.mediaStarted = true; session.mediaIdentity = identity;
+          child.stdout.once('close', cleanup);
+          return new Response(Readable.toWeb(child.stdout), { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } });
+        }
         if (playInfo.spadeA || playInfo.contentKey) {
           const buffer = await fetchDecryptedEpisodeOnce(session.vid, null, entry.seriesId, playInfo, controller.signal);
           checkIdentity();
@@ -2395,6 +2402,24 @@ function registerLocalProtocol() {
       return new Response('error', { status: 500, headers: { 'Content-Type': 'text/plain' } });
     }
   }));
+}
+
+/** Play CENC as fragmented MP4 while FFmpeg is still reading the remote file. Never log key/args. */
+function startContentKeyStream(playInfo, signal) {
+  if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey || '')) throw new Error('片源解密密钥格式无效');
+  const executable = resolveFfmpeg('ffmpeg');
+  if (!executable) throw new Error('未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
+  const { spawn } = require('child_process');
+  const child = spawn(executable, ['-y', '-hide_banner', '-loglevel', 'error',
+    '-user_agent', playInfo.userAgent || hongguo.UA,
+    '-decryption_key', playInfo.contentKey, '-i', playInfo.url,
+    '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1'],
+  { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const stop = () => { if (!child.killed) child.kill('SIGTERM'); };
+  signal?.addEventListener('abort', stop, { once: true });
+  child.once('close', () => signal?.removeEventListener('abort', stop));
+  return child;
 }
 
 /** App CENC uses native FFmpeg for both senc and saiz/saio layouts. Never log key/args. */
@@ -2546,6 +2571,10 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
           const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,force,signal:controller.signal},async playInfo => {
             const entry = {quality,deliveredQuality:playInfo.quality,qualityLimited:playInfo.qualityLimited===true,notice:playInfo.notice||'',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
+            else if (playInfo.contentKey && !playInfo.spadeA) {
+              if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
+              return {...entry,playInfo};
+            }
             else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
             else {
               entry.buffer = await fetchDecryptedEpisodeOnce(sourceVid,progress,seriesId,playInfo,controller.signal);
@@ -2575,7 +2604,10 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
     const sources = Array.isArray(error.sources) ? error.sources.map(item => ({
       source: item?.source, code: item?.code, message: item?.message,
     })) : undefined;
-    return { success: false, error: error.message, code: error.code, ...(sources ? { sources } : {}) };
+    const emptyDirect = sources?.length && sources.every(item => item.code === 'EMPTY_RESPONSE' || item.code === 'DEVICE_REGISTRATION_FAILED')
+      && getCurrentSettings().proxy_enabled !== true;
+    const message = emptyDirect ? `${error.message} 目前是直連，重複重試仍走同一條線路。人在台灣時請到設定啟用可連到來源的代理後再播放。` : error.message;
+    return { success: false, error: message, code: error.code, ...(sources ? { sources } : {}) };
   }
 });
 
