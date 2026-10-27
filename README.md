@@ -26,25 +26,26 @@
 
 只發行 **Windows x64** 安裝檔。媒體工具已內建，不必另外安裝 Node.js 或 FFmpeg。
 
-**[下載 3.4 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v3.4/hongguo-downloader-3.4-win-x64-setup.exe)**
+**[下載 4.0 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.0/hongguo-downloader-4.0-win-x64-setup.exe)**
 
 - 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
-- 安裝檔未簽章。請從 [3.4 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v3.4) 下載，並對照該頁的 SHA256。
+- 安裝檔未簽章。請從 [4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 下載，並對照該頁的 SHA256。
 - 一般使用只需要這個安裝檔。`latest.yml` 與 `.blockmap` 給更新程式用。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
-- 已安裝的 3.3 會看到下方四條摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
-- 4.0 是預發佈，不會取代 3.4 的自動更新。想先試上游的分集競速、註冊身份取片，以及官網失敗時的 App 搜尋與上新補搜，用 [4.0 預發佈](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.0-traditional-pre)。介面與彈幕維持這版的樣子。
+- 已安裝的 3.4 會看到更新摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
 
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 
 ## 這個版本
 
-3.4 正式版。從 3.3 更新時，提醒會顯示這四條：
+4.0 正式版。更新說明：
 
-- 搜尋更順，點開仍留本頁
-- 播最後一集時自動接下一季
-- 海報評分與收藏清單
-- 開啟時預設最大化
+- 官網搜尋失敗時，從上新名單找回當天的劇。
+- 線上播放遇到空片源會再試，並繼續播放。
+- 直連更穩，走不通時會提示改開代理。
+- 加密片源邊準備邊播放，快速換集不再報錯，載入也更快。
+- 海報只顯示劇集自己的評分，短時間重開不用重抓。
+- 沒有新一季時，觀看記錄不再把續作檢查顯示成失敗。
 
 搜尋聯想只在輸入時展開，點到別處、開始搜尋或按 Esc 會收起。點開一部劇會先清掉上一筆分集。某一季的最後一集開始播放時，背景查找緊接的下一季；這集播完後倒數 5 秒，再從下一季第 1 集播放。括號裡的「（第一季）」也算一季。
 
