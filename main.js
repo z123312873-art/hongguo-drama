@@ -2406,52 +2406,6 @@ function registerLocalProtocol() {
   }));
 }
 
-/** Play CENC as fragmented MP4 while FFmpeg is still reading the remote file. Never log key/args. */
-async function readMediaRange(playInfo, start, end, signal) {
-  const response = await requestMedia(playInfo, {
-    signal,
-    headers: { Range: `bytes=${start}-${end}` },
-    validateStatus: status => status === 206 || status === 200,
-  });
-  const chunks = [];
-  for await (const chunk of response.data) chunks.push(chunk);
-  return Buffer.concat(chunks);
-}
-
-async function feedContentKey(playInfo, stdin, signal) {
-  let total = 0;
-  try {
-    const probe = await requestMedia(playInfo, {
-      signal,
-      headers: { Range: 'bytes=0-0' },
-      validateStatus: status => status === 206 || status === 200,
-    });
-    total = Number(String(probe.headers['content-range'] || '').split('/').pop()) || 0;
-    probe.data.destroy();
-  } catch (_) { total = 0; }
-  const parts = total >= 2 * 1024 * 1024 && total <= ONLINE_MAX_BYTES ? 4 : 1;
-  if (parts === 1) {
-    const response = await requestMedia(playInfo, { signal });
-    await pipeline(response.data, stdin);
-    return;
-  }
-  const span = Math.ceil(total / parts);
-  const pieces = Array.from({ length: parts }, (_, index) => {
-    const start = index * span;
-    const end = Math.min(total - 1, start + span - 1);
-    return readMediaRange(playInfo, start, end, signal);
-  });
-  for (let index = 0; index < parts; index += 1) {
-    if (signal?.aborted) throw new Error('已取消播放');
-    const chunk = await pieces[index];
-    const start = index * span;
-    const end = Math.min(total - 1, start + span - 1);
-    if (chunk.length !== end - start + 1) throw new Error('分片长度不符');
-    if (!stdin.write(chunk)) await new Promise(resolve => stdin.once('drain', resolve));
-  }
-  stdin.end();
-}
-
 function startContentKeyStream(playInfo, signal) {
   if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey || '')) throw new Error('片源解密密钥格式无效');
   const executable = resolveFfmpeg('ffmpeg');
@@ -2466,7 +2420,11 @@ function startContentKeyStream(playInfo, signal) {
   signal?.addEventListener('abort', stop, { once: true });
   child.once('close', () => signal?.removeEventListener('abort', stop));
   if (child.stdin) {
-    feedContentKey(playInfo, child.stdin, signal).catch(() => { if (!child.killed) child.kill('SIGTERM'); });
+    // Attached before any write: killing FFmpeg on a fast episode change closes this pipe.
+    child.stdin.on('error', () => {});
+    require('./src/native/content-key-feed').feedContentKey(playInfo, child.stdin, signal, {
+      request: requestMedia, maxBytes: ONLINE_MAX_BYTES,
+    }).catch(() => { if (!child.killed) child.kill('SIGTERM'); });
   }
   return child;
 }
@@ -4169,6 +4127,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   try {
     const dataFile = path.join(app.getPath('userData'), 'data.json');
     store.init(dataFile);
+    require('./src/native/public-details').initRatingStore(path.join(app.getPath('userData'), 'ratings-cache.json'));
     setDeviceIdentityFile(path.join(app.getPath('userData'), 'danmaku-client.json'));
     loadDownloadTasks();
     loadSeriesRegistry();

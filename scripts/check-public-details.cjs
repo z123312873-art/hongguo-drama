@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
-const { parsePublicDetails, fetchPublicDetails } = require('../src/native/public-details');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { parsePublicDetails, fetchPublicDetails, fetchPublicRatings, initRatingStore, useScoreSource } = require('../src/native/public-details');
 const { publicMetadata } = require('../src/native/catalog');
 
 const html = (detail, extra = {}) => `<script>window._ROUTER_DATA = ${JSON.stringify({ loaderData: { detail_page: {
@@ -26,6 +29,36 @@ async function main() {
   assert.throws(() => parsePublicDetails('<html>登录或错误页面</html>', '123456789'));
   assert.equal((await fetchPublicDetails('http://127.0.0.1')).success, false);
   assert.equal((await fetchPublicDetails('123456789', '../private')).success, false);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-ratings-'));
+  const file = path.join(dir, 'ratings-cache.json');
+  initRatingStore(file);
+  let calls = 0;
+  useScoreSource(async id => {
+    calls += 1;
+    if (id === '1234567') return 8.6;
+    if (id === '2234567') return null;
+    throw new Error('offline');
+  });
+  const first = await fetchPublicRatings(['1234567', '2234567', '3234567', 'bad', '1234567']);
+  assert.equal(first.ratings['1234567'], 8.6);
+  assert.equal(first.ratings['2234567'], null);
+  assert.equal(first.ratings['3234567'], null);
+  assert.deepEqual(first.pending, ['3234567']);
+  assert.equal(first.ratings.bad, undefined);
+  assert.equal(calls, 3);
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(saved.entries['1234567'].rating, 8.6);
+  assert.equal(saved.entries['2234567'].rating, null);
+  assert.equal(saved.entries['3234567'], undefined);
+  calls = 0;
+  initRatingStore(file);
+  const second = await fetchPublicRatings(['1234567', '2234567', '3234567']);
+  assert.equal(calls, 1, 'a restart should read confirmed scores from disk and retry only the failed one');
+  assert.equal(second.ratings['1234567'], 8.6);
+  assert.equal(second.ratings['2234567'], null);
+  assert.deepEqual(second.pending, ['3234567']);
+  useScoreSource(null);
+  fs.rmSync(dir, { recursive: true, force: true });
   console.log('PASS public details: explicit metadata, source identity, public reviews, malformed data and URL boundary');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

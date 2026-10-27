@@ -6,6 +6,7 @@ import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search, Heart } from './icons';
 import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseTags } from '../catalogTags.mjs';
+import { applyPublicRatings } from '../publicRatings.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
@@ -355,13 +356,7 @@ function Browse({ onNavigate, active = true }) {
         try {
           const response = await window.electronAPI.getPublicRatings(ids.slice(index, index + 8));
           if (cancelled || request !== ratingRequest.current || !response?.success || !response.ratings) continue;
-          const numeric = {};
-          const now = Date.now();
-          for (const id of ids.slice(index, index + 8)) {
-            scoreCheckedAt.current.set(id, now);
-            const score = Number(response.ratings[id]);
-            numeric[id] = Number.isFinite(score) && score > 0 && score <= 10 ? Math.round(score * 10) / 10 : null;
-          }
+          const numeric = applyPublicRatings(scoreCheckedAt.current, response, ids.slice(index, index + 8));
           ratingsRef.current = { ...ratingsRef.current, ...numeric };
           setRatings(ratingsRef.current);
         } catch { /* The next group still runs. A miss is retried below. */ }

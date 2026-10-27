@@ -44,6 +44,13 @@ function metering(text, size = 4096) {
     assert.equal(readPublicScore('"seriesSocialInfo":{"rating":11}'), null);
     assert.equal(readPublicScore('评分9', { partial: true }), null);
     assert.equal(readPublicScore('评分9.1</span>', { partial: true }), 9.1);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"hot_score_data":{"score":45524479,"text":"4552万热度"},"rating":8.4,"reviews":{"reviews":[{"rating":10}]}}'), 8.4);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"hot_score_data":{"rating":9.9},"rating":8.2}'), 8.2);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"series_like_count":"29000","hot_score_data":{"score":45524479,"text":"4552万热度"},"reviews":{"total_count":"98","reviews":[{"rating":10}]}}'), null);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"rating":"7.5","series_like_count":"1"}'), 7.5);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"series_like_count":"1","hot_score_', { partial: true }), null);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"rating":8.2', { partial: true }), null);
+    assert.equal(readPublicScore('"seriesSocialInfo":{"rating":8.2'), 8.2);
   });
 
   await check('only a complete catalog episode list can skip the detail request', async () => {
