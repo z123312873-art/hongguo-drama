@@ -18,4 +18,12 @@
 ## 發行邊界
 
 4.1 為 **預發布**（`installer-4.1-traditional-pre` / GitHub Pre-release）。自動更新仍只認正式版，不會自動拉到 4.1 預發布。
-Windows 安裝檔未簽章。本機打包驗證：`npm run build:installer` 產出 `hongguo-downloader-4.1-win-x64-setup.exe`。
+
+## 安裝包
+
+| 類型 | 檔名 | 備註 |
+|------|------|------|
+| 便携 ZIP | `hongguo-4.1-win-x64-portable.zip` | 已上傳 Pre-release；SHA256 `257b808c52bb5fcbd7075dfe0ac1746a1d670abb3d4e00e1d135e10f471205a6` |
+| NSIS 安裝檔 | `hongguo-downloader-4.1-win-x64-setup.exe` | 須在 **Windows** 執行 `npm run build:installer` 或走 `.github/workflows/windows.yml`；Linux 上 Wine 產物約 210KB，不可用 |
+
+安裝檔未簽章。便携包由 `npm run build:dir` 產出 `dist/win-unpacked` 後 zip 打包。
