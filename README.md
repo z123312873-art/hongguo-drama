@@ -29,7 +29,7 @@
 
 **[下載 4.0 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.0/hongguo-downloader-4.0-win-x64-setup.exe)**
 
-**[下載 4.1 預發布（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 為 Pre-release。SHA256：`b9d10c60239fc437bfaf893423c086f031e6bc69347915165bd43a7ca2b4e043`（完整清單見發行頁 `WINDOWS-SHA256SUMS.txt`）。
+**[下載 4.1 預發布（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 為 Pre-release。SHA256：`6e8f4a82ffdd0f7aace77d7f7c342ef06cc17082f7cff67d38432d9aabee03eb`（完整清單見發行頁 `WINDOWS-SHA256SUMS.txt`）。
 
 也可使用 [4.1 便携 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-4.1-win-x64-portable.zip)。
 
