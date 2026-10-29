@@ -7,7 +7,8 @@
 <p align="center">在電腦上找劇、接著看、下載與合併。介面預設繁體，Windows 安裝檔由這個倉庫自己發行。</p>
 
 <p align="center">
-  <img alt="目前正式版 3.4" src="https://img.shields.io/badge/正式版-3.4-8b3a3a?style=flat-square">
+  <img alt="目前正式版 4.0" src="https://img.shields.io/badge/正式版-4.0-8b3a3a?style=flat-square">
+  <img alt="4.1 預發布" src="https://img.shields.io/badge/預發布-4.1-6b5b95?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -28,8 +29,10 @@
 
 **[下載 4.0 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.0/hongguo-downloader-4.0-win-x64-setup.exe)**
 
+**[下載 4.1 預發布（Windows x64，播放進度與 seek 改進）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64-setup.exe)** — 發行頁標記為 Pre-release 後生效。
+
 - 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
-- 安裝檔未簽章。請從 [4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 下載，並對照該頁的 SHA256。
+- 安裝檔未簽章。請從 [4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 或 [4.1 預發布](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 下載，並對照該頁的 SHA256。
 - 一般使用只需要這個安裝檔。`latest.yml` 與 `.blockmap` 給更新程式用。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
 - 已安裝的 3.4 會看到更新摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
@@ -37,6 +40,8 @@
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 
 ## 這個版本
+
+4.1 預發布重點：同次開啟 App 內切集會記住各集進度；進度條與 ±5 秒只跳到已緩衝／已落盤位置；加密線上仍快速起播，約 30 秒後背景寫播放暫存（不是下載目錄）。詳見 [4.1 預發布說明](docs/release-4.1-pre.md)。
 
 4.0 正式版。更新說明：
 
