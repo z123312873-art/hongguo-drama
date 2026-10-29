@@ -16,7 +16,8 @@ import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
 import { matchesText } from '../chineseScript.mjs';
 import {
-  clampSeekTarget, mediaSeekableEnd, resolveEpisodeSeekTarget, writeSessionEpisodeTime,
+  clampRelativeSeek, clampSeekTarget, mediaSeekableEnd, resolveEpisodeSeekTarget,
+  shouldDeferPlaybackEnd, writeSessionEpisodeTime,
 } from './playerSessionProgress.js';
 
 const localMediaKey = (seriesId, episode) => JSON.stringify([seriesId, episode?.vid, episode?.fileUrl, episode?.fileSize, episode?.taskId]);
@@ -1078,7 +1079,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         else video.pause();
       } else if (action.id === 'forward' || action.id === 'backward') {
         const delta = action.id === 'forward' ? 5 : -5;
-        const { time, blocked } = clampSeekTarget(video.currentTime + delta, seekableEnd, video.duration);
+        const { time, blocked } = clampRelativeSeek(video.currentTime, delta, seekableEnd, video.duration);
         try {
           video.currentTime = time;
           rememberCurrentEpisodeTime();
@@ -1652,7 +1653,13 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               if (v.currentSrc && v.currentSrc !== videoSrc) return;
               if (v.playbackRate !== playbackRateRef.current) changePlaybackRate(v.playbackRate);
             }}
-            onEnded={() => { if (activeRef.current && canPlay && playbackVersion === mediaVersion.current && (!videoRef.current || loadedMediaRef.current?.version === mediaVersion.current)) handleEnded(); }}
+            onEnded={() => {
+              const v = videoRef.current;
+              if (!activeRef.current || !canPlay || playbackVersion !== mediaVersion.current) return;
+              if (v && loadedMediaRef.current?.version !== mediaVersion.current) return;
+              if (v && shouldDeferPlaybackEnd(v)) { v.play().catch(() => {}); return; }
+              handleEnded();
+            }}
             onPause={() => persistPosition(true)}
             onPlaying={(event) => { handlePlaying(event); prepareNextEpisode(event); }}
             onWaiting={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(true); }}

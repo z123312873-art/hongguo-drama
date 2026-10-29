@@ -56,3 +56,33 @@ export function clampSeekTarget(target, seekableEnd, duration) {
   const blocked = Number.isFinite(limit) && limit !== Infinity && target > limit + 0.25;
   return { time: next, blocked, limit };
 }
+
+/** ±N second seeks: only cap forward jumps; backward stays relative to playhead (pipe can play past seekable ranges). */
+export function clampRelativeSeek(currentTime, delta, seekableEnd, duration) {
+  const from = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+  const target = from + delta;
+  if (delta <= 0) return { time: Math.max(0, target), blocked: false, limit: null };
+  return clampSeekTarget(target, seekableEnd, duration);
+}
+
+/**
+ * Progressive / pipe MP4 can fire `ended` while duration metadata still reflects an early fragment (~10–20s).
+ * Defer auto-next until the buffer tail and duration agree the episode actually finished.
+ */
+export function shouldDeferPlaybackEnd(video) {
+  if (!video?.ended) return false;
+  const t = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  let bufEnd = 0;
+  try {
+    if (video.buffered?.length) bufEnd = video.buffered.end(video.buffered.length - 1);
+  } catch (_) {}
+  const d = video.duration;
+  if (Number.isFinite(d) && d > 0 && bufEnd > d + 0.5) return true;
+  if (Number.isFinite(d) && d > 0 && t < d - 1.25) {
+    if (bufEnd > d + 0.5) return true;
+    if (bufEnd < d - 0.5) return true;
+    return false;
+  }
+  if (bufEnd > t + 2 && (!Number.isFinite(d) || d <= 0 || t < d - 5)) return true;
+  return false;
+}

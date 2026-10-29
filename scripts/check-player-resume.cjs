@@ -112,7 +112,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
     return event;
   };
   render();
-  return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, document, dispatchKey,
+  return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, mediaEvents, document, dispatchKey,
     releases, settingsSaved, stage, scrollArea,
     historyUpdated: payload => [...historyListeners].forEach(listener => listener(payload)),
     flushBatched: async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); render(); },
@@ -372,6 +372,32 @@ if (require.main === module) (async () => {
     ui.metadata(); ui.error(3); await ui.flush();
     assert.equal(ui.find(n => n.type === 'video').props.key, key, 'compatibility source swap must not replace the fullscreen video element');
     assert.equal(ui.find(n => n.type === 'video').props.src, 'file:///mock-compat.mp4'); ui.unmount();
+  });
+  await test('arrow seek stays relative when seekableEnd lags pipe playhead', async () => {
+    const ui = mount({ local: true }); await ui.flush(); ui.metadata();
+    ui.media.buffered = { length: 1, end: () => 15 };
+    ui.media.seekable = { length: 1, end: () => 15 };
+    ui.media.duration = 100;
+    ui.media.currentTime = 60;
+    ui.mediaEvents.get('timeupdate')?.(); await ui.flush();
+    ui.render();
+    ui.document.activeElement = ui.media;
+    ui.dispatchKey('keydown', { key: 'ArrowLeft', code: 'ArrowLeft' });
+    assert.equal(ui.media.currentTime, 55, 'backward must not snap to seekableEnd');
+    ui.media.currentTime = 10;
+    ui.dispatchKey('keydown', { key: 'ArrowRight', code: 'ArrowRight' });
+    assert.equal(ui.media.currentTime, 15, 'forward still capped at seekableEnd');
+    ui.unmount();
+  });
+  await test('premature ended with short duration does not auto-advance', async () => {
+    const ui = mount({ local: true }); await ui.flush(); ui.metadata();
+    ui.media.duration = 18;
+    ui.media.currentTime = 15;
+    ui.media.ended = true;
+    ui.media.buffered = { length: 1, end: () => 120 };
+    ui.find(n => n.type === 'video').props.onEnded(); await ui.flush();
+    assert.equal(ui.find(n => n.type === 'video').props.src, 'file:///mock-1.mp4', 'must not jump to next episode');
+    ui.unmount();
   });
   await test('fullscreen playback retains video and last source while the next online episode prepares', async () => {
     let finishNext;
