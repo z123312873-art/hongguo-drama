@@ -24,6 +24,6 @@
 | 類型 | 檔名 | 備註 |
 |------|------|------|
 | 便携 ZIP | `hongguo-4.1-win-x64-portable.zip` | 已上傳 Pre-release；SHA256 `257b808c52bb5fcbd7075dfe0ac1746a1d670abb3d4e00e1d135e10f471205a6` |
-| NSIS 安裝檔 | `hongguo-downloader-4.1-win-x64-setup.exe` | 須在 **Windows** 執行 `npm run build:installer` 或走 `.github/workflows/windows.yml`；Linux 上 Wine 產物約 210KB，不可用 |
+| NSIS 安裝檔 | `hongguo-downloader-4.1-win-x64-setup.exe` | 已由 `windows/4.1-pre-*` 分支觸發 CI 建置並上傳；SHA256 見 `WINDOWS-SHA256SUMS.txt` |
 
 安裝檔未簽章。便携包由 `npm run build:dir` 產出 `dist/win-unpacked` 後 zip 打包。
