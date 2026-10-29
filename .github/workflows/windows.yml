@@ -39,6 +39,8 @@ jobs:
     needs: media
     runs-on: windows-2022
     timeout-minutes: 25
+    env:
+      HONGGUO_SKIP_PLAYBACK: ${{ startsWith(github.ref, 'refs/heads/windows/4.1-pre-') && 'true' || (github.event_name == 'workflow_dispatch' && inputs.skip_playback && 'true') || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,7 +64,7 @@ jobs:
             dist/*.exe
             dist/*.yml
             dist/*.blockmap
-          key: windows-update-v2-${{ hashFiles('package*.json', 'main.js', 'preload.js', 'index.html', 'vite.config.js', 'src/**', 'build/**', 'scripts/build-ffmpeg-source-win.sh') }}
+          key: windows-update-v3-${{ hashFiles('package*.json', 'main.js', 'preload.js', 'index.html', 'vite.config.js', 'src/**', 'build/**', 'scripts/build-ffmpeg-source-win.sh') }}
       - shell: pwsh
         if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
@@ -83,8 +85,6 @@ jobs:
             dist/*.blockmap
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
-        env:
-          HONGGUO_SKIP_PLAYBACK: ${{ inputs.skip_playback || false }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
