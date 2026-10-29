@@ -29,12 +29,11 @@
 
 **[下載 4.0 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.0/hongguo-downloader-4.0-win-x64-setup.exe)**
 
-**[下載 4.1 預發布便携版（Windows x64，解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-4.1-win-x64-portable.zip)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 標記為 Pre-release。SHA256：`257b808c52bb5fcbd7075dfe0ac1746a1d670abb3d4e00e1d135e10f471205a6`。
+**[下載 4.1 預發布（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 為 Pre-release。SHA256：`b9d10c60239fc437bfaf893423c086f031e6bc69347915165bd43a7ca2b4e043`（完整清單見發行頁 `WINDOWS-SHA256SUMS.txt`）。
 
-4.1 的 NSIS 安裝檔（`hongguo-downloader-4.1-win-x64-setup.exe`）需在 Windows 上由 `npm run build:installer` 或 CI 產出後再上傳；Linux 交叉編譯只會得到不可用的小 stub。
+也可使用 [4.1 便携 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-4.1-win-x64-portable.zip)。
 
-- 4.0 仍建議用上方安裝精靈。4.1 便携版解壓後執行目錄內的 `红果短剧.exe`（檔名依打包設定）。
-- 依精靈安裝（4.0 正式版）。預設目錄是 `C:\hongguo`，安裝時可以改。
+- 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
 - 安裝檔未簽章。請從 [4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 或 [4.1 預發布](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 下載，並對照該頁的 SHA256。
 - 一般使用只需要這個安裝檔。`latest.yml` 與 `.blockmap` 給更新程式用。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
