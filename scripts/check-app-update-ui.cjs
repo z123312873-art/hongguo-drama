@@ -157,6 +157,21 @@ function mount(api = {}, component = 'AppUpdateNotice', props = {}) {
     assert.equal(plain.find(n => n.props.className === 'app-update-summary'), undefined);
     plain.unmount();
   });
+  await test('formal update notice lists every item and reports omitted ones', async () => {
+    const items = Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 項更新內容`);
+    const ui = mount({ checkAppUpdate: async () => ({ enabled: true, release: { ...release, highlights: [...items, ...items.slice(0, 2).map((item, i) => `${item}`)], moreCount: 5 } }) });
+    await ui.flush();
+    const list = ui.find(n => n.props.className === 'app-update-summary');
+    const rows = list.children.filter(item => item && item.type === 'li').map(item => item.children.join(''));
+    assert.equal(rows.length, 14);
+    assert.equal(rows[11], '第 12 項更新內容');
+    assert.ok(ui.text().includes('另有 5 条未列出'));
+    ui.unmount();
+    const none = mount({ checkAppUpdate: async () => ({ enabled: true, release: { ...release, highlights: ['一'], moreCount: -3 } }) });
+    await none.flush();
+    assert.ok(!none.text().includes('另有'));
+    none.unmount();
+  });
   await test('settings checks this repository and leaves the switch on by default', async () => {
     const ui = mount({ checkAppUpdate: async () => ({ enabled: true, release: null }) }, 'Settings'); await ui.flush();
     const box = ui.find(n => n.props['aria-label'] === '自动检测更新');

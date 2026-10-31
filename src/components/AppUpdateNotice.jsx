@@ -140,11 +140,13 @@ export default function AppUpdateNotice() {
   const updateError = error || state.error;
   const percent = Math.max(0, Math.min(100, Math.round(state.percent || 0)));
   const title = checking ? '正在检查更新…' : installing ? '正在重启安装…' : downloaded ? `新版 v${version} 已下载` : downloading ? `正在下载 v${version}` : version ? `发现新版本 v${version}` : '检查更新';
-  const highlights = !checking && version && Array.isArray(release?.highlights) ? release.highlights.filter(item => typeof item === 'string' && item).slice(0, 4) : [];
+  const highlights = !checking && version && Array.isArray(release?.highlights) ? release.highlights.filter(item => typeof item === 'string' && item) : [];
+  const moreCount = highlights.length && Number.isSafeInteger(release?.moreCount) && release.moreCount > 0 ? release.moreCount : 0;
   return <section className="app-update-notice" role="dialog" aria-label="软件更新" aria-describedby="app-update-description" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
     <button type="button" className="icon-btn app-update-close" aria-label="关闭更新提醒" title="关闭更新提醒" onClick={close}><X size={18} /></button>
     <h2 aria-live="polite">{title}</h2>
-    {highlights.length > 0 && <ul className="app-update-summary">{highlights.map(item => <li key={item}>{item}</li>)}</ul>}
+    {highlights.length > 0 && <ul className="app-update-summary" tabIndex={0} aria-label="更新摘要">{highlights.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>}
+    {moreCount > 0 && <p className="app-update-more">另有 {moreCount} 条未列出，请前往发布页查看完整说明。</p>}
     <p id="app-update-description">{checking ? '正在查询正式新版，请稍候。' : installing ? '应用即将退出并安装新版。' : downloaded ? '点击后退出应用并安装新版。请先完成视频下载、合并或转码；稍后也可在设置中找回此提醒。' : downloading ? '关闭提醒后继续下载。下载完成不会自动安装，可在设置中找回进度。' : version ? (state.supported ? '在应用内下载新版，完成后由你决定何时重启安装。关闭提醒可继续使用当前版本。' : state.reason) : updateError ? '可稍后重新检查。' : '已是最新版本。'}</p>
     {downloading && <div className="app-update-progress"><progress max="100" value={percent} aria-label="更新下载进度" /><span>{percent}%</span></div>}
     <div className="app-update-actions">
