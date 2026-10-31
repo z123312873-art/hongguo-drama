@@ -142,6 +142,13 @@ function releaseOnlineSession(id) {
   const session = onlineSessions.get(id);
   if (!session) return;
   onlineSessions.delete(id);
+  if (session.contentKeyChild && !session.contentKeyChild.killed) {
+    try { session.contentKeyChild.kill('SIGTERM'); } catch (_) {}
+  }
+  if (session.entry) {
+    require('./src/native/online-spill').finalizeSpill(session.entry);
+    require('./src/native/online-spill').disposeEntrySpill(session.entry);
+  }
   disposeOnlineDisk(session.entry);
   for (const controller of session.requests) controller.abort();
   const pending = session.job;
@@ -2298,11 +2305,34 @@ function registerStreamProtocol() {
         }
         // A fallback can change encryption and size; serve Range only after decoding that candidate.
         if (playInfo.contentKey && !playInfo.spadeA) {
-          if (request.method === 'HEAD') { cleanup(); return new Response(null, { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } }); }
+          const spill = require('./src/native/online-spill');
+          if (request.method === 'HEAD') {
+            cleanup();
+            const size = spill.spillFileSize(entry);
+            const headers = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' };
+            if (size > 0) headers['Content-Length'] = String(size);
+            return new Response(null, { status: 200, headers });
+          }
+          if (session.mediaStarted || session.contentKeyActive) {
+            const ranged = spill.spillRangeResponse(request, entry);
+            if (ranged) { cleanup(); return ranged; }
+            if (request.headers.get('range')) {
+              cleanup();
+              return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${Math.max(spill.spillFileSize(entry), 0)}` } });
+            }
+            cleanup();
+            return new Response(null, { status: 503, headers: { 'Retry-After': '1' } });
+          }
           const child = startContentKeyStream(playInfo, controller.signal);
+          session.contentKeyActive = true;
+          session.contentKeyChild = child;
           session.mediaStarted = true; session.mediaIdentity = identity;
-          child.stdout.once('close', cleanup);
-          return new Response(Readable.toWeb(child.stdout), { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } });
+          const body = spill.tapContentKeyStdout(entry, child.stdout, controller.signal);
+          child.once('close', () => { session.contentKeyActive = false; spill.finalizeSpill(entry); cleanup(); });
+          body.once('close', cleanup);
+          body.once('error', cleanup);
+          return new Response(Readable.toWeb(body, { strategy: { highWaterMark: 64 * 1024, size: chunk => chunk.byteLength } }),
+            { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' } });
         }
         if (playInfo.spadeA || playInfo.contentKey) {
           const buffer = await fetchDecryptedEpisodeOnce(session.vid, null, entry.seriesId, playInfo, controller.signal);

@@ -9,6 +9,9 @@ const videoEnhancementStub = {
 };
 const shortcutModule = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/shortcuts.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code, { module: shortcutModule, exports: shortcutModule.exports });
+const sessionProgressModule = { exports: {} };
+vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/components/playerSessionProgress.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code,
+  { module: sessionProgressModule, exports: sessionProgressModule.exports });
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/PlayerControls.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
 (async () => {
@@ -44,7 +47,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
     else if (document.fullscreenElement === stage) await document.exitFullscreen();
     else await stage.requestFullscreen();
   };
-  const context = { module: { exports: {} }, document, Date: { now: () => now }, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: (fn, delay) => { timers.set(++nextTimer, { fn, at: now + delay }); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
+  const context = { module: { exports: {} }, document, Date: { now: () => now }, window: { addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name) }, setTimeout: (fn, delay) => { timers.set(++nextTimer, { fn, at: now + delay }); return nextTimer; }, clearTimeout: id => timers.delete(id), require: name => name === 'react' ? react : name === '../shortcuts' ? shortcutModule.exports : name === './playerSessionProgress.js' ? sessionProgressModule.exports : name === './VideoEnhancement' ? videoEnhancementStub : {} };
   context.exports = context.module.exports; vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const visit = node => { if (!node || typeof node !== 'object') return; out.push(node); node.children?.forEach(visit); }; visit(tree); return out; };
   const find = label => nodes().find(node => node.props['aria-label'] === label);
@@ -59,6 +62,10 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   await find('播放').props.onClick(); render(); assert.equal(plays, 1); assert.ok(find('暂停'));
   find('暂停').props.onClick(); render(); assert.equal(pauses, 1);
   find('播放进度').props.onChange({ target: { value: '37.5' } }); assert.equal(media.currentTime, 37.5);
+  props.seekableEnd = 40; render();
+  assert.equal(find('播放进度').props.max, 40, 'partial online buffer caps scrub range');
+  find('播放进度').props.onChange({ target: { value: '55' } }); assert.equal(media.currentTime, 40);
+  props.seekableEnd = 0; render();
   find('静音').props.onClick(); listeners.get('volumechange')?.(); render(); assert.equal(media.muted, true); assert.ok(find('取消静音'));
   find('音量').props.onChange({ target: { value: '0.4' } }); assert.equal(media.volume, 0.4); assert.equal(media.muted, false);
   assert.equal(find('播放速度'), undefined, 'speed belongs in the lower-right menu');

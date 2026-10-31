@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, Settings as SettingsIcon } from './icons';
 import './PlayerControls.css';
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, shortcutKey } from '../shortcuts';
+import { clampSeekTarget } from './playerSessionProgress.js';
 import { VideoEnhancementControls } from './VideoEnhancement';
 import { DanmakuSettings } from './CommentDanmaku';
 
@@ -11,7 +12,7 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings }) {
+export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings, seekableEnd = 0, onSeekByTime }) {
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -243,11 +244,21 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     try { if (video.paused) await video.play(); else video.pause(); }
     catch { onError?.('暂时无法播放，请重试本集'); }
   };
+  const scrubMax = (() => {
+    const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 0;
+    if (seekableEnd > 0) return duration > 0 ? Math.min(seekableEnd, duration) : seekableEnd;
+    return duration;
+  })();
   const seek = event => {
     const video = videoRef.current;
-    if (!available || !video || !media.duration) return;
-    try { video.currentTime = Math.max(0, Math.min(media.duration, Number(event.target.value))); }
-    catch { onError?.('暂时无法跳转，请稍后重试'); }
+    if (!available || !video || !scrubMax) return;
+    const raw = Number(event.target.value);
+    const { time, blocked } = clampSeekTarget(raw, seekableEnd, media.duration);
+    try {
+      video.currentTime = time;
+      onSeekByTime?.();
+      if (blocked) onError?.('尚未緩衝到這裡，請稍候');
+    } catch { onError?.('暫時無法跳轉，請稍後重試'); }
   };
   const changeVolume = event => {
     const video = videoRef.current;
@@ -262,7 +273,10 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
         <strong title={seriesTitle}>{seriesTitle}</strong><span>第 {currentIndex} 集</span>
       </div>}
       <div ref={controlsRef} className="player-controls-bar">
-      <input className="player-controls-seek" type="range" aria-label="播放进度" aria-valuetext={`${formatTime(media.time)} / ${formatTime(media.duration)}`} min="0" max={media.duration || 0} step="0.1" value={Math.min(media.time, media.duration)} disabled={!available || !media.duration} onChange={seek} />
+      <input className="player-controls-seek" type="range" aria-label="播放进度" aria-valuetext={`${formatTime(media.time)} / ${formatTime(media.duration)}`} min="0" max={scrubMax || 0} step="0.1"
+        value={Math.min(media.time, scrubMax || media.duration || 0)} disabled={!available || !scrubMax}
+        title={seekableEnd > 0 && media.duration > seekableEnd + 1 ? '可拖動至已緩衝範圍，其餘位置請稍候' : undefined}
+        onChange={seek} />
       <div className="player-controls-row">
         <button type="button" data-player-control aria-label={media.paused ? '播放' : '暂停'} title={`播放/暂停（${formatShortcut(shortcuts.play)}）`} disabled={!available} onClick={togglePlay}>{media.paused ? <Play size={18} /> : <Pause size={18} />}</button>
         <span className="player-controls-time">{formatTime(media.time)} / {formatTime(media.duration)}</span>
