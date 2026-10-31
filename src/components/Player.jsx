@@ -23,6 +23,7 @@ const hasSeekableRange = video => {
   catch { return false; }
 };
 const localMediaKey = (seriesId, episode) => JSON.stringify([seriesId, episode?.vid, episode?.fileUrl, episode?.fileSize, episode?.taskId]);
+const SEASON_WAIT_MS = 8000;
 
 /**
  * Player —— 内置播放器
@@ -123,6 +124,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const episodesRef = useRef([]);
   const seasonLookupRef = useRef('');
   const seasonReadyRef = useRef(null);
+  const seasonPromiseRef = useRef(null);
+  const seasonPendingRef = useRef(false);
+  const lookupNextSeasonRef = useRef(() => Promise.resolve(null));
   const seasonOpeningRef = useRef(false);
   const [seasonHandoff, setSeasonHandoff] = useState(null);
   const selectedSeriesRef = useRef('');
@@ -741,30 +745,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       }
     }, 2600);
     const finale = nextSeason.seasonFinaleIndex?.(episodesRef.current) || 0;
-    if (finale && idx === finale) {
-      const token = `${stateRef.current.activeSeriesId}:${idx}`;
-      if (seasonLookupRef.current !== token) {
-        seasonLookupRef.current = token;
-        seasonReadyRef.current = null;
-        const seriesId = stateRef.current.activeSeriesId;
-        const title = stateRef.current.detail?.series_title || '';
-        window.electronAPI.findSeriesSequels?.(seriesId).then((result) => {
-          if (seasonLookupRef.current !== token) return;
-          const picked = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, result?.results || []);
-          if (!picked) return;
-          seasonReadyRef.current = picked;
-          window.electronAPI.searchResolve?.(picked.series_id).then((resolved) => {
-            if (seasonLookupRef.current !== token || !resolved?.success || String(resolved.data?.series_id) !== picked.series_id) return;
-            const confirmed = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, [{
-              ...picked,
-              series_title: resolved.data.series_title || picked.series_title,
-              cover: resolved.data.cover || picked.cover,
-            }]);
-            if (confirmed) seasonReadyRef.current = confirmed;
-          }).catch(() => {});
-        }).catch(() => {});
-      }
-    }
+    if (finale && idx === finale) lookupNextSeasonRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, tryAutoCompat, playbackVersion, canPlay, videoSrc, persistPosition]);
 
@@ -956,6 +937,46 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     queueNextPrefetchRef.current(currentIndex);
   };
 
+  // 末集开始播放时预先查找下一季；失败的查找不会被记住，播完时可以再试一次。
+  lookupNextSeasonRef.current = () => {
+    const { activeSeriesId: seriesId, currentIndex: idx, detail } = stateRef.current;
+    const token = `${seriesId}:${idx}`;
+    if (seasonLookupRef.current === token && seasonPromiseRef.current) return seasonPromiseRef.current;
+    seasonLookupRef.current = token;
+    seasonReadyRef.current = null;
+    seasonPendingRef.current = true;
+    const title = detail?.series_title || '';
+    const current = () => seasonLookupRef.current === token;
+    const promise = (async () => {
+      const result = await window.electronAPI.findSeriesSequels?.(seriesId);
+      if (!current()) return null;
+      const picked = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, result?.results || []);
+      if (!picked) {
+        // 只有联网查询失败才允许重试；确认没有下一季时保持结论。
+        if (!result?.success || result?.partial) seasonLookupRef.current = '';
+        return null;
+      }
+      seasonReadyRef.current = picked;
+      try {
+        const resolved = await window.electronAPI.searchResolve?.(picked.series_id);
+        if (current() && resolved?.success && String(resolved.data?.series_id) === picked.series_id) {
+          const confirmed = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, [{
+            ...picked,
+            series_title: resolved.data.series_title || picked.series_title,
+            cover: resolved.data.cover || picked.cover,
+          }]);
+          if (confirmed) seasonReadyRef.current = confirmed;
+        }
+      } catch (_) { /* 搜索结果已足够确认下一季 */ }
+      return current() ? seasonReadyRef.current : null;
+    })().catch(() => {
+      if (current()) seasonLookupRef.current = '';
+      return null;
+    }).finally(() => { if (seasonPromiseRef.current === promise) seasonPendingRef.current = false; });
+    seasonPromiseRef.current = promise;
+    return promise;
+  };
+
   // 先交接下一集或释放当前媒体，再清理刚看完的文件和缓存。
   const handleEnded = useCallback(async () => {
     const { currentIndex: ci, autoNext: an, activeSeriesId: sid } = stateRef.current;
@@ -971,10 +992,20 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       setCompatMap(previous => { const result = { ...previous }; delete result[ci]; return result; });
     }
     const finale = nextSeason.seasonFinaleIndex?.(episodes) || 0;
-    const prepared = seasonReadyRef.current;
+    let prepared = seasonReadyRef.current;
+    let moved = false;
+    if (!next && an && finale && ci === finale && !prepared?.series_id) {
+      // 查找还没结束或上次失败：先等它一会儿，而不是直接判定没有下一季。
+      if (seasonPendingRef.current || seasonLookupRef.current !== `${sid}:${ci}`) showToast('正在查找下一季…');
+      prepared = await Promise.race([lookupNextSeasonRef.current(), new Promise(resolve => setTimeout(() => resolve(null), SEASON_WAIT_MS))]);
+      const now = stateRef.current;
+      moved = now.activeSeriesId !== sid || now.currentIndex !== ci || !now.autoNext;
+    }
     if (next) {
       goToEpisode(next.vid_index, 0);
       setAutoAdvancing(true);
+    } else if (moved) {
+      // 等待期间用户已经换集或关闭自动播放：只清理，不再改动当前播放。
     } else if (an && finale && ci === finale && prepared?.series_id) {
       setSeasonHandoff({ ...prepared, seconds: prepared.seconds || 5, phase: 'prompt' });
     } else {
@@ -1203,6 +1234,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false, autoplay = true) => {
     seasonLookupRef.current = '';
     seasonReadyRef.current = null;
+    seasonPromiseRef.current = null;
+    seasonPendingRef.current = false;
     setSeasonHandoff(null);
     persistPosition(true);
     const version = ++selectionVersion.current;

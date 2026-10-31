@@ -41,8 +41,14 @@ function seasonNumber(value) {
   return Number.isSafeInteger(season) && season >= 1 ? season : 0;
 }
 
-function seasonTitle(title) {
-  const text = canonicalTitle(title);
+// Sentence punctuation after a title ("…福布斯了！") is not part of the series name, and must not
+// stop "…福布斯了第二季" from being recognised as the same series.
+const TAIL = /[\s!?.,;:~·…。、！？，；：～_—-]+$/u;
+const trimTail = text => text.replace(TAIL, '');
+const PUNCTUATION = /[\s\p{P}\p{S}]+/gu;
+
+function parseSeason(title) {
+  const text = trimTail(canonicalTitle(title));
   // （第一季）keeps 第N季 inside the brackets, so it is not a bare year like （2024）.
   const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两兩\d]+)[季部]|[（(]\s*第([一二三四五六七八九十百零两兩\d]+)[季部]\s*[）)]|[（(]([一二三四五六七八九十百零两兩\d]+)[）)]|season(\d+))$/i);
   if (!match) return trailingInstallment(text) || { base: text, season: 1, explicit: false };
@@ -52,6 +58,13 @@ function seasonTitle(title) {
   if (match[4] && season > 99) return { base: text, season: 1, explicit: false };
   if (season < 1) return { base: text, season: 1, explicit: false, invalid: true };
   return { base: match[1], season, explicit: true };
+}
+
+// `key` ignores punctuation and symbols, so "名称：副标题" and "名称，副标题" name the same series.
+function seasonTitle(title) {
+  const parsed = parseSeason(title);
+  const base = trimTail(parsed.base);
+  return { ...parsed, base, key: base.replace(PUNCTUATION, '') };
 }
 
 function sourceOf(id) {

@@ -50,12 +50,12 @@ function applyEpisodeUpdate(record, oldSeries, freshSeries, now = Date.now()) {
 function findSequels(series, candidates) {
   const current = seasonTitle(series.series_title);
   const source = sourceOf(String(series.series_id));
-  if (!current.base || current.invalid || !source) return [];
+  if (!current.key || current.invalid || !source) return [];
   const seen = new Set([String(series.series_id)]);
   return candidates.filter(candidate => {
     const id = String(candidate.series_id || '');
     const next = seasonTitle(candidate.series_title);
-    if (seen.has(id) || sourceOf(id) !== source || !next.explicit || next.invalid || next.base !== current.base || next.season <= current.season) return false;
+    if (seen.has(id) || sourceOf(id) !== source || !next.explicit || next.invalid || next.key !== current.key || next.season <= current.season) return false;
     seen.add(id);
     return true;
   }).sort((a, b) => seasonTitle(a.series_title).season - seasonTitle(b.series_title).season)
