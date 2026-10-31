@@ -68,6 +68,21 @@ const decryptCopy = async (input, output) => { fs.copyFileSync(input, output); }
     capture.adopt();
   });
 
+  await test('an episode larger than the in-memory head is delivered intact to early and late readers', async () => {
+    const big = Buffer.alloc(20 * 1024 * 1024);
+    for (let i = 0; i < big.length; i += 1) big[i] = (i * 13 + (i >> 11)) % 253;
+    const dir = directory();
+    const capture = createContentKeyCapture({ playInfo: {}, request: serve(big, { tailDelay: 20 }), maxBytes: 2 * big.length, directory: dir, decrypt: decryptCopy });
+    const early = collect(capture.reader());
+    await sleep(15);
+    const mid = collect(capture.reader());
+    assert.ok((await early).equals(big));
+    assert.ok((await mid).equals(big));
+    const finished = await capture.result;
+    assert.ok(fs.readFileSync(finished.filePath).equals(big));
+    capture.adopt();
+  });
+
   await test('several readers are served from the same single download', async () => {
     const dir = directory();
     let requests = 0;

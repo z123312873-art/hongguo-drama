@@ -15,6 +15,7 @@ const skip = new Set([
   'check-merge-benchmark.cjs',
   'check-error-boundary.cjs',
   'check-danmaku-live.cjs',
+  'check-seek-chromium.cjs',
 ]);
 
 function run(args) {

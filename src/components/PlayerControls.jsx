@@ -11,7 +11,7 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings }) {
+export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings, onSeek }) {
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -246,7 +246,8 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   const seek = event => {
     const video = videoRef.current;
     if (!available || !video || !media.duration) return;
-    try { video.currentTime = Math.max(0, Math.min(media.duration, Number(event.target.value))); }
+    const target = Math.max(0, Math.min(media.duration, Number(event.target.value)));
+    try { if (onSeek) onSeek(target); else video.currentTime = target; }
     catch { onError?.('暂时无法跳转，请稍后重试'); }
   };
   const changeVolume = event => {

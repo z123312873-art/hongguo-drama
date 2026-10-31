@@ -10,6 +10,8 @@ const { Readable, Writable, finished } = require('node:stream');
 const { feedContentKey } = require('./content-key-feed');
 
 const READ_SLICE = 256 * 1024;
+// The start of the episode is also kept in memory so the playing FFmpeg is fed without waiting on disk writes.
+const MEMORY_HEAD = 8 * 1024 * 1024;
 
 function cancelled() {
   return Object.assign(new Error('已取消播放'), { code: 'ERR_CANCELED' });
@@ -46,6 +48,8 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
   const waiters = new Set();
   let fd = fs.openSync(encryptedPath, 'w', 0o600);
   let written = 0;
+  let head = [];
+  let headBytes = 0;
   let downloaded = false;
   let failure = null;
   let settled = false;
@@ -69,6 +73,11 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
     write(chunk, _encoding, callback) {
       if (fd === null || controller.signal.aborted) { callback(cancelled()); return; }
       if (written + chunk.length > maxBytes) { callback(tooLarge()); return; }
+      if (headBytes < MEMORY_HEAD && headBytes === written) {
+        head.push(chunk);
+        headBytes += chunk.length;
+        wake();
+      }
       writeAll(fd, chunk, written, error => {
         if (error) { callback(error); return; }
         written += chunk.length;
@@ -88,12 +97,16 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
     if (controller.signal.aborted) throw cancelled();
     if (!written) throw Object.assign(new Error('视频下载不完整，请重试'), { code: 'MEDIA_TRANSFER_ERROR' });
     downloaded = true;
+    head = [];
+    headBytes = 0;
     closeFile();
     wake();
   })();
 
   const cleanup = async () => {
     closeFile();
+    head = [];
+    headBytes = 0;
     for (const reader of [...readers]) reader.destroy(failure || undefined);
     await Promise.all([...readers].map(reader => new Promise(resolve => {
       if (reader.closed) resolve(); else reader.once('close', resolve);
@@ -140,6 +153,19 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
         try {
           for (;;) {
             if (failure) throw failure;
+            if (position < headBytes) {
+              let offset = 0;
+              for (const piece of head) {
+                if (position < offset + piece.length) {
+                  const part = piece.subarray(position - offset, position - offset + READ_SLICE);
+                  position += part.length;
+                  yield part;
+                  break;
+                }
+                offset += piece.length;
+              }
+              continue;
+            }
             if (position < written) {
               const buffer = Buffer.allocUnsafe(Math.min(READ_SLICE, written - position));
               const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
