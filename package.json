@@ -1,6 +1,6 @@
 {
   "name": "hongguo-downloader",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "紅果短劇繁體桌面版 · Windows x64 · 三來源搜尋、播放、下載與追劇 · GPL-3.0",
   "main": "main.js",
   "license": "GPL-3.0",
@@ -59,7 +59,7 @@
       "src/store.js"
     ],
     "asar": true,
-    "artifactName": "hongguo-downloader-4.0-${os}-${arch}.${ext}",
+    "artifactName": "hongguo-downloader-4.1-${os}-${arch}.${ext}",
     "win": {
       "target": [
         {
@@ -100,7 +100,7 @@
       ]
     },
     "portable": {
-      "artifactName": "${productName}-4.0-便携版.${ext}"
+      "artifactName": "${productName}-4.1-便携版.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -109,7 +109,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "红果短剧下载器",
-      "artifactName": "hongguo-downloader-4.0-win-x64-setup.${ext}"
+      "artifactName": "hongguo-downloader-4.1-win-x64-setup.${ext}"
     },
     "mac": {
       "target": [
