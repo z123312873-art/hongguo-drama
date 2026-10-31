@@ -30,11 +30,11 @@ async function searchSeries(keyword, search, knownSeries = [], { afterSeason = 1
   if (!primary?.success) return primary || { success: false, results: [], error: '搜索暂不可用' };
   const results = [...(primary.results || [])], parsed = seasonTitle(kw);
   let queries = [];
-  if (parsed.base && !parsed.invalid && parsed.season <= 99) {
+  if (parsed.key && !parsed.invalid && parsed.season <= 99) {
     if (parsed.explicit) {
       if (!results.some(item => normalizeTitle(item.series_title) === normalizeTitle(kw))) queries = [parsed.base];
     } else {
-      const seasons = [...results, ...knownSeries].map(item => seasonTitle(item.series_title)).filter(item => item.base === parsed.base && !item.invalid);
+      const seasons = [...results, ...knownSeries].map(item => seasonTitle(item.series_title)).filter(item => item.key === parsed.key && !item.invalid);
       if (seasons.length) {
         const knownSeasons = new Set(seasons.map(item => item.season));
         let nextSeason = afterSeason + 1;
@@ -57,7 +57,7 @@ async function searchSeries(keyword, search, knownSeries = [], { afterSeason = 1
 async function findSeriesSequels(series, localCandidates, search, { localOnly = false } = {}) {
   const parsed = seasonTitle(series?.series_title), source = sourceOf(String(series?.series_id || ''));
   if (!source) return { success: false, results: [], error: '此来源暂不支持查找下一季，请按完整剧名搜索。' };
-  if (!parsed.base || parsed.invalid || parsed.season > 99) return { success: false, results: [], error: '剧名或季数无法识别，请按完整剧名搜索。' };
+  if (!parsed.key || parsed.invalid || parsed.season > 99) return { success: false, results: [], error: '剧名或季数无法识别，请按完整剧名搜索。' };
   const local = findSequels(series, localCandidates);
   if (localOnly) return { success: true, results: local };
   try {

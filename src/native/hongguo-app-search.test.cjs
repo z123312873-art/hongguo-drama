@@ -26,11 +26,15 @@ test('App search parses titles, ids, covers and cursors', () => {
   assert.deepEqual(result.cursor, { search_id: 'sid-1', passback: 'pb-1', next_offset: 20 });
 });
 
-test('HEIC covers become a placeholder instead of a broken image', () => {
+test('HEIC covers become a plain rendition and unknown HEIC hosts stay blank', () => {
   const result = parseSearchPayload({ ...payload, search_tabs: [{ ...payload.search_tabs[0], data: [
-    { search_high_light: { title: { text: 'HEIC 剧' } }, video_data: [{ series_id: '456', cover: 'https://img.example/a.heic?x=1' }] },
+    { search_high_light: { title: { text: 'HEIC 剧' } }, video_data: [{ series_id: '456', cover: 'https://p3-reading-sign.fqnovelpic.com/novel-pic/abc~tplv-81nmtwyey9-superreso-aifit:400:0.heic?lk3s=1' }] },
+    { search_high_light: { title: { text: '别站 剧' } }, video_data: [{ series_id: '457', cover: 'https://img.example/a.heic?x=1' }] },
+    { search_high_light: { title: { text: '备用封面 剧' } }, video_data: [{ series_id: '458', cover: 'https://img.example/b.heic', series_cover: 'https://img.example/b.jpg' }] },
   ] }] });
-  assert.equal(result.results[0].cover, '');
+  assert.equal(result.results[0].cover, 'https://p3-novel.byteimg.com/novel-pic/abc~tplv-shrink:640:0.image');
+  assert.equal(result.results[1].cover, '');
+  assert.equal(result.results[2].cover, 'https://img.example/b.jpg');
 });
 
 test('the signed request uses branch-0 search headers and carries the keyword', async () => {

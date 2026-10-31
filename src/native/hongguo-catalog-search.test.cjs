@@ -182,3 +182,14 @@ test('blank and oversized queries fail before any request', async () => {
   assert.equal(long.success, false);
   assert.equal(calls, 0);
 });
+
+test('a duplicate from another channel fills a missing poster without changing order or mutating inputs', () => {
+  const { mergeResults } = require('./hongguo-catalog-search');
+  const web = [{ series_id: '1', series_title: '甲', cover: '' }, { series_id: '2', series_title: '乙', cover: 'https://img.example/2.jpg' }];
+  const app = [{ series_id: '1', series_title: '甲', cover: 'https://img.example/1.jpg' }, { series_id: '2', series_title: '乙', cover: 'https://img.example/other.jpg' }, { series_id: '3', series_title: '丙', cover: '' }];
+  const merged = mergeResults(web, app);
+  assert.deepEqual(merged.map(item => [item.series_id, item.cover]), [['1', 'https://img.example/1.jpg'], ['2', 'https://img.example/2.jpg'], ['3', '']]);
+  assert.equal(web[0].cover, '', 'cached channel results must not be mutated');
+  assert.deepEqual(mergeResults(null, undefined), []);
+  assert.deepEqual(mergeResults([{ series_id: '', series_title: '无编号' }, { series_id: '9', series_title: '' }], []), []);
+});

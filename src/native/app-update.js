@@ -17,50 +17,69 @@ function versionParts(value) {
   return parts.every(Number.isSafeInteger) ? parts : null;
 }
 
-const HIGHLIGHT_LIMIT = 4;
-const HIGHLIGHT_LENGTH = 24;
-const SUMMARY_HEAD = /^(?:摘要|更新说明|更新說明|summary)\s*[:：]\s*(.*)$/i;
-const BULLET = /^[-*・•]\s+(.+)$/;
+const HIGHLIGHT_LIMIT = 20;
+const HIGHLIGHT_LENGTH = 72;
+const SUMMARY_HEAD = /^(?:摘要|更新说明|更新說明|更新内容|更新內容|summary)(?:\s*[:：]\s*(.*)|)$/i;
+const BULLET = /^(?:[-*+・•●▪◦]\s+|\d{1,2}(?:[.)]\s+|[、）]\s*)|[（(]\d{1,2}[)）]\s*)(.+)$/;
+// A heading after the summary that introduces file lists or checksums ends the list.
+const STOP_HEADING = /sha-?256|checksum|校验|校驗|下载|下載|download|assets|安装包|安裝包|文件|檔案|完整性|source/i;
 
 function clipHighlight(value) {
   const clean = String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!clean || /https?:|sha256/i.test(clean)) return '';
+  if (!clean || /https?:|sha-?256/i.test(clean)) return '';
   const chars = Array.from(clean);
   return chars.length <= HIGHLIGHT_LENGTH ? clean : `${chars.slice(0, HIGHLIGHT_LENGTH - 1).join('')}…`;
 }
 
-// Formal notes from 3.3 onward use a short bullet list. A single sentence is not shown.
-// Installed 2.9 does not read this field and only shows that a newer version exists.
-function releaseHighlights(body) {
-  const text = String(body || '')
-    .replace(/\r\n/g, '\n')
+function plainText(body) {
+  return String(body || '')
+    .replace(/\r\n?/g, '\n')
     .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
     .replace(/<[^>]*>/g, ' ')
-    .replace(/`+/g, '');
+    .replace(/`+/g, '')
+    .replace(/\*\*|__/g, '');
+}
+
+// Formal notes use a "摘要：" header followed by a bullet list. Items are not capped by the
+// old four-line limit: the popup scrolls and `more` reports what did not fit. A single
+// sentence is not shown. Installed 3.4/4.0 read only the first four short bullets.
+function releaseSummary(body) {
   const items = [];
-  let capture = false;
+  let more = 0, capture = false, stop = false;
   const push = value => {
     const clipped = clipHighlight(value);
-    if (!clipped || items.includes(clipped) || items.length >= HIGHLIGHT_LIMIT) return;
-    items.push(clipped);
+    if (!clipped || items.includes(clipped)) return;
+    if (items.length >= HIGHLIGHT_LIMIT) more++; else items.push(clipped);
   };
-  for (const raw of text.split('\n')) {
+  for (const raw of plainText(body).split('\n')) {
+    if (stop) break;
     const line = raw.trim();
     if (!line) continue;
-    const head = SUMMARY_HEAD.exec(line.replace(/^[#>\s]+/, ''));
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    const text = (heading ? heading[1] : line).replace(/^[>\s]+/, '').trim();
+    const head = !BULLET.test(line) && SUMMARY_HEAD.exec(text);
     if (head) {
       capture = true;
-      const parts = head[1].split('、').map(part => part.trim()).filter(Boolean);
+      const parts = (head[1] || '').split('、').map(part => part.trim()).filter(Boolean);
       if (parts.length > 1) parts.forEach(push);
       continue;
     }
     if (!capture) continue;
     const bullet = BULLET.exec(line);
-    if (!bullet) break;
-    push(bullet[1]);
+    if (bullet) { push(bullet[1]); continue; }
+    if (heading) {
+      if (STOP_HEADING.test(text)) stop = true;
+      continue;
+    }
+    if (/^[^\s:：]{1,16}[:：]$/.test(line)) { if (STOP_HEADING.test(line)) stop = true; continue; }
+    stop = true;
   }
-  return items;
+  return { items, more };
+}
+
+function releaseHighlights(body) {
+  return releaseSummary(body).items;
 }
 
 function availableRelease(data, currentVersion) {
@@ -69,13 +88,14 @@ function availableRelease(data, currentVersion) {
   if (!next || !current) return null;
   const difference = next.findIndex((part, i) => part !== current[i]);
   if (difference < 0 || next[difference] < current[difference]) return null;
-  const highlights = releaseHighlights(data.body);
+  const { items: highlights, more } = releaseSummary(data.body);
   return {
     version: data.tag_name.replace(/^v/, '').replace(/^(\d+\.\d+)\.0$/, '$1'),
     // Never open a remote-provided URL; only this project's release page.
     url: `${RELEASES_URL}/tag/${encodeURIComponent(data.tag_name)}`,
     ...(highlights.length ? { highlights } : {}),
+    ...(highlights.length && more ? { moreCount: more } : {}),
   };
 }
 
-module.exports = { availableRelease, releaseHighlights, UPDATE_OWNER, UPDATE_REPO, RELEASES_URL, LATEST_API, LATEST_PAGE, updateRedirectTag };
+module.exports = { availableRelease, releaseHighlights, releaseSummary, HIGHLIGHT_LIMIT, UPDATE_OWNER, UPDATE_REPO, RELEASES_URL, LATEST_API, LATEST_PAGE, updateRedirectTag };

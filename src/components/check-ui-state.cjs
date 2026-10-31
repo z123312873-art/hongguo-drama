@@ -330,6 +330,31 @@ async function mount(file, api, props = {}) {
       assert.equal(realCalls, callsAfterRefresh, 'empty refresh must not delete a still-fresh cache');
     } finally { ui.unmount(); }
   });
+  await test('browse card shows the source 新剧 tag between the rank and the score, only when the source marked it', async () => {
+    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: async () => ({ success: true, results: [
+      { series_id: '1000001', series_title: '新剧甲', rank: 2, rating: 9.1, is_new: true },
+      { series_id: '1000002', series_title: '旧剧乙', rank: 1, rating: 8.8, is_new: false },
+      { series_id: '1000003', series_title: '无标记丙', rank: 3 },
+      { series_id: '1000004', series_title: '新剧无评分丁', rank: 4, is_new: true },
+      { series_id: '1000005', series_title: '新剧无榜单戊', is_new: true, rating: 9.0 },
+      { series_id: '1000006', series_title: '字符串标记己', rank: 6, is_new: 'true' },
+    ] }) });
+    try {
+      await ui.flush();
+      const cards = ui.nodes().filter(n => n.props.className === 'browse-card');
+      const row = n => n?.props?.className === 'browse-cover-top' ? n : (n?.children || []).map(row).find(Boolean);
+      const parts = card => (row(card)?.children || []).filter(child => child && typeof child === 'object').map(child => child.props.className);
+      assert.deepEqual(parts(cards[0]), ['browse-rank-badge', 'browse-new-badge', 'browse-score'], 'badge sits between rank (left) and score (right)');
+      assert.deepEqual(parts(cards[1]), ['browse-rank-badge', 'browse-score'], 'no badge without the source tag');
+      assert.deepEqual(parts(cards[2]), ['browse-rank-badge'], 'an absent flag shows nothing');
+      assert.deepEqual(parts(cards[3]), ['browse-rank-badge', 'browse-new-badge'], 'no score still keeps rank and badge');
+      assert.deepEqual(parts(cards[4]), ['browse-new-badge', 'browse-score'], 'no rank still keeps badge and score');
+      assert.deepEqual(parts(cards[5]), ['browse-rank-badge'], 'only a real boolean true is treated as new');
+      const badge = ui.find(n => n.props.className === 'browse-new-badge');
+      assert.equal(ui.nodes().filter(n => n.props.className === 'browse-new-badge').length, 3);
+      assert.equal(badge.children.join(''), '新剧');
+    } finally { ui.unmount(); }
+  });
   await test('browse keeps posters when switching categories and does not refetch a fresh list', async () => {
     const calls = [];
     const ui = await mount('Browse', {

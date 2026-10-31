@@ -15,12 +15,15 @@ import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
 import { matchesText } from '../chineseScript.mjs';
-import {
-  clampRelativeSeek, clampSeekTarget, mediaSeekableEnd, resolveEpisodeSeekTarget,
-  shouldDeferPlaybackEnd, writeSessionEpisodeTime,
-} from './playerSessionProgress.js';
+import { resolveEpisodeSeekTarget, writeSessionEpisodeTime } from './playerSessionProgress.js';
 
+// Fragmented streams report an empty range, so a seek would restart them from zero.
+const hasSeekableRange = video => {
+  try { return video.seekable.length > 0 && video.seekable.end(video.seekable.length - 1) > 0.5; }
+  catch { return false; }
+};
 const localMediaKey = (seriesId, episode) => JSON.stringify([seriesId, episode?.vid, episode?.fileUrl, episode?.fileSize, episode?.taskId]);
+const SEASON_WAIT_MS = 8000;
 
 /**
  * Player —— 内置播放器
@@ -121,12 +124,19 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const episodesRef = useRef([]);
   const seasonLookupRef = useRef('');
   const seasonReadyRef = useRef(null);
+  const seasonPromiseRef = useRef(null);
+  const seasonPendingRef = useRef(false);
+  const lookupNextSeasonRef = useRef(() => Promise.resolve(null));
   const seasonOpeningRef = useRef(false);
   const [seasonHandoff, setSeasonHandoff] = useState(null);
   const selectedSeriesRef = useRef('');
   const selectionVersion = useRef(0);
   const onlineRequestRef = useRef(null);
   const prefetchRef = useRef(null);
+  const seekSwapRef = useRef(null);
+  const seekFailRef = useRef(null);
+  const pendingSeekExactRef = useRef(false);
+  const seekMediaRef = useRef(() => {});
   const queueNextPrefetchRef = useRef(() => {});
   const mediaVersion = useRef(0);
   const compatRequestRef = useRef(null);
@@ -142,7 +152,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const fallbackAttemptRef = useRef(null);
   const rejectedLocalRef = useRef(null);
   const sessionEpisodeTimesRef = useRef(new Map());
-  const [seekableEnd, setSeekableEnd] = useState(0);
 
   // 只有收到当前片源的 metadata 后才保存，避免旧元素的 pause 覆盖新集断点。
   const persistPosition = useCallback((force = false, ended = false) => {
@@ -192,6 +201,14 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (request) window.electronAPI.releaseOnlinePlay({ requestId: request.requestId }).catch(() => {});
   }, []);
 
+  const cancelSeekSwap = useCallback(() => {
+    const swap = seekSwapRef.current;
+    seekSwapRef.current = null;
+    if (!swap) return;
+    clearTimeout(swap.timer);
+    window.electronAPI.releaseOnlinePlay({ requestId: swap.request.requestId }).catch(() => {});
+  }, []);
+
   const cancelCompat = useCallback(() => {
     const request = compatRequestRef.current;
     compatRequestRef.current = null;
@@ -209,6 +226,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     const previous = loadedMediaRef.current;
     loadedMediaRef.current = null;
     previous?.element.pause();
+    cancelSeekSwap();
+    pendingSeekExactRef.current = false;
     mediaVersion.current++;
     setPlaybackVersion(mediaVersion.current);
     autoCompatAttemptRef.current = null;
@@ -225,7 +244,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     setCompatError('');
     setPlaybackError('');
     lastSavedRef.current = 0;
-  }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch]);
+  }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch, cancelSeekSwap]);
 
   const stopPlayback = (message = '播放已停止，可重试本集继续观看') => {
     const seekTo = currentPosition();
@@ -241,12 +260,13 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     mediaVersion.current++;
     selectedSeriesRef.current = '';
     cancelCompat();
+    cancelSeekSwap();
     releaseOnline();
     releasePrefetch();
     clearTimeout(decodeTimer.current);
     clearTimeout(toastTimer.current);
     clearTimeout(rateNoticeTimer.current);
-  }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch]);
+  }, [persistPosition, releaseOnline, cancelCompat, releasePrefetch, cancelSeekSwap]);
 
   const showToast = useCallback((text) => {
     setToast(text);
@@ -601,19 +621,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     v.playbackRate = playbackRateRef.current;
   }, [loading, canPlay, videoSrc, playbackVersion]);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!active || !canPlay || !video) {
-      setSeekableEnd(0);
-      return;
-    }
-    const sync = () => setSeekableEnd(mediaSeekableEnd(video));
-    const events = ['loadedmetadata', 'durationchange', 'progress', 'timeupdate', 'seeking', 'seeked'];
-    events.forEach(name => video.addEventListener(name, sync));
-    sync();
-    return () => events.forEach(name => video.removeEventListener(name, sync));
-  }, [active, canPlay, videoSrc, playbackVersion]);
-
   const playableCount = episodes.filter((e) => e.status === 'completed').length;
 
   /** 转码当前集为 H.264 后播放（解决本机无法解码 HEVC 的黑屏问题） */
@@ -738,30 +745,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       }
     }, 2600);
     const finale = nextSeason.seasonFinaleIndex?.(episodesRef.current) || 0;
-    if (finale && idx === finale) {
-      const token = `${stateRef.current.activeSeriesId}:${idx}`;
-      if (seasonLookupRef.current !== token) {
-        seasonLookupRef.current = token;
-        seasonReadyRef.current = null;
-        const seriesId = stateRef.current.activeSeriesId;
-        const title = stateRef.current.detail?.series_title || '';
-        window.electronAPI.findSeriesSequels?.(seriesId).then((result) => {
-          if (seasonLookupRef.current !== token) return;
-          const picked = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, result?.results || []);
-          if (!picked) return;
-          seasonReadyRef.current = picked;
-          window.electronAPI.searchResolve?.(picked.series_id).then((resolved) => {
-            if (seasonLookupRef.current !== token || !resolved?.success || String(resolved.data?.series_id) !== picked.series_id) return;
-            const confirmed = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, [{
-              ...picked,
-              series_title: resolved.data.series_title || picked.series_title,
-              cover: resolved.data.cover || picked.cover,
-            }]);
-            if (confirmed) seasonReadyRef.current = confirmed;
-          }).catch(() => {});
-        }).catch(() => {});
-      }
-    }
+    if (finale && idx === finale) lookupNextSeasonRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, tryAutoCompat, playbackVersion, canPlay, videoSrc, persistPosition]);
 
@@ -770,7 +754,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
    * 不占用下载目录；加密片源的准备文件会自动清理。
    */
   const startOnlinePlay = useCallback(
-    async (vidIndex, resumeAt, force = false, autoplay = true) => {
+    async (vidIndex, resumeAt, force = false, autoplay = true, swap = null) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
       if (ep?.locked) { showToast('这一集需在来源平台解锁'); return; }
       if (!ep || !ep.vid) {
@@ -781,19 +765,25 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       onlineSourceRef.current = `${activeSeriesId}:${vidIndex}`;
       rememberCurrentEpisodeTime();
       const seekTo = resolveSeekTarget(activeSeriesId, vidIndex, resumeAt);
-      const prefetched = !force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId && prefetchRef.current?.quality === quality ? prefetchRef.current : null;
-      if (prefetched) prefetchRef.current = null;
+      const prefetched = swap || (!force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId && prefetchRef.current?.quality === quality ? prefetchRef.current : null);
+      if (prefetched && prefetched === prefetchRef.current) prefetchRef.current = null;
       const ready = prefetched?.result?.success ? prefetched.result : null;
+      // 换成可跳转片源时，下一集的预取仍然有效，不能被这次换源释放。
+      const keptPrefetch = swap ? prefetchRef.current : null;
+      if (keptPrefetch) prefetchRef.current = null;
       resetPlayback(autoplay);
+      if (keptPrefetch) prefetchRef.current = keptPrefetch;
       setCompatMap(prev => { const next = { ...prev }; delete next[vidIndex]; return next; });
       const request = prefetched || { requestId: crypto.randomUUID(), vid: ep.vid };
       onlineRequestRef.current = request;
       pendingSeekRef.current = seekTo;
+      pendingSeekExactRef.current = Boolean(swap);
       setCurrentIndex(vidIndex);
       setWaitingFor(null);
       setOnlineVid(ep.vid);
       const usePrepared = (res) => {
         request.streamId = res.streamId;
+        request.streaming = Boolean(res.streaming);
         request.prepared = true;
         setMediaBuffering(true);
         setOnlineUrl(res.url);
@@ -947,6 +937,46 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     queueNextPrefetchRef.current(currentIndex);
   };
 
+  // 末集开始播放时预先查找下一季；失败的查找不会被记住，播完时可以再试一次。
+  lookupNextSeasonRef.current = () => {
+    const { activeSeriesId: seriesId, currentIndex: idx, detail } = stateRef.current;
+    const token = `${seriesId}:${idx}`;
+    if (seasonLookupRef.current === token && seasonPromiseRef.current) return seasonPromiseRef.current;
+    seasonLookupRef.current = token;
+    seasonReadyRef.current = null;
+    seasonPendingRef.current = true;
+    const title = detail?.series_title || '';
+    const current = () => seasonLookupRef.current === token;
+    const promise = (async () => {
+      const result = await window.electronAPI.findSeriesSequels?.(seriesId);
+      if (!current()) return null;
+      const picked = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, result?.results || []);
+      if (!picked) {
+        // 只有联网查询失败才允许重试；确认没有下一季时保持结论。
+        if (!result?.success || result?.partial) seasonLookupRef.current = '';
+        return null;
+      }
+      seasonReadyRef.current = picked;
+      try {
+        const resolved = await window.electronAPI.searchResolve?.(picked.series_id);
+        if (current() && resolved?.success && String(resolved.data?.series_id) === picked.series_id) {
+          const confirmed = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, [{
+            ...picked,
+            series_title: resolved.data.series_title || picked.series_title,
+            cover: resolved.data.cover || picked.cover,
+          }]);
+          if (confirmed) seasonReadyRef.current = confirmed;
+        }
+      } catch (_) { /* 搜索结果已足够确认下一季 */ }
+      return current() ? seasonReadyRef.current : null;
+    })().catch(() => {
+      if (current()) seasonLookupRef.current = '';
+      return null;
+    }).finally(() => { if (seasonPromiseRef.current === promise) seasonPendingRef.current = false; });
+    seasonPromiseRef.current = promise;
+    return promise;
+  };
+
   // 先交接下一集或释放当前媒体，再清理刚看完的文件和缓存。
   const handleEnded = useCallback(async () => {
     const { currentIndex: ci, autoNext: an, activeSeriesId: sid } = stateRef.current;
@@ -962,10 +992,20 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       setCompatMap(previous => { const result = { ...previous }; delete result[ci]; return result; });
     }
     const finale = nextSeason.seasonFinaleIndex?.(episodes) || 0;
-    const prepared = seasonReadyRef.current;
+    let prepared = seasonReadyRef.current;
+    let moved = false;
+    if (!next && an && finale && ci === finale && !prepared?.series_id) {
+      // 查找还没结束或上次失败：先等它一会儿，而不是直接判定没有下一季。
+      if (seasonPendingRef.current || seasonLookupRef.current !== `${sid}:${ci}`) showToast('正在查找下一季…');
+      prepared = await Promise.race([lookupNextSeasonRef.current(), new Promise(resolve => setTimeout(() => resolve(null), SEASON_WAIT_MS))]);
+      const now = stateRef.current;
+      moved = now.activeSeriesId !== sid || now.currentIndex !== ci || !now.autoNext;
+    }
     if (next) {
       goToEpisode(next.vid_index, 0);
       setAutoAdvancing(true);
+    } else if (moved) {
+      // 等待期间用户已经换集或关闭自动播放：只清理，不再改动当前播放。
     } else if (an && finale && ci === finale && prepared?.series_id) {
       setSeasonHandoff({ ...prepared, seconds: prepared.seconds || 5, phase: 'prompt' });
     } else {
@@ -1013,6 +1053,68 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     videoRef.current?.pause();
   }, [active, persistPosition]);
 
+  // 加密片源边下边播时是分片 MP4，浏览器无法跳转。用户跳转时换成已保存的完整文件，再落到目标位置。
+  seekMediaRef.current = (value, relative = false) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const swap = seekSwapRef.current;
+    const media = loadedMediaRef.current;
+    const request = onlineRequestRef.current;
+    const live = media?.element === video && media.version === mediaVersion.current;
+    const needsSwap = Boolean(swap) || Boolean(live && request?.streaming && !hasSeekableRange(video));
+    if (!live && !swap && request?.streaming) return;
+    const base = relative ? (swap ? swap.target : video.currentTime) : 0;
+    const raw = Number(value) + base;
+    if (!Number.isFinite(raw)) return;
+    if (!needsSwap) {
+      const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
+      try { video.currentTime = Math.max(0, Math.min(limit, raw)); }
+      catch { showToast('暂时无法跳转，请稍后重试'); }
+      return;
+    }
+    const target = Math.max(0, raw);
+    if (swap) { swap.target = target; return; }
+    const { currentIndex: index, activeSeriesId: seriesId, onlineQuality: quality } = stateRef.current;
+    const episode = episodesRef.current.find(item => item.vid_index === index);
+    const failed = seekFailRef.current;
+    if (!episode?.vid) return;
+    if (failed && failed.vid === episode.vid && failed.until > Date.now()) { showToast(failed.message); return; }
+    const entry = {
+      target,
+      version: mediaVersion.current,
+      request: { requestId: crypto.randomUUID(), vid: episode.vid, seriesId, vidIndex: index, quality },
+      timer: setTimeout(() => showToast('正在准备可快进快退的片源…'), 700),
+    };
+    seekSwapRef.current = entry;
+    const fail = (message, hold) => {
+      seekFailRef.current = { vid: episode.vid, until: Date.now() + hold, message };
+      showToast(message);
+    };
+    entry.request.promise = window.electronAPI.prepareOnlinePlay({ ...entry.request, seekable: true })
+      .catch(error => ({ success: false, error: error.message }))
+      .then(res => {
+        if (seekSwapRef.current !== entry) {
+          window.electronAPI.releaseOnlinePlay({ requestId: entry.request.requestId, streamId: res?.streamId }).catch(() => {});
+          return;
+        }
+        clearTimeout(entry.timer);
+        seekSwapRef.current = null;
+        if (entry.version !== mediaVersion.current || onlineRequestRef.current !== request) {
+          window.electronAPI.releaseOnlinePlay({ requestId: entry.request.requestId, streamId: res?.streamId }).catch(() => {});
+          return;
+        }
+        if (!res?.success || res.streaming) {
+          window.electronAPI.releaseOnlinePlay({ requestId: entry.request.requestId, streamId: res?.streamId }).catch(() => {});
+          if (res?.code === 'MEDIA_TOO_LARGE') fail('本集过大，暂不支持快进快退，请下载后观看', Infinity);
+          else fail('暂时无法跳转，请稍后重试', 5000);
+          return;
+        }
+        entry.request.result = res;
+        const playing = !video.paused;
+        startOnlinePlay(index, entry.target, false, playing, entry.request);
+      });
+  };
+
   const handleMetadata = (event) => {
     const v = event.currentTarget;
     if (!canPlay || playbackVersion !== mediaVersion.current || v !== videoRef.current || !current || current.locked) return;
@@ -1021,11 +1123,18 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     v.defaultPlaybackRate = playbackRateRef.current;
     v.playbackRate = playbackRateRef.current;
     const seekTo = Math.max(0, Number(pendingSeekRef.current) || 0);
-    if (seekTo > 0 && (!Number.isFinite(v.duration) || seekTo < v.duration - 3)) {
-      v.currentTime = seekTo;
-      showToast(`从 ${Math.floor(seekTo / 60)}:${String(Math.floor(seekTo % 60)).padStart(2, '0')} 继续播放`);
-    }
+    const exact = pendingSeekExactRef.current;
+    pendingSeekExactRef.current = false;
     pendingSeekRef.current = 0;
+    if (exact) {
+      if (seekTo > 0) v.currentTime = Number.isFinite(v.duration) ? Math.min(seekTo, v.duration) : seekTo;
+    } else if (seekTo > 0 && (!Number.isFinite(v.duration) || seekTo < v.duration - 3)) {
+      if (onlineRequestRef.current?.streaming && !hasSeekableRange(v)) seekMediaRef.current(seekTo, false);
+      else {
+        v.currentTime = seekTo;
+        showToast(`从 ${Math.floor(seekTo / 60)}:${String(Math.floor(seekTo % 60)).padStart(2, '0')} 继续播放`);
+      }
+    }
     if (compatMap[currentIndex]) releaseOnline();
     if (activeRef.current && pendingAutoplayRef.current) v.play().catch(() => { if (playbackVersion === mediaVersion.current) setAutoAdvancing(false); });
   };
@@ -1078,13 +1187,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         if (video.paused) video.play().catch(() => showToast('暂时无法播放，请重试本集'));
         else video.pause();
       } else if (action.id === 'forward' || action.id === 'backward') {
-        const delta = action.id === 'forward' ? 5 : -5;
-        const { time, blocked } = clampRelativeSeek(video.currentTime, delta, seekableEnd, video.duration);
-        try {
-          video.currentTime = time;
-          rememberCurrentEpisodeTime();
-          if (blocked) showToast('尚未緩衝到這裡，請稍候');
-        } catch { showToast('暫時無法跳轉，請稍後重試'); }
+        seekMediaRef.current(action.id === 'forward' ? 5 : -5, true);
       } else if (action.id === 'previous' || action.id === 'next') {
         const episode = action.id === 'previous' ? findPrev(index) : findNext(index);
         if (episode) { goToEpisode(episode.vid_index); setAutoAdvancing(true); }
@@ -1106,7 +1209,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       window.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('blur', onBlur);
     };
-  }, [active, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast, shortcuts, toggleFullscreen, seekableEnd, rememberCurrentEpisodeTime]);
+  }, [active, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast, shortcuts, toggleFullscreen]);
 
   const openNextSeason = useCallback(async (target) => {
     if (!target?.series_id || seasonOpeningRef.current) return;
@@ -1131,6 +1234,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false, autoplay = true) => {
     seasonLookupRef.current = '';
     seasonReadyRef.current = null;
+    seasonPromiseRef.current = null;
+    seasonPendingRef.current = false;
     setSeasonHandoff(null);
     persistPosition(true);
     const version = ++selectionVersion.current;
@@ -1653,13 +1758,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               if (v.currentSrc && v.currentSrc !== videoSrc) return;
               if (v.playbackRate !== playbackRateRef.current) changePlaybackRate(v.playbackRate);
             }}
-            onEnded={() => {
-              const v = videoRef.current;
-              if (!activeRef.current || !canPlay || playbackVersion !== mediaVersion.current) return;
-              if (v && loadedMediaRef.current?.version !== mediaVersion.current) return;
-              if (v && shouldDeferPlaybackEnd(v)) { v.play().catch(() => {}); return; }
-              handleEnded();
-            }}
+            onEnded={() => { if (activeRef.current && canPlay && playbackVersion === mediaVersion.current && (!videoRef.current || loadedMediaRef.current?.version === mediaVersion.current)) handleEnded(); }}
             onPause={() => persistPosition(true)}
             onPlaying={(event) => { handlePlaying(event); prepareNextEpisode(event); }}
             onWaiting={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(true); }}
@@ -1693,11 +1792,10 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <OfficialDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={officialDanmaku} />}
         {showEpisodeComments &&
           <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={commentDanmaku} />}
-        <PlayerControls onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} danmaku={showDanmakuControls ? danmaku : null} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
+        <PlayerControls onSeek={time => seekMediaRef.current(time, false)} onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} danmaku={showDanmakuControls ? danmaku : null} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           seriesTitle={detail?.series_title} episodes={episodes} currentIndex={currentIndex} onEpisodeChange={goToEpisode}
           onlineQuality={onlineQuality} supportsOnlineQuality={supportsOnlineQuality} onQualityChange={changeOnlineQuality}
-          pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast}
-          seekableEnd={seekableEnd} onSeekByTime={rememberCurrentEpisodeTime} />
+          pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>
             {playbackError ? (

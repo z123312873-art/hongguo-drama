@@ -87,3 +87,39 @@ test('a season finale is the highest episode, including a locked later episode',
     { series_id: 'xifan:1:2', series_title: '谁让这个文盲修仙的第二季' },
   ]), null);
 });
+
+test('punctuation around a title never hides the next season', () => {
+  const { findSequels } = require('./watch-history');
+  const season2 = { series_id: '7663395668320324632', series_title: '大学没毕业，你怎么登上福布斯了第二季' };
+  const season3 = { series_id: '7681249492561054744', series_title: '大学没毕业，你怎么登上福布斯了第三季' };
+  const unrelated = { series_id: '7645153739656924184', series_title: '大学没毕业：你怎么登上福布斯了' };
+  for (const title of [
+    '大学没毕业，你怎么登上福布斯了！',
+    '大学没毕业，你怎么登上福布斯了!',
+    '大学没毕业,你怎么登上福布斯了？！',
+    '大學沒畢業，你怎麼登上福布斯了！',
+    '大学没毕业：你怎么登上福布斯了',
+  ]) {
+    const current = { series_id: '7654950385206971417', series_title: title };
+    for (const lookup of [
+      candidates => immediateNextSeason(current, candidates),
+      candidates => findSequels(current, candidates)[0],
+    ]) {
+      assert.equal(lookup([season3, unrelated, season2]).series_id, season2.series_id, title);
+    }
+    assert.equal(immediateNextSeason(current, [season3]), null, `${title}: season 3 must not stand in for season 2`);
+  }
+  const colon = immediateNextSeason({ series_id: '10000061', series_title: '名称！' }, [{ series_id: '10000062', series_title: '名称：第二季！' }]);
+  assert.equal(colon.series_id, '10000062');
+  assert.equal(immediateNextSeason({ series_id: '10000061', series_title: '名称甲！' }, [{ series_id: '10000062', series_title: '名称乙第二季' }]), null);
+  assert.equal(immediateNextSeason({ series_id: '10000063', series_title: '！！！' }, [{ series_id: '10000064', series_title: '！！！第二季' }]), null);
+});
+
+test('the same title with different punctuation shares one season key in both parsers', () => {
+  for (const title of ['大学没毕业，你怎么登上福布斯了！', '名称：第二季！', '《老千》第三部。', '剧名（第二季）！', '剧名2！', 'A～B…']) {
+    assert.deepEqual(cjsSeason.seasonTitle(title), esmSeason.seasonTitle(title), title);
+  }
+  assert.equal(cjsSeason.seasonTitle('名称：副标题！').key, cjsSeason.seasonTitle('名称，副标题第二季').key);
+  assert.equal(cjsSeason.seasonTitle('剧名（第二季）！').season, 2);
+  assert.equal(cjsSeason.seasonTitle('名称：第二季！').base, '名称');
+});

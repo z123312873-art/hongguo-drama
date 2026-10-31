@@ -65,6 +65,31 @@ const checks = [
       assert.doesNotMatch(JSON.stringify(result), /secret|signed\.invalid|private/);
     }
   }],
+  ['Certificate interception is reported as a trust problem with a filter hint and no private details', async () => {
+    for (const code of ['SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT']) {
+      const app = load('app-source.js', { axios: async () => {
+        throw Object.assign(new Error('secret https://signed.invalid/?token=private'), { code, config: { secret: true } });
+      } });
+      await assert.rejects(app.fetchAppPlayUrl('11'), error => {
+        assert.equal(error.code, 'ERR_TLS_CERT');
+        assert.doesNotMatch(error.message + JSON.stringify(error), /secret|signed\.invalid|private/);
+        return true;
+      });
+      const f = load('hongguo.js', { './app-source': app });
+      const result = await f.fetchPlayUrlSingle('11', '1', { quality: '720p' });
+      assert.equal(result.sources[0].code, 'NETWORK_ERROR');
+      assert.match(result.sources[0].message, /AdGuard/);
+      assert.doesNotMatch(JSON.stringify(result), /secret|signed\.invalid|private/);
+    }
+    for (const [reason, hinted] of [['NETWORK', true], ['TLS', true], ['', false]]) {
+      const f = load('hongguo.js', { './app-source': { fetchAppPlayUrl: async () => {
+        throw Object.assign(new Error('x'), { code: 'EMPTY_RESPONSE', ...(reason ? { registrationReason: reason } : {}) });
+      } } });
+      const result = await f.fetchPlayUrlSingle('11', '1', { quality: '720p' });
+      assert.equal(result.sources[0].code, 'EMPTY_RESPONSE');
+      assert.equal(/AdGuard/.test(result.sources[0].message), hinted);
+    }
+  }],
   ['App distinguishes HTTP, business refusal, absent model, parsing and unsafe media', async () => {
     const first = { data: { '11': { video_model: { fallback_api: 'https://vod.snssdk.com/info' } } } };
     const cases = [

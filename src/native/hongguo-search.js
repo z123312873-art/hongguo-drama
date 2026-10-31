@@ -7,6 +7,7 @@
  * 接口未公开，字段或可用性可能变化：调用方应保留页面嗅探作为兜底。
  */
 const axios = require('axios');
+const { compatibleCover } = require('./cover-url');
 
 const SITE_ORIGIN = 'https://hongguoduanju.com';
 const SEARCH_ENDPOINT = `${SITE_ORIGIN}/api/search/result`;
@@ -51,9 +52,12 @@ function cleanText(value) {
     .trim();
 }
 
-function safeCover(value) {
-  const url = cleanUrl(value);
-  return /^https?:\/\//i.test(url) ? url : '';
+function safeCover(...values) {
+  for (const value of values) {
+    const cover = compatibleCover(cleanUrl(value));
+    if (cover) return cover;
+  }
+  return '';
 }
 
 function episodeCountOf(video) {
@@ -107,7 +111,7 @@ function parseSearchResponse(payload) {
     results.push({
       series_id: seriesId,
       series_title: title,
-      cover: safeCover(video?.series_cover || video?.cover || ''),
+      cover: safeCover(video?.series_cover, video?.cover, item?.cover),
       episode_count: episodeCountOf(video),
       tags: tagsOf(video),
       description: cleanText(video?.series_intro || ''),

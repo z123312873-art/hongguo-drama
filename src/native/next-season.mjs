@@ -27,7 +27,7 @@ function chineseSeason(season) {
 export function immediateNextSeason(series, candidates) {
   const current = seasonTitle(series?.series_title);
   const source = sourceOf(String(series?.series_id || ''));
-  if (!current.base || current.invalid || !source || !Number.isInteger(current.season) || current.season < 1 || current.season >= 99) return null;
+  if (!current.key || current.invalid || !source || !Number.isInteger(current.season) || current.season < 1 || current.season >= 99) return null;
   const target = current.season + 1;
   const exact = new Set([
     canonicalTitle(`${current.base}第${target}季`),
@@ -41,7 +41,7 @@ export function immediateNextSeason(series, candidates) {
     const id = String(candidate?.series_id || '');
     const next = seasonTitle(candidate?.series_title);
     if (!id || seen.has(id) || sourceOf(id) !== source || !next.explicit || next.invalid) continue;
-    if (next.base !== current.base || next.season !== target) continue;
+    if (next.key !== current.key || next.season !== target) continue;
     seen.add(id);
     matches.push(candidate);
   }

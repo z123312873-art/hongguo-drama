@@ -14,9 +14,16 @@ vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/ch
 const sessionProgressModule = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/components/playerSessionProgress.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code,
   { module: sessionProgressModule, exports: sessionProgressModule.exports });
+const esm = file => transformSync(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), { loader: 'js', format: 'cjs' }).code;
+const seasonTitleModule = { exports: {} };
+vm.runInNewContext(esm('src/native/season-title.mjs'), { module: seasonTitleModule, exports: seasonTitleModule.exports,
+  require: n => n.endsWith('chineseScript.mjs') ? chineseModule.exports : require(n) });
+const nextSeasonModule = { exports: {} };
+vm.runInNewContext(esm('src/native/next-season.mjs'), { module: nextSeasonModule, exports: nextSeasonModule.exports,
+  require: n => n.endsWith('chineseScript.mjs') ? chineseModule.exports : n.endsWith('season-title.mjs') ? seasonTitleModule.exports : require(n) });
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
-function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [], apiOverrides = {} } = {}) {
+function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [], apiOverrides = {}, realSeasons = false } = {}) {
   // Playback fixtures model an explicit play command; target:null exercises passive library entry.
   props = { setEpisodesOpen() {}, ...((local || saved) ? { target: { seriesId, resume: true, ts: 1 } } : {}), ...props };
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
@@ -81,7 +88,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const shortcutModule = { exports: {} };
   vm.runInNewContext(shortcutSource, { module: shortcutModule, exports: shortcutModule.exports, window, Event });
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './playerSessionProgress.js' ? sessionProgressModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n === './danmakuWarmup.mjs' ? { useDanmakuWarmup() {} } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './playerSessionProgress.js' ? sessionProgressModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n === './danmakuWarmup.mjs' ? { useDanmakuWarmup() {} } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : n.endsWith('next-season.mjs') && realSeasons ? nextSeasonModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
@@ -373,32 +380,6 @@ if (require.main === module) (async () => {
     assert.equal(ui.find(n => n.type === 'video').props.key, key, 'compatibility source swap must not replace the fullscreen video element');
     assert.equal(ui.find(n => n.type === 'video').props.src, 'file:///mock-compat.mp4'); ui.unmount();
   });
-  await test('arrow seek stays relative when seekableEnd lags pipe playhead', async () => {
-    const ui = mount({ local: true }); await ui.flush(); ui.metadata();
-    ui.media.buffered = { length: 1, end: () => 15 };
-    ui.media.seekable = { length: 1, end: () => 15 };
-    ui.media.duration = 100;
-    ui.media.currentTime = 60;
-    ui.mediaEvents.get('timeupdate')?.(); await ui.flush();
-    ui.render();
-    ui.document.activeElement = ui.media;
-    ui.dispatchKey('keydown', { key: 'ArrowLeft', code: 'ArrowLeft' });
-    assert.equal(ui.media.currentTime, 55, 'backward must not snap to seekableEnd');
-    ui.media.currentTime = 10;
-    ui.dispatchKey('keydown', { key: 'ArrowRight', code: 'ArrowRight' });
-    assert.equal(ui.media.currentTime, 15, 'forward still capped at seekableEnd');
-    ui.unmount();
-  });
-  await test('premature ended with short duration does not auto-advance', async () => {
-    const ui = mount({ local: true }); await ui.flush(); ui.metadata();
-    ui.media.duration = 18;
-    ui.media.currentTime = 15;
-    ui.media.ended = true;
-    ui.media.buffered = { length: 1, end: () => 120 };
-    ui.find(n => n.type === 'video').props.onEnded(); await ui.flush();
-    assert.equal(ui.find(n => n.type === 'video').props.src, 'file:///mock-1.mp4', 'must not jump to next episode');
-    ui.unmount();
-  });
   await test('fullscreen playback retains video and last source while the next online episode prepares', async () => {
     let finishNext;
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: p => p.vidIndex === 1 ? { success: true, url: 'hongguo-stream://one' } : new Promise(r => { finishNext = r; }) });
@@ -410,6 +391,59 @@ if (require.main === module) (async () => {
     finishNext({ success: true, url: 'hongguo-stream://two' }); await ui.flush();
     assert.equal(ui.find(n => n.type === 'video').props.key, first.props.key);
     assert.equal(ui.find(n => n.type === 'video').props.src, 'hongguo-stream://two'); ui.unmount();
+  });
+
+  const finaleSeries = (title, apiOverrides) => mount({ realSeasons: true, seriesId: '7654950385206971417', props: { target: { seriesId: '7654950385206971417', vidIndex: 2, ts: 1 } },
+    apiOverrides: { getSeriesEpisodes: async () => ({ success: true, data: { series_id: '7654950385206971417', series_title: title, total: 2, episodes: [1, 2].map(n => ({ vid_index: n, vid: `v${n}`, status: 'missing' })) } }), ...apiOverrides } });
+  const season2 = { series_id: '7663395668320324632', series_title: '大学没毕业，你怎么登上福布斯了第二季' };
+  const finishFinale = async ui => { await ui.flush(); ui.metadata(); await ui.flush(); ui.find(n => n.type === 'video').props.onEnded(); await ui.flush(); };
+  await test('season finale hands off to the next season even when the title carries trailing punctuation', async () => {
+    const lookups = [];
+    const ui = finaleSeries('大学没毕业，你怎么登上福布斯了！', {
+      findSeriesSequels: async id => { lookups.push(id); return { success: true, results: [season2, { series_id: '7681249492561054744', series_title: '大学没毕业，你怎么登上福布斯了第三季' }] }; },
+      searchResolve: async id => ({ success: true, data: { series_id: id, series_title: season2.series_title, cover: 'https://img.example/s2.jpg' } }),
+    });
+    await finishFinale(ui);
+    assert.ok(ui.button('立即播放'), 'the handoff prompt appears after the finale');
+    assert.ok(ui.find(n => n.type === 'h3' && n.children.join('').includes('第二季')), 'the prompt names season 2, not a later season');
+    assert.equal(lookups.length, 1, 'the lookup runs once for the finale');
+    ui.unmount();
+  });
+  await test('a lookup still running when the finale ends is awaited instead of reporting the last episode', async () => {
+    let finish;
+    const ui = finaleSeries('大学没毕业，你怎么登上福布斯了', { findSeriesSequels: () => new Promise(resolve => { finish = resolve; }) });
+    await ui.flush(); ui.metadata(); await ui.flush();
+    ui.find(n => n.type === 'video').props.onEnded(); await ui.flush();
+    assert.equal(ui.button('立即播放'), undefined, 'no prompt before the lookup answers');
+    finish({ success: true, results: [season2] }); await ui.flush();
+    assert.ok(ui.button('立即播放'), 'the prompt follows once the lookup answers');
+    ui.unmount();
+  });
+  await test('a failed finale lookup is retried when the episode ends', async () => {
+    let calls = 0;
+    const ui = finaleSeries('大学没毕业，你怎么登上福布斯了', { findSeriesSequels: async () => (++calls === 1 ? { success: false, results: [], error: '网络断开' } : { success: true, results: [season2] }) });
+    await finishFinale(ui);
+    assert.equal(calls, 2, 'one lookup at the finale start and one retry at the end');
+    assert.ok(ui.button('立即播放'));
+    ui.unmount();
+  });
+  await test('a series without a next season keeps one lookup and ends normally', async () => {
+    let calls = 0;
+    const ui = finaleSeries('大学没毕业，你怎么登上福布斯了！', { findSeriesSequels: async () => { calls++; return { success: true, results: [{ series_id: '7681249492561054744', series_title: '大学没毕业，你怎么登上福布斯了第三季' }] }; } });
+    await finishFinale(ui);
+    assert.equal(ui.button('立即播放'), undefined, 'season 3 must not stand in for season 2');
+    assert.equal(calls, 1, 'a confirmed answer is not searched again');
+    ui.unmount();
+  });
+  await test('leaving the finale while waiting for the lookup does not open a stale handoff', async () => {
+    let finish;
+    const ui = finaleSeries('大学没毕业，你怎么登上福布斯了', { findSeriesSequels: () => new Promise(resolve => { finish = resolve; }) });
+    await ui.flush(); ui.metadata(); await ui.flush();
+    ui.find(n => n.type === 'video').props.onEnded(); await ui.flush();
+    ui.episode(1); await ui.flush();
+    finish({ success: true, results: [season2] }); await ui.flush();
+    assert.equal(ui.button('立即播放'), undefined, 'a lookup for the old episode must not prompt');
+    ui.unmount();
   });
   process.exitCode = failures ? 1 : 0;
 })();

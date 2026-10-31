@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const assert = require('node:assert/strict');
 const { availableRelease } = require('../src/native/app-update');
 
@@ -40,6 +42,7 @@ assert.equal(availableRelease({ tag_name: 'v4.0' }, '3.4.0').version, '4.0');
 assert.equal(availableRelease({ tag_name: 'v4.0' }, '4.0.0'), null);
 assert.equal(availableRelease({ tag_name: 'v4.1' }, '4.0.0').version, '4.1');
 assert.equal(availableRelease({ tag_name: 'v4.1' }, '4.1.0'), null);
+assert.equal(availableRelease({ tag_name: 'v4.0' }, '4.1.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.1-traditional-pre', prerelease: true }, '4.0.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.0-traditional-pre', prerelease: true }, '3.4.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-3.4-traditional-pre', prerelease: true }, '3.3.0'), null);
@@ -49,8 +52,32 @@ assert.deepEqual(noted.highlights, ['修正彈幕重疊', '時間軸最多 35 �
 assert.equal(availableRelease({ tag_name: 'v3.4', body: '摘要：這一整句不該變成單行摘要，因為正式說明要條列。' }, '3.3.0').highlights, undefined);
 assert.deepEqual(availableRelease({ tag_name: 'v3.4', body: '摘要：橫幅、更新提醒、時間軸' }, '3.3.0').highlights, ['橫幅', '更新提醒', '時間軸']);
 assert.equal(availableRelease({ tag_name: 'v3.4', body: `- ${'字'.repeat(40)}` }, '3.3.0').highlights, undefined);
-assert.equal(availableRelease({ tag_name: 'v3.4', body: `摘要：\n- ${'字'.repeat(40)}` }, '3.3.0').highlights[0].length, 24);
+assert.equal(availableRelease({ tag_name: 'v3.4', body: `摘要：\n- ${'字'.repeat(40)}` }, '3.3.0').highlights[0].length, 40);
+assert.equal(availableRelease({ tag_name: 'v3.4', body: `摘要：\n- ${'字'.repeat(200)}` }, '3.3.0').highlights[0].length, 72);
+const many = availableRelease({ tag_name: 'v4.1', body: `摘要：\r\n${Array.from({ length: 27 }, (_, i) => `- 第 ${i + 1} 項`).join('\r\n')}\r\n\r\nSHA256：abc` }, '4.0.0');
+assert.equal(many.highlights.length, 20);
+assert.equal(many.moreCount, 7);
+assert.equal(many.highlights[19], '第 20 項');
+assert.equal(availableRelease({ tag_name: 'v4.1', body: '摘要：\n- 一\n- 二' }, '4.0.0').moreCount, undefined);
+assert.deepEqual(availableRelease({ tag_name: 'v4.1', body: '## 摘要\n1. 甲\n2、乙\n（3）丙\n   - 子項\n\n### 新增\n- 丁\n- 甲\n\n### SHA256\n- 不該出現' }, '4.0.0').highlights, ['甲', '乙', '丙', '子項', '丁']);
+assert.deepEqual(availableRelease({ tag_name: 'v4.1', body: '摘要：\n- 一\n\n**下載**\n- 不該出現' }, '4.0.0').highlights, ['一']);
+assert.deepEqual(availableRelease({ tag_name: 'v4.1', body: '摘要：\n- 見 [說明](https://example.invalid/a)\n- https://example.invalid/b\n- 檔案 SHA256 abc\n- 二' }, '4.0.0').highlights, ['見 說明', '二']);
+assert.equal(availableRelease({ tag_name: 'v4.1', body: '摘要這一整句沒有冒號\n- 不該出現' }, '4.0.0').highlights, undefined);
+assert.equal(availableRelease({ tag_name: 'v4.1', body: '4.1 正式版\n- 不該出現' }, '4.0.0').highlights, undefined);
+assert.equal(availableRelease({ tag_name: 'v4.1', body: '摘要：\n' }, '4.0.0').highlights, undefined);
+assert.equal(availableRelease({ tag_name: 'v4.1', body: '摘要：\n- ' + '甲'.repeat(5000) }, '4.0.0').highlights[0].length, 72);
+assert.equal(availableRelease({ tag_name: 'v4.1', body: null }, '4.0.0').highlights, undefined);
 assert.equal(availableRelease({ tag_name: 'v3.4', prerelease: true, body: '摘要：\n- 不該出現' }, '3.3.0'), null);
+const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/windows.yml'), 'utf8').replace(/\r\n?/g, '\n');
+const releaseJob = workflow.slice(workflow.indexOf('publish-release:'));
+const heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(releaseJob);
+assert(heredoc, 'The formal release job must build its notes from a heredoc');
+const formalBody = heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n').replace(/\$\w+/g, 'x');
+const formal = availableRelease({ tag_name: 'v4.1', body: formalBody }, '4.0.0');
+assert(formal.highlights.length >= 4, 'The formal notes must list the summary bullets');
+assert(formal.highlights.slice(0, 4).every(item => Array.from(item).length <= 24), 'Installed 3.4/4.0 clients clip the first four bullets at 24 characters');
+assert(formal.highlights.every(item => !/sha-?256|https?:/i.test(item)), 'Checksums and links never become summary lines');
+assert(!formal.moreCount, 'The formal notes fit in the update window');
 for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) {
   assert(artifact.includes(`-${publicVersion}-`), 'Download filenames must contain the two-part release version');
   assert(!artifact.includes('${version}'), 'Raw internal versions must not leak into download filenames');

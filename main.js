@@ -30,6 +30,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const hongguo = require('./src/native/hongguo');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./src/native/download-quality');
 const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
+const { createContentKeyCapture } = require('./src/native/seekable-capture');
 const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const seriesSearch = require('./src/native/series-search');
@@ -117,6 +118,15 @@ const onlineCache = new Map();
 const ONLINE_MAX_BYTES = 300 * 1024 * 1024; // 单集整块读取及缓存淘汰预算，不是进程总内存上限
 const onlinePreparing = new Map(); // vid -> shared preparation + abort controller
 const onlineSessions = new Map(); // opaque stream ID -> playback lifetime
+// cache key -> encrypted episode being kept while FFmpeg streams it, so a seekable MP4 can follow the stream
+const onlineCaptures = new Map();
+
+function abortOnlineCapture(key) {
+  const capture = onlineCaptures.get(key);
+  if (!capture) return;
+  onlineCaptures.delete(key);
+  capture.abort();
+}
 
 function onlineCacheTotal() {
   let t = 0;
@@ -142,15 +152,13 @@ function releaseOnlineSession(id) {
   const session = onlineSessions.get(id);
   if (!session) return;
   onlineSessions.delete(id);
-  if (session.contentKeyChild && !session.contentKeyChild.killed) {
-    try { session.contentKeyChild.kill('SIGTERM'); } catch (_) {}
-  }
-  if (session.entry) {
-    require('./src/native/online-spill').finalizeSpill(session.entry);
-    require('./src/native/online-spill').disposeEntrySpill(session.entry);
-  }
   disposeOnlineDisk(session.entry);
   for (const controller of session.requests) controller.abort();
+  // Leaving an episode must stop its background download so the next one gets the whole connection.
+  const captureKey = session.cacheKey || session.vid;
+  if (onlineCaptures.has(captureKey) && ![...onlineSessions.values()].some(active => (active.cacheKey || active.vid) === captureKey)) {
+    abortOnlineCapture(captureKey);
+  }
   const pending = session.job;
   if (pending && ![...onlineSessions.values()].some(s => s.job === pending)) {
     pending.controller.abort();
@@ -160,6 +168,7 @@ function releaseOnlineSession(id) {
 
 function clearOnlineCache() {
   for (const id of [...onlineSessions.keys()]) releaseOnlineSession(id);
+  for (const key of [...onlineCaptures.keys()]) abortOnlineCapture(key);
   for (const key of [...onlineCache.keys()]) deleteOnlineCacheEntry(key);
 }
 
@@ -335,6 +344,7 @@ function publicProxyError(message, settings, resolved) {
  */
 function applyProxyToEnv(resolved) {
   require('./src/native/direct-connect').setDirectConnect(resolved.mode === 'direct');
+  require('./src/native/playback-device').forgetFailedPlaybackDevice();
   for (const key of PROXY_ENV_KEYS) {
     if (resolved.mode === 'system') {
       if (originalProxyEnv[key] !== undefined) process.env[key] = originalProxyEnv[key];
@@ -1243,6 +1253,7 @@ async function invalidateCustomSource(id) {
   const prefix = `custom:${id}:`;
   for (const [streamId, session] of [...onlineSessions]) if (session.vid.startsWith(prefix)) releaseOnlineSession(streamId);
   for (const [key, job] of [...onlinePreparing]) if (key.startsWith(prefix)) { job.controller.abort(); onlinePreparing.delete(key); }
+  for (const key of [...onlineCaptures.keys()]) if (key.startsWith(prefix)) abortOnlineCapture(key);
   for (const key of [...onlineCache.keys()]) if (key.startsWith(prefix)) deleteOnlineCacheEntry(key);
   for (const job of compatPreparing.values()) if (job.sourceVid.startsWith(prefix)) cancelCompatJob(job);
   await Promise.all(downloadTasks.filter(task => String(task.hongguoInfo?.vid).startsWith(prefix) && isTaskInFlight(task)).map(task => stopTaskAndWait(task).catch(() => {})));
@@ -2305,34 +2316,11 @@ function registerStreamProtocol() {
         }
         // A fallback can change encryption and size; serve Range only after decoding that candidate.
         if (playInfo.contentKey && !playInfo.spadeA) {
-          const spill = require('./src/native/online-spill');
-          if (request.method === 'HEAD') {
-            cleanup();
-            const size = spill.spillFileSize(entry);
-            const headers = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' };
-            if (size > 0) headers['Content-Length'] = String(size);
-            return new Response(null, { status: 200, headers });
-          }
-          if (session.mediaStarted || session.contentKeyActive) {
-            const ranged = spill.spillRangeResponse(request, entry);
-            if (ranged) { cleanup(); return ranged; }
-            if (request.headers.get('range')) {
-              cleanup();
-              return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${Math.max(spill.spillFileSize(entry), 0)}` } });
-            }
-            cleanup();
-            return new Response(null, { status: 503, headers: { 'Retry-After': '1' } });
-          }
-          const child = startContentKeyStream(playInfo, controller.signal);
-          session.contentKeyActive = true;
-          session.contentKeyChild = child;
+          if (request.method === 'HEAD') { cleanup(); return new Response(null, { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } }); }
+          const child = startContentKeyStream(playInfo, controller.signal, startOnlineCapture(session, entry, playInfo, identity));
           session.mediaStarted = true; session.mediaIdentity = identity;
-          const body = spill.tapContentKeyStdout(entry, child.stdout, controller.signal);
-          child.once('close', () => { session.contentKeyActive = false; spill.finalizeSpill(entry); cleanup(); });
-          body.once('close', cleanup);
-          body.once('error', cleanup);
-          return new Response(Readable.toWeb(body, { strategy: { highWaterMark: 64 * 1024, size: chunk => chunk.byteLength } }),
-            { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' } });
+          child.stdout.once('close', cleanup);
+          return new Response(Readable.toWeb(child.stdout), { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } });
         }
         if (playInfo.spadeA || playInfo.contentKey) {
           const buffer = await fetchDecryptedEpisodeOnce(session.vid, null, entry.seriesId, playInfo, controller.signal);
@@ -2436,7 +2424,49 @@ function registerLocalProtocol() {
   }));
 }
 
-function startContentKeyStream(playInfo, signal) {
+/**
+ * Keep the encrypted episode while it streams. When the download finishes it becomes an ordinary MP4 in the online
+ * cache, which `prepare-online-play` hands out once the player needs to seek. Returns null when it cannot be kept.
+ */
+function startOnlineCapture(session, entry, playInfo, identity) {
+  const key = session.cacheKey || session.vid;
+  const existing = onlineCaptures.get(key);
+  if (existing && existing.identity === identity) return existing;
+  if (existing) abortOnlineCapture(key);
+  if (onlineCache.get(key)?.filePath) return null;
+  let directory;
+  try {
+    directory = fs.mkdtempSync(path.join(app.getPath('temp'), 'hongguo-online-'));
+    const capture = createContentKeyCapture({ playInfo, request: requestMedia, maxBytes: ONLINE_MAX_BYTES, directory,
+      decrypt: (input, output, options) => decryptContentKeyFile(input, output, playInfo.contentKey, options) });
+    capture.identity = identity;
+    onlineCaptures.set(key, capture);
+    const base = { ...entry };
+    delete base.playInfo;
+    capture.finished = capture.result.then(async ({ filePath, size }) => {
+      // An aborted or replaced capture must not put a stale file back after the cache was cleared.
+      if (onlineCaptures.get(key) !== capture) { await capture.discard(); throw Object.assign(new Error('已取消播放'), { code: 'ERR_CANCELED' }); }
+      onlineCaptures.delete(key);
+      if (onlineCache.has(key)) { await capture.discard(); return onlineCache.get(key); }
+      capture.adopt();
+      const source = /^custom:[^:]+/.exec(session.vid)?.[0] || /^(xifan|hema):/.exec(session.vid)?.[1] || 'hongguo';
+      const finished = { ...base, filePath, size, disk: { directory, readers: 0 }, vid: session.vid, source, complete: true, lastUsed: Date.now() };
+      onlineCache.set(key, finished); trimOnlineCache();
+      return finished;
+    }, error => {
+      if (onlineCaptures.get(key) === capture) onlineCaptures.delete(key);
+      if (error?.code === 'MEDIA_TOO_LARGE') sendToRenderer('online-play-progress', { requestId: session.requestId, code: error.code, error: error.message });
+      throw error;
+    });
+    capture.finished.catch(() => {});
+    return capture;
+  } catch (_) {
+    if (directory) fs.rmSync(directory, { recursive: true, force: true });
+    return null;
+  }
+}
+
+function startContentKeyStream(playInfo, signal, capture = null) {
   if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey || '')) throw new Error('片源解密密钥格式无效');
   const executable = resolveFfmpeg('ffmpeg');
   if (!executable) throw new Error('未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
@@ -2452,9 +2482,17 @@ function startContentKeyStream(playInfo, signal) {
   if (child.stdin) {
     // Attached before any write: killing FFmpeg on a fast episode change closes this pipe.
     child.stdin.on('error', () => {});
-    require('./src/native/content-key-feed').feedContentKey(playInfo, child.stdin, signal, {
-      request: requestMedia, maxBytes: ONLINE_MAX_BYTES,
-    }).catch(() => { if (!child.killed) child.kill('SIGTERM'); });
+    if (capture?.readable) {
+      // The kept file is the single download; FFmpeg reads it at its own pace while it grows.
+      const reader = capture.reader();
+      reader.once('error', () => { if (!child.killed) child.kill('SIGTERM'); });
+      child.once('close', () => reader.destroy());
+      reader.pipe(child.stdin);
+    } else {
+      require('./src/native/content-key-feed').feedContentKey(playInfo, child.stdin, signal, {
+        request: requestMedia, maxBytes: ONLINE_MAX_BYTES,
+      }).catch(() => { if (!child.killed) child.kill('SIGTERM'); });
+    }
   }
   return child;
 }
@@ -2579,7 +2617,7 @@ async function prepareHlsEntry(playInfo,entry,signal,onProgress) {
 }
 
 ipcMain.handle('prepare-online-play', async (event, payload) => {
-  const { vid, seriesId, vidIndex, requestId, prefetch = false, force = false } = payload || {};
+  const { vid, seriesId, vidIndex, requestId, prefetch = false, force = false, seekable = false } = payload || {};
   if (!vid) return { success: false, error: '缺少 vid' };
   let quality;
   try { quality = playbackQuality(payload.quality, vid); } catch (error) { return { success: false, error: error.message }; }
@@ -2591,13 +2629,19 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
     const checkedPlayInfo = /^(xifan|hema|custom):/.test(sourceVid) ? await hongguo.fetchPlayUrlSingle(sourceVid, seriesId, { force, quality }) : null;
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
     if (checkedPlayInfo && !checkedPlayInfo.url) throw new Error(checkedPlayInfo.error || '来源未开放该集');
-    if (force) deleteOnlineCacheEntry(key);
+    if (force) { abortOnlineCapture(key); deleteOnlineCacheEntry(key); }
     let entry = onlineCache.get(key), cached = !!entry;
+    if (!entry && seekable && onlineCaptures.has(key)) {
+      // The streamed copy of this episode is still downloading; the seekable file is the same bytes, not a second download.
+      await onlineCaptures.get(key).finished.catch(() => {});
+      if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
+      entry = onlineCache.get(key); cached = !!entry;
+    }
     if (!entry) {
       let job = onlinePreparing.get(key);
-      if (!job || (force && !job.force)) {
+      if (!job || (force && !job.force) || (seekable && !job.seekable)) {
         const controller = new AbortController();
-        job = { controller, force };
+        job = { controller, force, seekable };
         job.promise = (async () => {
           const progress = (received,total,phase) => {
             for (const active of onlineSessions.values()) if (active.cacheKey === key) {
@@ -2608,11 +2652,11 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
           const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,force,signal:controller.signal},async playInfo => {
             const entry = {quality,deliveredQuality:playInfo.quality,qualityLimited:playInfo.qualityLimited===true,notice:playInfo.notice||'',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
-            else if (playInfo.contentKey && !playInfo.spadeA) {
+            else if (!seekable && playInfo.contentKey && !playInfo.spadeA) {
               if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
               return {...entry,playInfo};
             }
-            else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
+            else if (!seekable && !prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
             else {
               entry.buffer = await fetchDecryptedEpisodeOnce(sourceVid,progress,seriesId,playInfo,controller.signal);
               entry.size = entry.buffer.length;
@@ -4153,6 +4197,7 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
+  require('./src/native/system-trust').trustSystemCertificates();
   let startupStage = '读取本地数据';
   try {
     const dataFile = path.join(app.getPath('userData'), 'data.json');

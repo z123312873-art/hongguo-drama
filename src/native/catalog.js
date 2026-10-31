@@ -19,6 +19,13 @@ function ratingNumber(value) {
   return Math.round(number * 10) / 10;
 }
 
+const NEW_STATUS = /^新[剧劇]$/;
+
+// The ranking pages expose the site's own status chips (statusTags / status-tag items).
+function isNewStatus(labels) {
+  return Array.isArray(labels) && labels.some(label => typeof label === 'string' && NEW_STATUS.test(label.replace(/\s+/g, '')));
+}
+
 function publicMetadata(item) {
   const episode_label = typeof item?.episode_right_text === 'string' ? item.episode_right_text.trim().slice(0, 80) : '';
   const completion_status = /^(?:全\s*\d+\s*集|已完结|完结)$/.test(episode_label) ? 'completed'
@@ -129,6 +136,7 @@ function parseRanking(html, category, page, sourceUrl) {
       tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
       rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
+      is_new: isNewStatus(item.statusTags),
       introduction: cleanIntroduction(item.description || item.intro || item.series_intro || item.abstract),
       ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${id}` };
@@ -142,6 +150,7 @@ function parseRanking(html, category, page, sourceUrl) {
       if (!heading || !article.includes(`/detail?series_id=${heading[1]}`)) continue;
       const cover = article.match(/<img\b[^>]*\bsrc=(?:"([^"]*)"|'([^']*)')/i);
       const tags = article.match(/<p\b[^>]*class=["'][^"']*pc-categories-[^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
+      const statusTags = Array.from(article.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi), tag => text(tag[1]));
       let introduction = '';
       for (const paragraph of article.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
         const plain = text(paragraph[1]).replace(/\s+/g, ' ').trim();
@@ -156,6 +165,7 @@ function parseRanking(html, category, page, sourceUrl) {
         description: introduction,
         rating: text(article).match(/评分\s*(\d+(?:\.\d+)?)/)?.[1],
         tags: tags ? Array.from(tags[1].matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi), tag => text(tag[1])) : [],
+        statusTags,
       });
       if (item) results.push(item);
     }
@@ -252,4 +262,4 @@ async function browseList(options = {}, proxyLogin) {
   return task;
 }
 
-module.exports = { browseList, parseCatalog, readRouterData, publicMetadata };
+module.exports = { browseList, parseCatalog, readRouterData, publicMetadata, parseRanking, isNewStatus };

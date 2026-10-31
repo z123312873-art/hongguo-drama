@@ -143,3 +143,16 @@ test('empty keywords are rejected without a request', async () => {
   await assert.rejects(searchHongguo('   ', { request: async () => { calls++; } }), /搜索词/);
   assert.equal(calls, 0);
 });
+
+test('an undecodable series_cover falls back to the next usable poster', () => {
+  const parsed = parseSearchResponse({
+    searchList: [
+      { video_data: { series_id: '3333333', series_title: '丁', series_cover: 'https://p3.fqnovelpic.com/novel-pic/abc~tplv-x:400:0.heic?sig=1', cover: 'https://img.example/d.jpg' } },
+      { video_data: { series_id: '4444444', series_title: '戊', series_cover: 'https://img.example/e.heic', cover: 'https://img.example/e.jpg' } },
+      { video_data: { series_id: '5555555', series_title: '己', series_cover: 'https://img.example/f.heic' } },
+    ],
+  });
+  assert.equal(parsed.results[0].cover, 'https://p3-novel.byteimg.com/novel-pic/abc~tplv-shrink:640:0.image');
+  assert.equal(parsed.results[1].cover, 'https://img.example/e.jpg');
+  assert.equal(parsed.results[2].cover, '');
+});

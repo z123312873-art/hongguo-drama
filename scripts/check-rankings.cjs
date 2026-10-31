@@ -28,6 +28,8 @@ async function main() {
     assert.equal(data.results[0].rank, 1);
     assert.match(data.results[0].heat, /热度$/);
     if (heat) assert.equal(data.results[0].heat, heat);
+    assert.equal(typeof data.results[0].is_new, 'boolean', `${category} always reports the new-drama flag`);
+    assert.equal(data.results[0].is_new, category === 'hot-real-drama', `${category} copies the source's own 新剧 tag only`);
     if (category === 'hot-real-drama') {
       assert(data.results[0].episode_count > 24, 'streamed JSON must supply full episode metadata');
       assert.match(data.results[0].introduction, /顾娇/, 'streamed ranking JSON keeps the public description');
@@ -57,6 +59,17 @@ async function main() {
   assert.equal(renamed.results[0].rank, 1);
   assert.equal(renamed.results[0].heat, '7173万热度');
   assert.match(renamed.results[0].introduction, /聚宝盆/, 'description survives renamed style classes');
+  response = read('hot-real-drama').replace(/data-fn-name=(["'])mergeLoaderData\1/g, 'data-fn-name="ignored"');
+  const rendered = await browseList({ category: 'hot-real-drama', forceRefresh: true });
+  assert.equal(rendered.success, true);
+  assert.equal(rendered.results[0].is_new, true, 'rendered cards keep the 新剧 chip when the JSON payload is absent');
+  assert.ok(rendered.results.every(item => item.is_new === true));
+  response = read('hot-drama').replace(/data-fn-name=(["'])mergeLoaderData\1/g, 'data-fn-name="ignored"');
+  const plain = await browseList({ category: 'hot-drama', forceRefresh: true });
+  assert.ok(plain.results.length > 0 && plain.results.every(item => item.is_new === false), 'cards without the chip stay unflagged');
+  response = read('hot-real-drama').replace(/pc-[A-Za-z][\w-]*/g, 'changed-style').replace(/data-fn-name=(["'])mergeLoaderData\1/g, 'data-fn-name="ignored"');
+  const restyled = await browseList({ category: 'hot-real-drama', forceRefresh: true });
+  assert.equal(restyled.results[0].is_new, true, 'the 新剧 chip survives CSS hash changes');
   const invalid = await browseList({ category: 'hot-drama', genre: '../../outside' });
   assert.equal(invalid.success, false);
   console.log('PASS rankings: four live-source fixtures, streamed JSON and semantic HTML, rank/heat, page 2, cache, retry and malformed data');
