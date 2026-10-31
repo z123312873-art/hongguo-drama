@@ -25,13 +25,20 @@ function pack(value, channel) {
 }
 
 function mergeResults(primary, extra) {
-  const seen = new Set();
+  const byId = new Map();
   const results = [];
   for (const item of [...(primary || []), ...(extra || [])]) {
     const id = String(item?.series_id || '');
-    if (!id || !item?.series_title || seen.has(id)) continue;
-    seen.add(id);
-    results.push(item);
+    if (!id || !item?.series_title) continue;
+    const existing = byId.get(id);
+    if (!existing) {
+      const copy = { ...item };
+      byId.set(id, copy);
+      results.push(copy);
+      continue;
+    }
+    // A later channel may know the poster the first one lacked.
+    if (!existing.cover && item.cover) existing.cover = item.cover;
   }
   return results;
 }

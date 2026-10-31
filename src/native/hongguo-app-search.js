@@ -1,6 +1,7 @@
 // Optional signed App search (hongguoTV reference) with website API fallback.
 const { signedSearchRequest, parseSearchInteger, requestJson } = require('./app-source');
 const { getPlaybackDevice } = require('./playback-device');
+const { compatibleCover } = require('./cover-url');
 
 const SEARCH_TAB = 11;
 const DEFAULT_TIMEOUT_MS = 4000;
@@ -16,23 +17,8 @@ function cleanTitle(value) {
     .replace(/\s+/g, ' ').trim();
 }
 
-function appCover(value) {
-  const url = String(value || '').trim();
-  if (!/^https?:\/\//i.test(url)) return '';
-  // The App returns HEIC variants that Chromium may not decode; leave them blank rather than a broken card.
-  return /\.heic(?:\?|$)/i.test(url) ? '' : url;
-}
-
-function catalogCover(value) {
-  const compatible = appCover(value);
-  try {
-    const url = new URL(value);
-    if (!/\.heic$/i.test(url.pathname)) return compatible;
-    if (!['http:', 'https:'].includes(url.protocol) || !/(^|\.)(fqnovelpic\.com|byteimg\.com)$/i.test(url.hostname) ||
-        !url.pathname.startsWith('/novel-pic/') || !url.pathname.includes('~')) return '';
-    return `https://p3-novel.byteimg.com${url.pathname.split('~', 1)[0]}~tplv-shrink:640:0.image`;
-  } catch (_) { return compatible; }
-}
+const appCover = compatibleCover;
+const catalogCover = compatibleCover;
 
 async function defaultRequest(signed, deadline) {
   const remaining = Math.max(1, deadline - Date.now());
@@ -68,7 +54,7 @@ function parseSearchPayload(payload, { page = 1 } = {}) {
     results.push({
       series_id: seriesId,
       series_title: title,
-      cover: appCover(video?.cover),
+      cover: [video?.cover, video?.series_cover, video?.thumb_url].map(appCover).find(Boolean) || '',
       episode_count: Number(video?.episode_cnt ?? video?.episode_count ?? 0) || 0,
       source: 'hongguo',
       url: `https://hongguoduanju.com/detail?series_id=${seriesId}`,

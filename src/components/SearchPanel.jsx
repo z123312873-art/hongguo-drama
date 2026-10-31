@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './HongguoDownload.css';
-import { Search, Film, RefreshCw, ExternalLink } from './icons';
+import { Search, RefreshCw, ExternalLink } from './icons';
 import { isSubmitKey } from './episodeRange';
 import { readSearchHistory, saveSearchTerm, removeSearchTerm, clearSearchHistory, rememberCatalogTitles, getSearchSuggestions } from '../searchHistory';
 
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { canonicalTitle } from '../chineseScript.mjs';
+import CoverImage from './CoverImage';
 
 export function rankSearchResults(results, keyword) {
   const normalize = value => typeof canonicalTitle === 'function'
@@ -320,13 +321,7 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
                 title={`点击查看并下载：${item.series_title}`}
               >
                 <div className="search-cover">
-                  {item.cover ? (
-                    <img src={item.cover} alt={item.series_title} loading="lazy" />
-                  ) : (
-                    <div className="cover-placeholder">
-                      <Film size={22} />
-                    </div>
-                  )}
+                  <CoverImage src={item.cover} alt={item.series_title} />
                 </div>
                 <div className="search-card-body">
                   <div className="search-card-title">{item.series_title}</div>
