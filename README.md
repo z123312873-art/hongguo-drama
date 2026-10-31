@@ -29,13 +29,13 @@
 
 **[下載 4.0 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.0/hongguo-downloader-4.0-win-x64-setup.exe)**
 
-**[下載 4.1 預發布（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 為 Pre-release，SHA256 見該頁 `WINDOWS-SHA256SUMS.txt`。
+**[下載 4.1 預發布（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 為 Pre-release，只提供安裝版與便攜 ZIP，SHA256 寫在該頁的發行說明。
 
 也可使用 [4.1 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/installer-4.1-traditional-pre/hongguo-downloader-4.1-win-x64.zip)。
 
 - 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
 - 安裝檔未簽章。請從 [4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 或 [4.1 預發布](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.1-traditional-pre) 下載，並對照該頁的 SHA256。
-- 一般使用只需要這個安裝檔。`latest.yml` 與 `.blockmap` 給更新程式用。
+- 4.1 預發布頁不放 `latest.yml`、`.blockmap` 與校驗檔；一般使用只需要安裝檔或便攜 ZIP。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
 - 已安裝的 3.4 會看到更新摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
 
@@ -44,7 +44,7 @@
 
 ## 這個版本
 
-4.1 預發布重點：加密片源按快進、快退（預設方向鍵，每次 5 秒）或拖動進度條不再從頭重播；同次開啟 App 內切集會記住各集進度。詳見 [4.1 預發布說明](docs/release-4.1-pre.md)。
+4.1 預發布重點：加密片源按快進、快退（預設方向鍵，每次 5 秒）或拖動進度條不再從頭重播；同次開啟 App 內切集會記住各集進度；搜尋海報載入失敗時自動改用相容圖片；熱播榜卡片顯示來源的綠色「新劇」標籤；末集播完時更穩定地找到並自動播放下一季。詳見 [4.1 預發布說明](docs/release-4.1-pre.md)。
 
 4.0 正式版。更新說明：
 
@@ -64,6 +64,9 @@
 - 加密片源邊下邊播時，瀏覽器無法跳轉。按快進、快退（預設方向鍵，每次 5 秒）或拖動進度條，會換成已保存的完整檔案並接在目標位置，不再回到開頭。
 - 開始播放與切集的速度不變：換檔只在第一次跳轉時發生，背景下載與解密沿用同一份下載，不多下載一次。
 - 準備期間原畫面照常播放；失敗或本集過大時會提示，並維持原播放，不重播。
+- 搜尋結果的海報：App 搜尋回傳的 HEIC 圖會換成同一張圖的相容版本；官網與 App 搜尋結果重複時，缺海報的一筆會用另一邊補上；圖片仍載入失敗時先重試相容版本，最後才顯示佔位圖。
+- 熱播榜（綜合、真人、漫劇、AI）卡片：來源頁標示「新劇」的短劇，在排名與評分之間顯示綠色「新劇」。來源沒有標示就不顯示。
+- 下一季查找：劇名後的標點（例如「…了！」）、冒號或逗號差異不再讓第二季被判成另一部劇；末集播完時若查找還在進行或上次失敗，會等待並重試一次，再決定有沒有下一季。
 
 ## 開始使用
 

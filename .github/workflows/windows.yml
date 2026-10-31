@@ -133,9 +133,34 @@ jobs:
           set -euo pipefail
           tag=installer-4.1-traditional-pre
           setup="release/hongguo-downloader-4.1-win-x64-setup.exe"
+          portable="release/hongguo-downloader-4.1-win-x64.zip"
           test -f "$setup"
-          if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.1 預發佈" \
-              --notes "預發佈，不會取代 4.0 正式版的自動更新。修正加密片源按方向鍵快進、快退 5 秒時重新播放的問題。安裝檔未簽章，請對照 WINDOWS-SHA256SUMS.txt。"
+          test -f "$portable"
+          setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
+          portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
+          notes=$(cat <<EOF
+          預發佈，不會取代 4.0 正式版的自動更新。僅提供安裝版與便攜 ZIP，安裝檔未簽章。
+
+          - 修正加密片源按方向鍵快進、快退 5 秒時重新播放的問題。
+          - 搜尋結果的海報無法顯示時，改用相容的圖片版本，仍失敗才顯示佔位圖。
+          - 熱播榜四個榜單的卡片，來源標示「新劇」時顯示綠色標籤（排名與評分之間）。
+          - 末集播完時，劇名帶標點或查詢暫時失敗也能找到並自動播放下一季。
+
+          SHA256
+          - hongguo-downloader-4.1-win-x64-setup.exe: $setup_sha
+          - hongguo-downloader-4.1-win-x64.zip: $portable_sha
+          EOF
+          )
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease --notes "$notes"
+          else
+            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.1 預發佈" --notes "$notes"
           fi
-          gh release upload "$tag" "$setup" release/hongguo-downloader-4.1-win-x64.zip release/latest.yml release/WINDOWS-SHA256SUMS.txt release/*.blockmap --clobber
+          gh release upload "$tag" "$setup" "$portable" --clobber
+          keep=$(printf '%s\n%s\n' "$(basename "$setup")" "$(basename "$portable")")
+          gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
+            if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
+              gh release delete-asset "$tag" "$name" --yes
+            fi
+          done
+          gh release view "$tag" --json assets --jq '.assets[].name'
