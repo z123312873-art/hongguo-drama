@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ startsWith(github.ref, 'refs/heads/windows/4.1-pre-') && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.1-pre-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -164,3 +164,65 @@ jobs:
             fi
           done
           gh release view "$tag" --json assets --jq '.assets[].name'
+  publish-release:
+    needs: windows
+    if: startsWith(github.ref, 'refs/heads/windows/4.1-release-')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Publish the 4.1 formal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=v4.1
+          setup="release/hongguo-downloader-4.1-win-x64-setup.exe"
+          blockmap="$setup.blockmap"
+          latest="release/latest.yml"
+          portable="release/hongguo-downloader-4.1-win-x64.zip"
+          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
+          grep -Fq "hongguo-downloader-4.1-win-x64-setup.exe" "$latest"
+          grep -Eq '^version: 4\.1\.0$' "$latest"
+          setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
+          setup_size=$(stat -c %s "$setup")
+          portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
+          notes=$(cat <<EOF
+          摘要：
+          - 方向鍵快進、快退不再重新播放。
+          - 搜尋海報顯示失敗時自動換圖。
+          - 熱播榜新增綠色「新劇」標籤。
+          - 有 AdGuard 時播放連線更穩。
+          - 末集播完時，更穩定地找到並自動播放下一季。
+          - 更新提醒視窗完整列出所有條目，條目多時可捲動，放不下的會標出還有幾條。
+          - 播放設備註冊失敗後短暫等待即可再試，不必重開 App；改網路或代理設定會立即重試。
+          - 信任系統憑證庫，AdGuard、防毒軟體過濾 HTTPS 時也能連線；被攔截時會提示加入例外。
+
+          4.1 正式版，未簽章。已安裝的 4.0 會看到上面的摘要。下載與安裝都要自己確認。
+
+          檔名：hongguo-downloader-4.1-win-x64-setup.exe
+          SHA256：$setup_sha
+          大小：$setup_size
+          便攜 ZIP：hongguo-downloader-4.1-win-x64.zip
+          便攜 ZIP SHA256：$portable_sha
+          對應提交：$GITHUB_SHA
+          EOF
+          )
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease=false --draft=false --latest --title "4.1 正式版" --notes "$notes"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --latest --title "4.1 正式版" --notes "$notes"
+          fi
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
+          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
+          gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
+            if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
+              gh release delete-asset "$tag" "$name" --yes
+            fi
+          done
+          gh release view "$tag" --json isPrerelease,isDraft,assets --jq '{isPrerelease,isDraft,assets:[.assets[].name]}'
