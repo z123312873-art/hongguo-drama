@@ -745,8 +745,11 @@ function Browse({ onNavigate, active = true }) {
                 title={item.series_title}
               >
                 <div className="browse-cover">
-                  {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
-                  {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
+                  {(item.rank > 0 || item.is_new === true || formatPublicScore(item.rating ?? ratings[String(item.series_id)])) && <div className="browse-cover-top">
+                    {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
+                    {item.is_new === true && <span className="browse-new-badge">新剧</span>}
+                    {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
+                  </div>}
                   {item.cover ? (
                     <img src={item.cover} alt={item.series_title} loading="lazy" />
                   ) : (
