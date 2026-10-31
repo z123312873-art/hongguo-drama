@@ -11,6 +11,9 @@ const videoEnhancementStub = {
 const shortcutSource = transformSync(fs.readFileSync(path.join(__dirname, '../src/shortcuts.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code;
 const chineseModule = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/chineseScript.mjs'), 'utf8'), { loader: 'js', format: 'cjs' }).code, { module: chineseModule, exports: chineseModule.exports, require });
+const sessionProgressModule = { exports: {} };
+vm.runInNewContext(transformSync(fs.readFileSync(path.join(__dirname, '../src/components/playerSessionProgress.js'), 'utf8'), { loader: 'js', format: 'cjs' }).code,
+  { module: sessionProgressModule, exports: sessionProgressModule.exports });
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
 function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [], apiOverrides = {} } = {}) {
@@ -78,7 +81,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const shortcutModule = { exports: {} };
   vm.runInNewContext(shortcutSource, { module: shortcutModule, exports: shortcutModule.exports, window, Event });
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n === './danmakuWarmup.mjs' ? { useDanmakuWarmup() {} } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './playerSessionProgress.js' ? sessionProgressModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n === './danmakuWarmup.mjs' ? { useDanmakuWarmup() {} } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
@@ -109,7 +112,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
     return event;
   };
   render();
-  return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, document, dispatchKey,
+  return { props, render, flush, find, media, metadata, saves, prepares, transcodes, cancelled, events, timers, listenerOptions, mediaCalls, mediaEvents, document, dispatchKey,
     releases, settingsSaved, stage, scrollArea,
     historyUpdated: payload => [...historyListeners].forEach(listener => listener(payload)),
     flushBatched: async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); render(); },
@@ -198,6 +201,13 @@ if (require.main === module) (async () => {
     assert.ok(ui.saves.some(p => p[1] === 2 && p[2] === 1.2), 'hide must bypass periodic save threshold');
     assert.equal(ui.events.has('keydown'), false, 'hidden player must not capture keys');
     assert.equal([...ui.timers.values()].some(t => t.delay === 2000), false, 'hidden idle detail polling must stop'); ui.unmount();
+  });
+  await test('session map restores earlier episode without store per-episode records', async () => {
+    const ui = mount({ local: true, episodeCount: 3 }); await ui.flush(); ui.metadata();
+    ui.media.currentTime = 33.3; ui.episode(2); await ui.flush(); ui.metadata();
+    ui.media.currentTime = 4; ui.episode(1); await ui.flush(); ui.metadata();
+    assert.equal(ui.media.currentTime, 33.3, 'returning to a prior episode must reuse session progress');
+    ui.unmount();
   });
   await test('online decoding error auto-falls back once and retains time', async () => {
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } }); await ui.flush(); ui.metadata(); ui.media.currentTime = 27;

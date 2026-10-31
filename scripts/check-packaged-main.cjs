@@ -25,7 +25,7 @@ function resolveRequired(fromFile, spec) {
 const seen = new Set();
 const failures = [];
 function walk(file) {
-  const relative = path.relative(root, file);
+  const relative = path.relative(root, file).split(path.sep).join('/');
   if (seen.has(relative)) return;
   seen.add(relative);
   if (relative !== 'package.json' && !packagedFile(relative)) failures.push(`${relative} is required at startup but is not in the installer file list`);

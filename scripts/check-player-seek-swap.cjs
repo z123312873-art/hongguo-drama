@@ -202,6 +202,20 @@ async function open(options = {}) {
     ui.unmount();
   });
 
+  await test('returning to an earlier streamed episode in the same session lands on its remembered second', async () => {
+    const ui = await open({ episodeCount: 3 });
+    ui.media.currentTime = 33.3;
+    ui.find(n => n.props?.['aria-label'] === '第 2 集').props.onClick(); await ui.flush();
+    ui.media.seekable = range(0); ui.metadata(); ui.media.currentTime = 4;
+    ui.find(n => n.props?.['aria-label'] === '第 1 集').props.onClick(); await ui.flush();
+    ui.media.seekable = range(0); ui.metadata();
+    const seeks = ui.seekRequests().filter(p => p.vid === 'v1');
+    assert.equal(seeks.length, 1, 'the remembered position needs the seekable file');
+    await finish(ui, ui.deferred.length - 1); ui.media.seekable = range(100); ui.metadata();
+    assert.equal(ui.media.currentTime, 33.3);
+    ui.unmount();
+  });
+
   await test('a key pressed before metadata does not start a swap', async () => {
     const fixture = streamFixture();
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, prepare: fixture.prepare });

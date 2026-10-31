@@ -138,4 +138,4 @@ jobs:
             gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.1 預發佈" \
               --notes "預發佈，不會取代 4.0 正式版的自動更新。修正加密片源按方向鍵快進、快退 5 秒時重新播放的問題。安裝檔未簽章，請對照 WINDOWS-SHA256SUMS.txt。"
           fi
-          gh release upload "$tag" "$setup" release/latest.yml release/WINDOWS-SHA256SUMS.txt release/*.blockmap --clobber
+          gh release upload "$tag" "$setup" release/hongguo-downloader-4.1-win-x64.zip release/latest.yml release/WINDOWS-SHA256SUMS.txt release/*.blockmap --clobber

@@ -38,6 +38,8 @@ assert.equal(availableRelease({ tag_name: 'v3.4' }, '3.3.0').version, '3.4');
 assert.equal(availableRelease({ tag_name: 'v3.4' }, '3.4.0'), null);
 assert.equal(availableRelease({ tag_name: 'v4.0' }, '3.4.0').version, '4.0');
 assert.equal(availableRelease({ tag_name: 'v4.0' }, '4.0.0'), null);
+assert.equal(availableRelease({ tag_name: 'v4.1' }, '4.0.0').version, '4.1');
+assert.equal(availableRelease({ tag_name: 'v4.1' }, '4.1.0'), null);
 assert.equal(availableRelease({ tag_name: 'v4.0' }, '4.1.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.1-traditional-pre', prerelease: true }, '4.0.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.0-traditional-pre', prerelease: true }, '3.4.0'), null);

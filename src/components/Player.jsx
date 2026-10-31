@@ -15,6 +15,7 @@ import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
 import './Player.css';
 import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown, Zap } from './icons';
 import { matchesText } from '../chineseScript.mjs';
+import { resolveEpisodeSeekTarget, writeSessionEpisodeTime } from './playerSessionProgress.js';
 
 // Fragmented streams report an empty range, so a seek would restart them from zero.
 const hasSeekableRange = video => {
@@ -146,6 +147,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const fallbackRef = useRef(null);
   const fallbackAttemptRef = useRef(null);
   const rejectedLocalRef = useRef(null);
+  const sessionEpisodeTimesRef = useRef(new Map());
 
   // 只有收到当前片源的 metadata 后才保存，避免旧元素的 pause 覆盖新集断点。
   const persistPosition = useCallback((force = false, ended = false) => {
@@ -155,6 +157,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (!Number.isFinite(seconds) || seconds < 0) return;
     if (!force && Math.abs(seconds - lastSavedRef.current) < 3) return;
     lastSavedRef.current = seconds;
+    writeSessionEpisodeTime(sessionEpisodeTimesRef.current, media.seriesId, media.vidIndex, seconds);
     window.electronAPI.savePlaybackPosition(media.seriesId, media.vidIndex, seconds,
       { duration: media.element.duration, ended: ended || media.element.ended === true }).catch(() => {});
   }, []);
@@ -170,6 +173,17 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     return media?.version === mediaVersion.current && Number.isFinite(media.element.currentTime)
       ? media.element.currentTime : pendingSeekRef.current;
   }, []);
+
+  const rememberCurrentEpisodeTime = useCallback(() => {
+    const { currentIndex: index, activeSeriesId: sid } = stateRef.current;
+    if (!sid || !index) return;
+    writeSessionEpisodeTime(sessionEpisodeTimesRef.current, sid, index, currentPosition());
+  }, [currentPosition]);
+
+  const resolveSeekTarget = useCallback((seriesId, vidIndex, resumeAt) => {
+    const { currentIndex: index } = stateRef.current;
+    return resolveEpisodeSeekTarget(sessionEpisodeTimesRef.current, seriesId, vidIndex, resumeAt, index, currentPosition);
+  }, [currentPosition]);
 
   const releaseOnline = useCallback(() => {
     const request = onlineRequestRef.current;
@@ -768,7 +782,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       }
       const quality = stateRef.current.onlineQuality;
       onlineSourceRef.current = `${activeSeriesId}:${vidIndex}`;
-      const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
+      rememberCurrentEpisodeTime();
+      const seekTo = resolveSeekTarget(activeSeriesId, vidIndex, resumeAt);
       const prefetched = swap || (!force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId && prefetchRef.current?.quality === quality ? prefetchRef.current : null);
       if (prefetched && prefetched === prefetchRef.current) prefetchRef.current = null;
       const ready = prefetched?.result?.success ? prefetched.result : null;
@@ -828,7 +843,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         await recoverOnlineFailure(ep, '在线播放失败: ' + e.message);
       }
     },
-    [episodes, activeSeriesId, showToast, refreshOnlineCacheInfo, resetPlayback, releaseOnline, currentPosition, recoverOnlineFailure]
+    [episodes, activeSeriesId, showToast, refreshOnlineCacheInfo, resetPlayback, releaseOnline, currentPosition, recoverOnlineFailure, rememberCurrentEpisodeTime, resolveSeekTarget]
   );
 
   function reconnectOnce() {
@@ -849,18 +864,19 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       fallbackAttemptRef.current = null;
       reconnectAttemptRef.current = null;
       if (vidIndex !== stateRef.current.currentIndex) setSeasonHandoff(null);
+      rememberCurrentEpisodeTime();
+      const seekTo = resolveSeekTarget(activeSeriesId, vidIndex, resumeAt);
       if (!usableLocal(ep, String(activeSeriesId))) {
-        startOnlinePlay(vidIndex, resumeAt);
+        startOnlinePlay(vidIndex, seekTo);
         return;
       }
       onlineSourceRef.current = null;
-      const seekTo = resumeAt ?? (vidIndex === stateRef.current.currentIndex ? currentPosition() : 0);
       resetPlayback();
       setCurrentIndex(vidIndex);
       setWaitingFor(null);
       pendingSeekRef.current = seekTo;
     },
-    [episodes, activeSeriesId, resetPlayback, startOnlinePlay, currentPosition, usableLocal]
+    [episodes, activeSeriesId, resetPlayback, startOnlinePlay, usableLocal, rememberCurrentEpisodeTime, resolveSeekTarget]
   );
 
   const retryPlayback = async () => {
