@@ -68,7 +68,7 @@ assert.equal(availableRelease({ tag_name: 'v4.1', body: '摘要：\n' }, '4.0.0'
 assert.equal(availableRelease({ tag_name: 'v4.1', body: '摘要：\n- ' + '甲'.repeat(5000) }, '4.0.0').highlights[0].length, 72);
 assert.equal(availableRelease({ tag_name: 'v4.1', body: null }, '4.0.0').highlights, undefined);
 assert.equal(availableRelease({ tag_name: 'v3.4', prerelease: true, body: '摘要：\n- 不該出現' }, '3.3.0'), null);
-const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/windows.yml'), 'utf8');
+const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/windows.yml'), 'utf8').replace(/\r\n?/g, '\n');
 const releaseJob = workflow.slice(workflow.indexOf('publish-release:'));
 const heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(releaseJob);
 assert(heredoc, 'The formal release job must build its notes from a heredoc');
