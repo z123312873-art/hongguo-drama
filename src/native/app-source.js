@@ -292,6 +292,9 @@ async function requestJson(url, options, deadline, signal) {
                 validateStatus: () => true,
             });
         } catch (error) {
+            if (!signal.aborted && /^(?:CERT_|UNABLE_TO_(?:VERIFY|GET)|SELF_SIGNED_CERT|DEPTH_ZERO_SELF_SIGNED|HOSTNAME_MISMATCH|ERR_TLS_CERT)/.test(String(error?.code || ''))) {
+                throw Object.assign(new Error('App 片源 HTTPS 证书未被信任'), { code: 'ERR_TLS_CERT' });
+            }
             const code = signal.aborted ? 'ETIMEDOUT' : ['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
                 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ERR_CANCELED'].includes(error.code) ? error.code : 'ERR_NETWORK';
             throw Object.assign(new Error(['ECONNABORTED', 'ETIMEDOUT'].includes(code)
@@ -343,8 +346,8 @@ async function fetchAppPlayUrl(vid, options = {}) {
         }
         throw lastError;
     };
-    let identity = null;
-    try { identity = await getPlaybackDevice(requestJson); } catch (_) { identity = null; }
+    let identity = null, registrationReason = '';
+    try { identity = await getPlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
     let response;
     try {
         response = await readModel(identity);
@@ -352,8 +355,11 @@ async function fetchAppPlayUrl(vid, options = {}) {
         // One fresh registration, then both playback styles. A second empty response stops.
         if (error?.code !== 'EMPTY_RESPONSE') throw error;
         let fresh = null;
-        try { fresh = await refreshPlaybackDevice(requestJson); } catch (_) { fresh = null; }
-        if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) throw error;
+        try { fresh = await refreshPlaybackDevice(requestJson); } catch (failure) { fresh = null; registrationReason = failure?.reason || registrationReason; }
+        if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) {
+            if (!fresh && registrationReason) error.registrationReason = registrationReason;
+            throw error;
+        }
         response = await readModel(fresh);
     }
     if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });

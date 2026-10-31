@@ -698,9 +698,17 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
   }
 }
 
+// Local filters (AdGuard, antivirus, VPN) can block the anonymous device registration or re-sign HTTPS.
+const FILTER_HINT = '若电脑装有 AdGuard 等拦截软件，请把红果短剧加入例外或暂时关闭后再试';
+const CERT_HINT = 'HTTPS 证书未被信任，请在 AdGuard/杀毒软件中把红果短剧加入例外，或暂时关闭 HTTPS 过滤后再试';
+function registrationHint(reason) {
+  return reason === 'TLS' ? `（${CERT_HINT}）` : reason === 'NETWORK' ? `（设备注册连接被拦截或中断。${FILTER_HINT}）` : '';
+}
+
 function sourceFailure(source, error) {
   const message = String(error?.message || '');
   const code = String(error?.code || '');
+  if (code === 'ERR_TLS_CERT') return { source, code: 'NETWORK_ERROR', message: `网络连接失败（${CERT_HINT}）` };
   const status = Number(error?.status || error?.response?.status || message.match(/HTTP\s+(\d{3})/)?.[1]);
   if (status >= 300 && status <= 599) return { source, code: `HTTP_${status}`, message: `请求失败（HTTP ${status}）` };
   if (code === 'SECURITY_BLOCKED' || code.startsWith('ERR_WEB_MEDIA_')) return { source, code: 'SECURITY_BLOCKED', message: '片源地址被安全校验阻止' };
@@ -709,8 +717,8 @@ function sourceFailure(source, error) {
   if (code === 'PREVIEW_ONLY') return { source, code, message: '网页仅提供预览，未作为完整片源' };
   if (code === 'BUSINESS_REJECTED') return { source, code, message: '接口暂时拒绝本次请求' };
   if (code === 'MISSING_MODEL' || /未返回目录数据/.test(message)) return { source, code: 'MISSING_MODEL', message: '接口未返回本集片源模型' };
-  if (code === 'DEVICE_REGISTRATION_FAILED') return { source, code, message: '播放设备注册失败，请重试在线播放' };
-  if (code === 'EMPTY_RESPONSE') return { source, code: 'EMPTY_RESPONSE', message: '片源服务没有返回数据，请重试在线播放' };
+  if (code === 'DEVICE_REGISTRATION_FAILED') return { source, code, message: `播放设备注册失败，请重试在线播放${registrationHint(error?.reason)}` };
+  if (code === 'EMPTY_RESPONSE') return { source, code: 'EMPTY_RESPONSE', message: `片源服务没有返回数据，请重试在线播放${registrationHint(error?.registrationReason)}` };
   if (code === 'INVALID_RESPONSE' || /空响应|有效数据|目录数据不完整|JSON/.test(message)) return { source, code: 'INVALID_RESPONSE', message: '片源数据无法解析' };
   if (/未降级|尺寸可确认|H\.264\/HEVC/.test(message)) return { source, code: 'NO_PLAYABLE_SOURCE', message };
   return { source, code: 'NO_PLAYABLE_SOURCE', message: '暂未取得有效片源' };

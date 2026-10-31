@@ -11,10 +11,10 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, 'playback-device.js'), 'utf8');
 const endpoint = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const failureMessage = '匿名播放设备注册失败，请重启应用后重试';
-function loadModule() {
+function loadModule(clock) {
     const module = { exports: {} };
     vm.runInNewContext(source, {
-        module, Buffer, AbortSignal,
+        module, Buffer, AbortSignal, ...(clock ? { Date: { now: () => clock.now } } : {}),
         require(name) {
             assert.ok(['node:crypto', 'node:zlib'].includes(name), 'no transport or persistence dependencies');
             return require(name);
@@ -136,7 +136,8 @@ test('synchronous and asynchronous failures remain cached and expose only a safe
         const error = results[0].reason;
         assert.equal(error.code, 'DEVICE_REGISTRATION_FAILED');
         assert.equal(error.message, failureMessage);
-        assert.deepEqual(Object.keys(error), ['code']);
+        assert.deepEqual(Object.keys(error).sort(), ['code', 'reason']);
+        assert.equal(error.reason, 'NETWORK');
         assert.equal(error.cause, undefined);
         assert.doesNotMatch(String(error.stack) + JSON.stringify(error), /PRIVATE_RESPONSE_SENTINEL/);
         assert.equal(get(() => assert.fail('no later retry')), first);
@@ -210,4 +211,58 @@ test('business rejection cannot be accepted even if IDs are present', async () =
             code: 'DEVICE_REGISTRATION_FAILED', message: failureMessage,
         });
     }
+});
+
+test('a failed registration is retried after the cooldown, never while within it', async () => {
+    const clock = { now: 1_000_000 };
+    const { getPlaybackDevice: get } = loadModule(clock);
+    let calls = 0;
+    const failing = () => { calls++; return Promise.reject(Object.assign(new Error('offline'), { code: 'ERR_NETWORK' })); };
+    const first = get(failing);
+    await assert.rejects(first, { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal(calls, 3);
+    clock.now += 4999;
+    assert.equal(get(() => assert.fail('inside the cooldown')), first);
+    clock.now += 1;
+    let registered = 0;
+    const second = get(async () => { registered++; return { device_id: '777', install_id: '888' }; });
+    assert.notEqual(second, first);
+    assert.equal((await second).device_id, '777');
+    assert.equal(registered, 1);
+    clock.now += 10 * 60_000;
+    assert.equal(get(() => assert.fail('a successful identity is kept for the process')), second);
+});
+
+test('a pending registration is never replaced by the cooldown or by forgetting failures', async () => {
+    const clock = { now: 5_000_000 };
+    const { getPlaybackDevice: get, forgetFailedPlaybackDevice: forget } = loadModule(clock);
+    let finish;
+    const pending = get(() => new Promise(resolve => { finish = resolve; }));
+    await Promise.resolve();
+    clock.now += 60_000;
+    forget();
+    assert.equal(get(() => assert.fail('still pending')), pending);
+    finish({ device_id: '5', install_id: '6' });
+    assert.equal((await pending).device_id, '5');
+    forget();
+    assert.equal(get(() => assert.fail('success is kept')), pending);
+});
+
+test('forgetting a failure lets the next playback register at once and keeps one identity per success', async () => {
+    const clock = { now: 9_000_000 };
+    const { getPlaybackDevice: get, forgetFailedPlaybackDevice: forget } = loadModule(clock);
+    const failed = get(async () => ({ code: 1 }));
+    await assert.rejects(failed, { code: 'DEVICE_REGISTRATION_FAILED', reason: 'REJECTED' });
+    forget();
+    const results = await Promise.all(Array.from({ length: 5 }, () => get(async () => ({ device_id: '31', install_id: '41' }))));
+    assert.ok(results.every(item => item === results[0]));
+});
+
+test('certificate failures are reported as a trust problem and mixed failures keep that reason', async () => {
+    const tls = Object.assign(new Error('x'), { code: 'ERR_TLS_CERT' });
+    const plain = Object.assign(new Error('x'), { code: 'ERR_NETWORK' });
+    let call = 0;
+    await assert.rejects(load()(async () => { throw [plain, tls, plain][call++]; }), { reason: 'TLS' });
+    call = 0;
+    await assert.rejects(load()(async () => { if (call++ < 2) throw plain; return { device_id: '0' }; }), { reason: 'REJECTED' });
 });

@@ -268,6 +268,40 @@ const checks = [
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
     }
   }],
+  ['blocked or re-signed registration is remembered as a reason and a later playback registers again', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    const media = 'https://v3-reading.qznovelvod.com/video.mp4';
+    const model = { code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: media, codec_type: 'h264', quality_desc: '720P', vwidth: 720, vheight: 1280 },
+    ] }) } } };
+    try {
+      for (const [failure, reason] of [['SELF_SIGNED_CERT_IN_CHAIN', 'TLS'], ['ECONNRESET', 'NETWORK']]) {
+        device.resetPlaybackDevice();
+        const fetch = loadFetch(async config => {
+          if (String(config.url).includes('device_register')) throw Object.assign(new Error('blocked'), { code: failure });
+          return { status: 200, headers: {}, data: '' };
+        });
+        await assert.rejects(fetch('11'), error => error.code === 'EMPTY_RESPONSE' && error.registrationReason === reason);
+      }
+      device.resetPlaybackDevice();
+      const blocked = loadFetch(async config => {
+        if (String(config.url).includes('device_register')) throw Object.assign(new Error('blocked'), { code: 'ECONNRESET' });
+        return { status: 200, headers: {}, data: '' };
+      });
+      await assert.rejects(blocked('11'));
+      device.forgetFailedPlaybackDevice();
+      const healed = loadFetch(async config => {
+        if (String(config.url).includes('device_register')) {
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: '1234567890123456', install_id_str: '6543210987654321', code: 0 }) };
+        }
+        return { status: 200, headers: {}, data: JSON.stringify(model) };
+      });
+      assert.equal((await healed('11', { quality: '1080p' })).url, media);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
   ['empty unsigned playback signs the same device once and does not register again', async () => {
     const device = require(path.join(nativeDir, 'playback-device'));
     device.resetPlaybackDevice();

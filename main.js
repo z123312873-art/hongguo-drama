@@ -344,6 +344,7 @@ function publicProxyError(message, settings, resolved) {
  */
 function applyProxyToEnv(resolved) {
   require('./src/native/direct-connect').setDirectConnect(resolved.mode === 'direct');
+  require('./src/native/playback-device').forgetFailedPlaybackDevice();
   for (const key of PROXY_ENV_KEYS) {
     if (resolved.mode === 'system') {
       if (originalProxyEnv[key] !== undefined) process.env[key] = originalProxyEnv[key];
@@ -4196,6 +4197,7 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
+  require('./src/native/system-trust').trustSystemCertificates();
   let startupStage = '读取本地数据';
   try {
     const dataFile = path.join(app.getPath('userData'), 'data.json');

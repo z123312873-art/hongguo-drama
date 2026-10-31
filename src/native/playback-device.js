@@ -11,7 +11,11 @@ const REGISTER_QUERY = 'tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_versi
 const REGISTER_HOSTS = ['log5-applog-lf.fqnovel.com', 'log5-applog-hl.fqnovel.com', 'log0-applog-lf.fqnovel.com'];
 const REGISTER_URLS = REGISTER_HOSTS.map(host => `https://${host}/service/2/device_register/?${REGISTER_QUERY}`);
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
+// A failed attempt registers nothing, so it is safe to try again once this window has passed.
+// Within the window every caller (prefetch, repeated clicks) still shares the one failure.
+const FAILURE_COOLDOWN_MS = 5000;
 let registration;
+let failedAt = 0;
 let refreshing = null;
 
 function responseId(response, name) {
@@ -22,8 +26,11 @@ function responseId(response, name) {
 }
 
 function getPlaybackDevice(requestJson) {
-    // Keep rejected promises too: prefetch and retries must not create more anonymous devices.
-    registration ||= Promise.resolve().then(async () => {
+    if (registration && failedAt && Date.now() - failedAt >= FAILURE_COOLDOWN_MS) { registration = null; failedAt = 0; }
+    if (registration) return registration;
+    failedAt = 0;
+    const attempt = Promise.resolve().then(async () => {
+        let reason = 'UNKNOWN';
         try {
             const now = Date.now();
             const cdid = crypto.randomUUID();
@@ -67,17 +74,24 @@ function getPlaybackDevice(requestJson) {
                 try {
                     response = await requestJson(url, { method: 'POST', headers, data }, deadline, AbortSignal.timeout(Math.max(1, deadline - Date.now())));
                     break;
-                } catch (_) { response = null; }
+                } catch (error) {
+                    response = null;
+                    if (String(error?.code || '') === 'ERR_TLS_CERT') reason = 'TLS';
+                    else if (reason !== 'TLS') reason = 'NETWORK';
+                }
             }
             const device_id = responseId(response, 'device_id');
             const iid = responseId(response, 'install_id');
+            if (response) reason = 'REJECTED';
             if (!response || !device_id || !iid || Number(response?.code ?? response?.Code ?? 0) !== 0) throw new Error('Invalid registration');
             return Object.freeze({ device_id, iid, cdid });
         } catch (_) {
-            throw Object.assign(new Error('匿名播放设备注册失败，请重启应用后重试'), { code: 'DEVICE_REGISTRATION_FAILED' });
+            if (registration === attempt) failedAt = Date.now();
+            throw Object.assign(new Error('匿名播放设备注册失败，请重启应用后重试'), { code: 'DEVICE_REGISTRATION_FAILED', reason });
         }
     });
-    return registration;
+    registration = attempt;
+    return attempt;
 }
 
 // The signed video API now answers an unregistered device with an empty 200.
@@ -85,6 +99,7 @@ function getPlaybackDevice(requestJson) {
 function refreshPlaybackDevice(requestJson) {
     if (refreshing) return refreshing;
     registration = null;
+    failedAt = 0;
     const run = getPlaybackDevice(requestJson);
     refreshing = run;
     // The caller handles `run`. This side chain only clears the single-flight slot.
@@ -92,9 +107,16 @@ function refreshPlaybackDevice(requestJson) {
     return run;
 }
 
+// Network or proxy settings changed: a failure under the old route says nothing about the new one.
+// A registration that is still running or already succeeded is kept.
+function forgetFailedPlaybackDevice() {
+    if (registration && failedAt) { registration = null; failedAt = 0; }
+}
+
 function resetPlaybackDevice() {
     registration = null;
+    failedAt = 0;
     refreshing = null;
 }
 
-module.exports = { getPlaybackDevice, refreshPlaybackDevice, resetPlaybackDevice };
+module.exports = { getPlaybackDevice, refreshPlaybackDevice, forgetFailedPlaybackDevice, resetPlaybackDevice };
