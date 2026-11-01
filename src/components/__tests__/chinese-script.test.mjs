@@ -121,6 +121,15 @@ test('catalog pages grow only when the window can show more than one source page
   assert.equal(sourcePageWindow(3, 2, 5).count, 1);
 });
 
+test('paging inside one list keeps the joined source pages so page 2 never repeats page 1', () => {
+  const browse = fs.readFileSync(new URL('../Browse.jsx', import.meta.url), 'utf8');
+  assert.match(browse, /showSnapshot\(source, category, genre, next, true\)/);
+  assert.match(browse, /else if \(!sameList\) \{ pageSpan\.current = 1;/);
+  assert.deepEqual(sourcePageWindow(1, 2, 34), { start: 1, count: 2, uiPages: 17 });
+  assert.deepEqual(sourcePageWindow(2, 2, 34), { start: 3, count: 2, uiPages: 17 });
+  assert.equal(sourcePageWindow(2, 1, 34).start, 2, 'a span reset to 1 would restart at source page 2, which page 1 already showed');
+});
+
 test('font size defaults to the original interface size', () => {
   const storage = new Map();
   globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) };
