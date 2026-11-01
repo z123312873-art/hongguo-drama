@@ -585,8 +585,8 @@ async function mount(file, api, props = {}) {
       assert.ok(ui.text().includes('共 120 话'));
       const chips = ui.nodes().filter(n => String(n.props.className).startsWith('ep-chip'));
       assert.equal(chips.length, 50, 'episodes are grouped 50 at a time');
-      assert.ok(ui.button('51-100') && ui.button('101-120'), 'every group is reachable');
-      ui.button('101-120').props.onClick(); await ui.flush();
+      assert.ok(ui.button('1-50') && ui.button('50-99') && ui.button('100-119'), 'every group is reachable and named after the episode numbers it holds');
+      ui.button('100-119').props.onClick(); await ui.flush();
       assert.equal(ui.nodes().filter(n => String(n.props.className).startsWith('ep-chip')).length, 20);
       ui.nodes().find(n => String(n.props.className).startsWith('ep-chip')).props.onClick(); await ui.flush();
       assert.ok(ui.nodes().some(n => typeof n.type === 'function' && n.type.name === 'ComicReader'), 'choosing an episode opens the reader');

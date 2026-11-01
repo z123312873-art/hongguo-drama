@@ -25,6 +25,13 @@ function readPage(reservedRows) {
   } catch (_) { return { columns: 0, pageSize: 0 }; }
 }
 
+// A group is named after the episode numbers it holds, which can skip a number the source never published.
+function groupName(episodes, group) {
+  const first = episodes[group.start - 1]?.label;
+  const last = episodes[group.end - 1]?.label;
+  return /^\d+$/.test(first || '') && /^\d+$/.test(last || '') ? `${first}-${last}` : `${group.start}-${group.end}`;
+}
+
 const EMPTY = { items: [], siteCount: 0, expectedTotal: 0, pending: true, stale: false, notice: '' };
 
 export default function ComicBrowse({ active = true, reservedRows = 0, reloadToken = 0 }) {
@@ -234,7 +241,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
                 <div className="comic-groups" role="tablist" aria-label="分集区间">
                   {groups.map((item, index) => (
                     <button type="button" role="tab" key={item.start} aria-selected={index === (detail.group || 0)} className={`btn-chip ${index === (detail.group || 0) ? 'active' : ''}`}
-                      onClick={() => setDetail(value => ({ ...value, group: index }))}>{item.start}-{item.end}</button>
+                      onClick={() => setDetail(value => ({ ...value, group: index }))}>{groupName(detail.episodes, item)}</button>
                   ))}
                 </div>
               )}
