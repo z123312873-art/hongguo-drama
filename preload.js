@@ -83,6 +83,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMediaSources: () => ipcRenderer.invoke('get-media-sources'),
   browseCategories: () => ipcRenderer.invoke('browse-categories'),
   browseList: (options) => ipcRenderer.invoke('browse-list', options),
+  comicSnapshot: () => ipcRenderer.invoke('comic-snapshot'),
+  comicExtras: (payload) => ipcRenderer.invoke('comic-extras', payload),
+  comicEpisodes: (seriesId) => ipcRenderer.invoke('comic-episodes', { seriesId }),
+  comicChapter: (payload) => ipcRenderer.invoke('comic-chapter', payload),
+  comicImage: (payload) => ipcRenderer.invoke('comic-image', payload),
+  comicCancelPrefetch: () => ipcRenderer.invoke('comic-cancel-prefetch'),
   playSeries: (payload) => ipcRenderer.invoke('play-series', payload),
   onNavigate: (cb) => {
     const listener = (_e, data) => cb(data);

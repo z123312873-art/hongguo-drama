@@ -142,7 +142,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             if (task.type === 'search') return api.searchComicPage(session, task.query, task.paging);
             throw new Error('unknown task');
         },
-        now, ...schedulerOptions,
+        now, concurrency: 3, ...schedulerOptions,
     });
 
     function loadCache() {
@@ -353,11 +353,12 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return { ...scheduler.snapshot(), directories: directories.size, chapters: chapters.size, pool: state.pool.items.length };
     }
 
-    function cancelBackground() {
-        return scheduler.cancel((key, job) => job.priority >= PRIORITY.prefetch);
+    // Leaving a chapter withdraws the look-ahead for it; the catalog sweep keeps running.
+    function cancelPrefetch() {
+        return scheduler.cancel((key, job) => job.priority === PRIORITY.prefetch);
     }
 
-    return { configure, noteSitePage, snapshot, extras, episodes, chapter, image, stats, cancelBackground, scheduler,
+    return { configure, noteSitePage, snapshot, extras, episodes, chapter, image, stats, cancelPrefetch, scheduler,
         _state: state };
 }
 

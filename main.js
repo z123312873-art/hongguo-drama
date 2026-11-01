@@ -1240,6 +1240,7 @@ const BROWSE_CATEGORIES = [
   { slug: 'real-drama', label: '真人剧' },
   { slug: 'comic-drama', label: '漫剧' },
   { slug: 'ai-drama', label: 'AI剧' },
+  { slug: 'comic', label: '漫画' },
   { slug: 'hot-drama', label: '综合热播榜', group: 'rank' },
   { slug: 'hot-real-drama', label: '真人热播榜', group: 'rank' },
   { slug: 'hot-comic-drama', label: '漫剧热播榜', group: 'rank' },
@@ -1296,6 +1297,17 @@ ipcMain.handle('browse-list', (_event, options) =>
       if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
       else callback();
     }));
+
+const comicReply = (work) => async (_event, payload) => {
+  try { return { success: true, ...(await work(payload && typeof payload === 'object' ? payload : {})) }; }
+  catch (error) { return { success: false, error: error?.message || '漫画服务暂时不可用', code: String(error?.code || '') }; }
+};
+ipcMain.handle('comic-snapshot', comicReply(async () => ({ snapshot: require('./src/native/comic').service().snapshot() })));
+ipcMain.handle('comic-extras', comicReply(async (payload) => require('./src/native/comic').service().extras({ exclude: payload.exclude, limit: payload.limit })));
+ipcMain.handle('comic-episodes', comicReply(async (payload) => ({ ...(await require('./src/native/comic').service().episodes(payload.seriesId)) })));
+ipcMain.handle('comic-chapter', comicReply(async (payload) => ({ ...(await require('./src/native/comic').service().chapter({ itemId: payload.itemId, width: payload.width, priority: payload.priority })) })));
+ipcMain.handle('comic-image', comicReply(async (payload) => ({ ...(await require('./src/native/comic').service().image({ itemId: payload.itemId, index: payload.index })) })));
+ipcMain.handle('comic-cancel-prefetch', comicReply(async () => ({ cancelled: require('./src/native/comic').service().cancelPrefetch() })));
 
 function catalogQuery(keyword) {
   const typed = String(keyword || '').trim();
@@ -4203,6 +4215,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     const dataFile = path.join(app.getPath('userData'), 'data.json');
     store.init(dataFile);
     require('./src/native/public-details').initRatingStore(path.join(app.getPath('userData'), 'ratings-cache.json'));
+    require('./src/native/comic').service().configure({ file: path.join(app.getPath('userData'), 'comic-cache.json') });
     setDeviceIdentityFile(path.join(app.getPath('userData'), 'danmaku-client.json'));
     loadDownloadTasks();
     loadSeriesRegistry();
