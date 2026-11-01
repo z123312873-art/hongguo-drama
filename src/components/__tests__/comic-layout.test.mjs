@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, SOURCE_PAGE_SIZE, alignedPageSize, pagesToFill } from '../../catalogFill.mjs';
 import {
-  COMIC_MAX, IMAGE_WIDTHS, clampPage, comicPageSize, desiredImageWidth, episodeGroups, groupIndexOf, nextImageWidth,
+  COMIC_MAX, IMAGE_WIDTHS, firstPagePosters, clampPage, comicPageSize, desiredImageWidth, episodeGroups, groupIndexOf, nextImageWidth,
   pageCount, pageSlice, pagerNumbers, readerColumnWidth, skeletonCount,
 } from '../../comicLayout.mjs';
 
@@ -14,12 +15,12 @@ const SCREENS = [
   { name: 'small', width: 1100, height: 700, sidebarWidth: 220 },
 ];
 
-test('every screen gets whole rows and at least two pages for the full 140 comics', () => {
+test('every screen gets whole source pages and at least two pages for the full 140 comics', () => {
   for (const screen of SCREENS) {
     const { columns, pageSize } = comicPageSize({ ...screen, reservedRows: 1 });
     assert.ok(columns >= 4, `${screen.name} columns ${columns}`);
-    assert.equal(pageSize % columns, 0, `${screen.name} whole rows`);
-    assert.ok(pageSize >= columns * 3 && pageSize <= columns * 4, `${screen.name} 3-4 rows`);
+    assert.equal(pageSize % SOURCE_PAGE_SIZE, 0, `${screen.name} whole source pages, so the drama lists show the same count`);
+    assert.ok(pageSize >= columns * 3 && pageSize < columns * 4 + SOURCE_PAGE_SIZE, `${screen.name} 3-4 rows, rounded up to a source page`);
     assert.ok(pageCount(COMIC_MAX, pageSize) >= 2, `${screen.name} pages ${pageCount(COMIC_MAX, pageSize)}`);
   }
   const sizes = SCREENS.slice(0, 3).map(screen => comicPageSize({ ...screen, reservedRows: 1 }).pageSize);
@@ -115,4 +116,36 @@ test('episode groups of fifty cover every episode exactly once', () => {
   assert.equal(groupIndexOf(1, episodeGroups(217)), 0);
   assert.equal(groupIndexOf(999, episodeGroups(217)), 0, 'unknown position falls back to the first group');
   assert.deepEqual(episodeGroups('x'), []);
+});
+
+test('rounding up to source pages never shrinks a page and handles bad input', () => {
+  assert.equal(alignedPageSize(36), 48);
+  assert.equal(alignedPageSize(48), 48);
+  assert.equal(alignedPageSize(49), 72);
+  assert.equal(alignedPageSize(1), 24);
+  assert.equal(alignedPageSize(0), 0);
+  assert.equal(alignedPageSize(NaN), 0);
+  assert.equal(alignedPageSize(-5), 0);
+  assert.equal(alignedPageSize(36, 30), 60);
+  assert.equal(alignedPageSize(36, 0), 36);
+});
+
+test('every window opens the drama lists with the comic poster count and user sources with at least 40', () => {
+  for (const screen of SCREENS) {
+    for (const reservedRows of [0, 2]) {
+      const comic = comicPageSize({ ...screen, reservedRows });
+      const hongguo = firstPagePosters({ ...screen, reservedRows });
+      assert.equal(hongguo.slots, comic.pageSize, `${screen.name} drama == comic`);
+      const spanned = pagesToFill(hongguo.slots, SOURCE_PAGE_SIZE, 34) * SOURCE_PAGE_SIZE;
+      assert.equal(spanned, comic.pageSize, `${screen.name} the pages fetched for a drama list add up to the comic page`);
+      const custom = firstPagePosters({ ...screen, reservedRows, minimum: MIN_SOURCE_POSTERS });
+      assert.ok(custom.slots >= MIN_SOURCE_POSTERS && custom.slots >= comic.pageSize, `${screen.name} custom ${custom.slots}`);
+      for (const perPage of [10, 30]) {
+        const joined = pagesToFill(custom.slots, perPage, OPEN_SOURCE_PAGES, MAX_OPEN_PAGES) * perPage;
+        assert.ok(joined >= MIN_SOURCE_POSTERS, `${screen.name} ${perPage} per page joins to ${joined}`);
+      }
+    }
+  }
+  assert.deepEqual(firstPagePosters({ width: 0, height: 0, minimum: 40 }), { columns: 0, slots: 0 });
+  assert.equal(firstPagePosters({ ...SCREENS[0], minimum: 'x' }).slots, comicPageSize(SCREENS[0]).pageSize);
 });

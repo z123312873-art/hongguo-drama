@@ -1,6 +1,14 @@
 // How many source pages to join so the current window's poster grid can fill.
 // A short page stays one page. Extra pages stop at the visible slots, and never past four.
 const MAX_SOURCE_PAGES = 4;
+// Hongguo lists come in fixed pages of this size. Comic pages follow it so both grids match.
+export const SOURCE_PAGE_SIZE = 24;
+// Sources that list a few posters per page (Hema: 10) may join more pages, up to this many.
+export const MAX_OPEN_PAGES = 6;
+// Sources without a page total keep going while they report more. This stands in for the total.
+export const OPEN_SOURCE_PAGES = 99;
+// Smallest first page a user-added source shows.
+export const MIN_SOURCE_POSTERS = 40;
 
 export function posterColumns({ width, minCard = 150, gapX = 20 } = {}) {
   const boxWidth = Number(width);
@@ -42,14 +50,24 @@ export function sameCatalogWindow(previousWidth, nextWidth, tolerance = 80) {
   return Math.abs(previous - next) < tolerance;
 }
 
-export function pagesToFill(slots, pageCount, totalPages) {
+// Whole source pages that cover the wanted poster count.
+export function alignedPageSize(target, pageSize = SOURCE_PAGE_SIZE) {
+  const size = Math.floor(Number(pageSize));
+  const need = Math.floor(Number(target));
+  if (!(size > 0)) return Math.max(0, need) || 0;
+  if (!(need > 0)) return 0;
+  return size * Math.ceil(need / size);
+}
+
+export function pagesToFill(slots, pageCount, totalPages, maxPages = MAX_SOURCE_PAGES) {
   const count = Number(pageCount);
   const pages = Number(totalPages);
   const need = Number(slots);
   if (!Number.isFinite(count) || count < 1) return 1;
   if (!Number.isFinite(need) || need <= count) return 1;
   if (!Number.isFinite(pages) || pages < 2) return 1;
-  return Math.min(pages, MAX_SOURCE_PAGES, Math.max(1, Math.ceil(need / count)));
+  const cap = Number.isFinite(Number(maxPages)) && Number(maxPages) >= 1 ? Math.floor(Number(maxPages)) : MAX_SOURCE_PAGES;
+  return Math.min(pages, cap, Math.max(1, Math.ceil(need / count)));
 }
 
 export function sourcePageWindow(uiPage, span, totalSourcePages) {

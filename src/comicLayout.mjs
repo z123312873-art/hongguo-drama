@@ -1,4 +1,4 @@
-import { posterColumns, posterSlots } from './catalogFill.mjs';
+import { alignedPageSize, posterColumns, posterSlots } from './catalogFill.mjs';
 import { uiScale } from './uiScale.mjs';
 
 export const COMIC_MAX = 140;
@@ -8,7 +8,8 @@ const MIN_ROWS = 3;
 const MAX_ROWS = 4;
 const EPISODE_GROUP = 50;
 
-// Poster page size from the window alone. Whole rows only, so the last row is never ragged.
+// Poster page size from the window alone. Rows come from the window; the count is rounded up
+// to whole source pages so the drama categories show the same number of posters on page one.
 export function comicPageSize({ width, height, reservedRows = 0, sidebarWidth = 0 } = {}) {
   const viewport = Number(width);
   if (!(viewport > 0)) return { columns: 0, pageSize: 0 };
@@ -20,7 +21,15 @@ export function comicPageSize({ width, height, reservedRows = 0, sidebarWidth = 
   if (!columns) return { columns: 0, pageSize: 0 };
   const fitted = posterSlots({ width: boxWidth, height: boxHeight, minCard, reservedRows }) / columns;
   const rows = Math.min(MAX_ROWS, Math.max(MIN_ROWS, Math.round(fitted)));
-  return { columns, pageSize: columns * rows };
+  return { columns, pageSize: alignedPageSize(columns * rows) };
+}
+
+// Posters a drama list should open with: the comic page size, or the given minimum when that is larger.
+export function firstPagePosters({ minimum = 0, ...window } = {}) {
+  const { columns, pageSize } = comicPageSize(window);
+  if (!columns) return { columns: 0, slots: 0 };
+  const floor = Math.floor(Number(minimum));
+  return { columns, slots: Math.max(pageSize, Number.isFinite(floor) && floor > 0 ? floor : 0) };
 }
 
 export function pageCount(total, pageSize) {
