@@ -9,7 +9,7 @@ const path = require('node:path');
 const realApi = require('./comic-api');
 const { createComicService, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS } = require('./comic');
 
-const fastScheduler = { rate: 500, burst: 20, concurrency: 3, backoff: [2, 4, 8, 16], rotationCooldownMs: 5 };
+const fastScheduler = { rate: 500, burst: 20, concurrency: 3, backoff: [2, 4, 8, 16], rotationCooldownMs: 5, rejectionPauseMs: 5 };
 const id = (n) => String(7000000000000000000n + BigInt(n));
 const md5 = (n) => crypto.createHash('md5').update(String(n)).digest('hex');
 
@@ -262,4 +262,101 @@ test('the total listing is capped at the maximum even when the site alone is lar
     const snapshot = service.snapshot();
     assert.equal(snapshot.items.length, MAX_COMICS);
     assert.equal(snapshot.siteCount, 192);
+});
+
+test('a slow first build answers at once with what it has, keeps growing, and a later call sees the rest', async () => {
+    const gate = { release: null };
+    const hold = new Promise((resolve) => { gate.release = resolve; });
+    let searches = 0;
+    const api = fakeApi({
+        async searchComicPage(_session, query, paging = {}) {
+            searches += 1;
+            if (searches > 2) await hold;
+            const base = (query.codePointAt(0) % 40) * 100 + (paging.offset || 0);
+            return { books: Array.from({ length: 20 }, (_, i) => book(base + i + 1)), hasMore: (paging.offset || 0) < 20, nextOffset: (paging.offset || 0) + 20, searchId: 's' };
+        },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1]));
+    const first = await service.extras({ exclude: [id(1)], limit: 100, waitMs: 60 });
+    assert.equal(first.success, true);
+    assert.equal(first.refreshing, true, 'the build is still running');
+    assert.equal(first.partial, true);
+    assert.ok(first.items.length > 0 && first.items.length < 100, `first batch ${first.items.length}`);
+    gate.release();
+    let later = first;
+    for (let round = 0; round < 40 && later.items.length < 100; round += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        later = await service.extras({ exclude: [id(1)], limit: 100, waitMs: 0 });
+    }
+    assert.equal(later.items.length, 100);
+    assert.equal(later.partial, false);
+});
+
+test('when nothing can be fetched the reply says why, with the stage and code but no service text', async () => {
+    const api = fakeApi({ async searchComicPage() { throw Object.assign(new Error('漫画服务暂时无法提供该内容（搜索，代码 101021）'), { code: 'BUSINESS_REJECTED', apiCode: 101021 }); } });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    const outcome = await service.extras({ exclude: [], limit: 30, waitMs: 5000 });
+    assert.deepEqual(outcome.items, []);
+    assert.equal(outcome.refreshing, false);
+    assert.match(outcome.diagnostic, /搜索，代码 101021/);
+});
+
+test('a pool that is still growing is continued after a minute; one that stopped growing waits much longer', async () => {
+    let now = Date.parse('2026-03-01T10:00:00');
+    let available = 10;
+    let searches = 0;
+    const api = fakeApi({
+        async searchComicPage(_session, query, paging = {}) {
+            searches += 1;
+            const base = (query.codePointAt(0) % 40) * 100;
+            return { books: Array.from({ length: available }, (_, i) => book(base + i + 1)), hasMore: false, nextOffset: 0, searchId: 's' };
+        },
+    });
+    const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1]));
+    const first = await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    assert.ok(first.items.length > 0 && first.items.length < 130);
+    const searchesAfterFirst = searches;
+    now += 61 * 1000;
+    available = 20;
+    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    assert.ok(searches > searchesAfterFirst, 'a pool that grew is continued after about a minute');
+    const second = searches;
+    available = 0;
+    now += 61 * 1000;
+    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    now += 61 * 1000;
+    const third = searches;
+    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    assert.equal(searches, third, 'no growth: not retried again within the long window');
+    assert.ok(second <= third);
+});
+
+test('episodes load through the real client even when the service refuses the key exchange, and a refused device is replaced', async () => {
+    const identity = { device_id: '7500000000000000001', iid: '7500000000000000002', cdid: 'c' };
+    let registrations = 0;
+    let refuseDirectory = 1;
+    const transport = async (url) => {
+        if (url.includes('registerkey')) return { code: 101021 };
+        if (url.includes('directory')) {
+            if (refuseDirectory > 0) { refuseDirectory -= 1; return { code: 101021 }; }
+            return { code: 0, data: { item_data_list: Array.from({ length: 30 }, (_, i) => ({ item_id: id(9000 + i), title: `第${i + 1}话` })) } };
+        }
+        return { code: 0 };
+    };
+    const api = { ...realApi, createSession: () => { registrations += 1; return realApi.createSession({ register: async () => identity, transport }); } };
+    const service = createComicService({ api, schedulerOptions: { ...fastScheduler, rejectionPauseMs: 5 } });
+    const outcome = await service.episodes(id(5));
+    assert.equal(outcome.total, 30);
+    assert.equal(outcome.episodes[0].label, '1');
+    assert.equal(registrations, 1, 'one early refusal is retried on the same device');
+});
+
+test('a service that refuses every directory request ends with the stage and the code in the message', async () => {
+    const identity = { device_id: '7500000000000000001', iid: '7500000000000000002', cdid: 'c' };
+    const transport = async () => ({ code: 101021 });
+    const api = { ...realApi, createSession: () => realApi.createSession({ register: async () => identity, transport }) };
+    const service = createComicService({ api, schedulerOptions: { ...fastScheduler, rejectionPauseMs: 5 } });
+    await assert.rejects(service.episodes(id(5)), (error) => error.code === 'BUSINESS_REJECTED' && /分集目录，代码 101021/.test(error.message));
 });

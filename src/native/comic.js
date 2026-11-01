@@ -15,6 +15,10 @@ const POOL_TTL_MS = 24 * 60 * 60 * 1000;
 const DIRECTORY_TTL_MS = 30 * 60 * 1000;
 const CHAPTER_TTL_MS = 20 * 60 * 1000;
 const POOL_RETRY_MS = 30 * 60 * 1000;
+// A build that added titles is continued soon; one that added nothing waits POOL_RETRY_MS.
+const POOL_CONTINUE_MS = 60 * 1000;
+// The first listing waits this long for a first batch of extras, then answers and lets the caller poll.
+const FIRST_BATCH_WAIT_MS = 8000;
 const POOL_BUILD_BUDGET_MS = 60 * 1000;
 const SEARCH_PAGES_PER_KEYWORD = 2;
 const IMAGE_CONCURRENCY = 4;
@@ -131,6 +135,8 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
     const directoryPending = new Map();
     let poolBuild = null;
     let lastBuildAt = 0;
+    let lastBuildGain = 0;
+    let lastPoolError = null;
     let imageActive = 0;
     const imageWaiters = [];
 
@@ -224,7 +230,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return { items: [...site, ...extras].slice(0, MAX_COMICS), siteCount: site.length, savedAt: state.site.savedAt };
     }
 
-    async function buildPool(site, blocked, needed) {
+    async function buildPool(site, blocked, needed, onFound = () => {}) {
         const exclude = new Set([...site.map((card) => card.series_id), ...blocked]);
         const found = new Map();
         const keywords = [...topTags(site, 10), ...FALLBACK_KEYWORDS].filter((word, index, all) => all.indexOf(word) === index);
@@ -233,6 +239,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         const deadline = now() + POOL_BUILD_BUDGET_MS;
         let cursor = 0;
         let failures = 0;
+        let lastError = null;
         const sweep = async () => {
             while (cursor < order.length && found.size < target && now() < deadline && failures < 3) {
                 const query = order[cursor++];
@@ -240,44 +247,58 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
                 for (let page = 0; page < SEARCH_PAGES_PER_KEYWORD && found.size < target && now() < deadline; page += 1) {
                     let result;
                     try { result = await scheduler.run(`search:${query}:${paging.offset || 0}`, PRIORITY.background, { type: 'search', query, paging }); }
-                    catch (_) { failures += 1; break; }
+                    catch (error) { failures += 1; lastError = error; break; }
+                    const fresh = [];
                     for (const book of result.books) {
                         const card = bookToCard(book, api);
-                        if (card && String(book.genre_type) === '110' && eligible(card, exclude) && !found.has(card.series_id)) found.set(card.series_id, card);
+                        if (card && String(book.genre_type) === '110' && eligible(card, exclude) && !found.has(card.series_id)) { found.set(card.series_id, card); fresh.push(card); }
                     }
+                    if (fresh.length) onFound(fresh);
                     if (!result.hasMore) break;
                     paging = { offset: result.nextOffset, searchId: result.searchId };
                 }
             }
         };
         await Promise.all([sweep(), sweep(), sweep()]);
-        return { items: [...found.values()], failed: failures >= 3 };
+        return { items: [...found.values()], failed: failures >= 3, error: lastError };
     }
 
     // Extra titles never block the listing: a stale pool is served while a new one is built.
-    async function extras({ exclude = [], limit = MAX_COMICS } = {}) {
+    async function extras({ exclude = [], limit = MAX_COMICS, waitMs = FIRST_BATCH_WAIT_MS } = {}) {
         const blocked = (Array.isArray(exclude) ? exclude : []).map(String).filter((id) => ID.test(id)).slice(0, 400);
         const cap = Math.max(0, Math.min(MAX_COMICS, Number.parseInt(limit, 10) || 0));
-        if (!cap) return { success: true, items: [], partial: false, refreshing: false };
+        if (!cap) return { success: true, items: [], partial: false, refreshing: false, diagnostic: '' };
         const at = now();
         const fresh = state.pool.builtAt && at - state.pool.builtAt < POOL_TTL_MS;
         const enough = selectExtras(blocked, cap, at).length >= cap;
-        // A pool that stays short is not rebuilt on every call; an empty one is retried sooner.
-        const cooldown = state.pool.items.length ? POOL_RETRY_MS : 60 * 1000;
+        // A pool that stays short is not rebuilt on every call. One that is still growing is continued,
+        // and an empty one is retried sooner than a pool that simply has nothing more to give.
+        const cooldown = !state.pool.items.length ? 60 * 1000 : lastBuildGain > 0 ? POOL_CONTINUE_MS : POOL_RETRY_MS;
         if ((!fresh || !enough) && !poolBuild && at - lastBuildAt > cooldown) {
             lastBuildAt = at;
-            poolBuild = buildPool(siteItems(), blocked, cap).then((built) => {
-                if (!built.items.length) return;
+            const before = state.pool.items.length;
+            // Titles join the pool as each search page arrives, so a caller that polls sees it grow.
+            const merge = (cards) => {
                 const merged = new Map(state.pool.items.map((card) => [card.series_id, card]));
-                for (const card of built.items) merged.set(card.series_id, card);
+                for (const card of cards) merged.set(card.series_id, card);
                 state.pool = { items: [...merged.values()].slice(0, 400), builtAt: now() };
                 persist();
-            }).catch(() => {}).finally(() => { lastBuildAt = now(); poolBuild = null; });
+            };
+            poolBuild = buildPool(siteItems(), blocked, cap, merge).then((built) => {
+                lastPoolError = built.items.length ? null : built.error;
+                lastBuildGain = state.pool.items.length - before;
+            }).catch((error) => { lastPoolError = error; lastBuildGain = 0; }).finally(() => { lastBuildAt = now(); poolBuild = null; });
         }
-        // First run has nothing to show yet, so it waits for the build. Later runs answer from the cache.
-        if (poolBuild && !state.pool.items.length) await poolBuild;
+        // Nothing to show yet: wait a little for a first batch, then answer and let the caller ask again.
+        if (poolBuild && !state.pool.items.length) {
+            const running = poolBuild;
+            let timer;
+            await Promise.race([running, new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, Number(waitMs) || 0)); })]);
+            clearTimeout(timer);
+        }
         const items = selectExtras(blocked, cap, now());
-        return { success: true, items, partial: items.length < cap, refreshing: Boolean(poolBuild) };
+        const refreshing = Boolean(poolBuild);
+        return { success: true, items, partial: items.length < cap, refreshing, diagnostic: items.length < cap && !refreshing ? String(lastPoolError?.message || '') : '' };
     }
 
     async function episodes(seriesId, { priority = PRIORITY.click } = {}) {

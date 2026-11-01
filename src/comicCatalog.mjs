@@ -2,6 +2,10 @@ import { COMIC_MAX } from './comicLayout.mjs';
 
 const PAGE_CONCURRENCY = 3;
 const MAX_SITE_PAGES = 12;
+const EXTRAS_POLL_MS = 3000;
+const EXTRAS_POLL_ROUNDS = 25;
+const PAGES_NOTICE = '部分页面暂时没载入，可点「刷新片单」重试。';
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function uniqueCards(lists) {
   const seen = new Set();
@@ -93,19 +97,40 @@ export async function loadComicCatalog({ api, onProgress, isCurrent = () => true
     return { items: site };
   }
   emit({ items: site, siteCount: site.length, expectedTotal: COMIC_MAX, pending: true, stale: false,
-    notice: complete ? '' : '部分页面暂时没载入，可点「刷新片单」重试。' });
+    notice: complete ? '' : PAGES_NOTICE });
 
   let extras = [];
   let extrasFailed = false;
-  try {
-    const reply = await api.comicExtras?.({ exclude: site.map((card) => card.series_id), limit: room });
+  let diagnostic = '';
+  let refreshing = false;
+  const askExtras = async () => {
+    try {
+      const reply = await api.comicExtras?.({ exclude: site.map((card) => card.series_id), limit: room });
+      if (!isCurrent()) return false;
+      if (reply?.success && Array.isArray(reply.items)) {
+        extras = reply.items;
+        extrasFailed = false;
+        refreshing = reply.refreshing === true && reply.items.length < room;
+        diagnostic = typeof reply.diagnostic === 'string' ? reply.diagnostic : '';
+      } else { extrasFailed = true; refreshing = false; }
+    } catch (_) { extrasFailed = true; refreshing = false; }
+    return true;
+  };
+  if (!await askExtras()) return { cancelled: true };
+  // The service keeps adding titles in the background; ask again while it does, and show what arrives.
+  for (let round = 0; refreshing && round < EXTRAS_POLL_ROUNDS; round += 1) {
+    emit({ items: uniqueCards([site, extras]).slice(0, COMIC_MAX), siteCount: site.length, expectedTotal: COMIC_MAX, pending: true, stale: false,
+      notice: complete ? '' : PAGES_NOTICE });
+    await (api.wait || wait)(EXTRAS_POLL_MS);
     if (!isCurrent()) return { cancelled: true };
-    if (reply?.success && Array.isArray(reply.items)) extras = reply.items; else extrasFailed = true;
-  } catch (_) { extrasFailed = true; }
+    if (!await askExtras()) return { cancelled: true };
+  }
   const items = uniqueCards([site, extras]).slice(0, COMIC_MAX);
-  emit({
-    items, siteCount: site.length, expectedTotal: items.length, pending: false, stale: false,
-    notice: !complete ? '部分页面暂时没载入，可点「刷新片单」重试。' : extrasFailed ? '补充漫画暂时没取到，先显示站内片单。' : '',
-  });
+  const short = items.length < Math.min(COMIC_MAX, site.length + room);
+  let notice = '';
+  if (!complete) notice = PAGES_NOTICE;
+  else if (extrasFailed || (short && extras.length === 0)) notice = `补充漫画暂时没取到，先显示站内片单。${diagnostic ? `（${diagnostic}）` : ''}`;
+  else if (short) notice = '补充漫画还没取满，稍后点「刷新片单」可继续补齐。';
+  emit({ items, siteCount: site.length, expectedTotal: items.length, pending: false, stale: false, notice });
   return { items };
 }

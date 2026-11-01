@@ -140,3 +140,51 @@ test('a thrown snapshot call or a single-page site does not break loading', asyn
   assert.equal(result.items.length, 76, '10 site titles plus 66 extras');
   assert.equal(api.calls.browse.length, 1);
 });
+
+test('extras that are still being gathered are asked for again and the list grows to 140', async () => {
+  const api = fakeApi();
+  const all = range(1000, 1065);
+  const sizes = [0, 20, 45, 66];
+  let round = 0;
+  api.comicExtras = async (payload) => {
+    api.calls.extras.push(payload);
+    const size = sizes[Math.min(round++, sizes.length - 1)];
+    return { success: true, items: all.slice(0, size), refreshing: size < 66, partial: size < 66 };
+  };
+  api.wait = async () => {};
+  const states = [];
+  const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });
+  assert.equal(result.items.length, 140);
+  assert.equal(api.calls.extras.length, 4);
+  const pending = states.filter((state) => state.pending && state.items.length > 74);
+  assert.ok(pending.length >= 2, 'titles appear while the rest is still arriving');
+  assert.equal(states.at(-1).pending, false);
+  assert.equal(states.at(-1).notice, '');
+});
+
+test('when no extras can be fetched the notice carries the stage and code the service reported', async () => {
+  const api = fakeApi();
+  api.comicExtras = async () => ({ success: true, items: [], partial: true, refreshing: false, diagnostic: '漫画服务暂时无法提供该内容（搜索，代码 101021）' });
+  const states = [];
+  const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });
+  assert.equal(result.items.length, 74, 'the site list is still shown in full');
+  assert.match(states.at(-1).notice, /补充漫画暂时没取到.*搜索，代码 101021/);
+});
+
+test('extras that stop short of 140 say so instead of staying silent', async () => {
+  const api = fakeApi({ extras: range(1000, 1019) });
+  const states = [];
+  const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });
+  assert.equal(result.items.length, 94);
+  assert.match(states.at(-1).notice, /没取满/);
+});
+
+test('polling stops when a newer request takes over', async () => {
+  const api = fakeApi();
+  let current = true;
+  api.comicExtras = async (payload) => { api.calls.extras.push(payload); return { success: true, items: range(1000, 1010), refreshing: true, partial: true }; };
+  api.wait = async () => { current = false; };
+  const result = await loadComicCatalog({ api, isCurrent: () => current });
+  assert.equal(result.cancelled, true);
+  assert.equal(api.calls.extras.length, 1);
+});
