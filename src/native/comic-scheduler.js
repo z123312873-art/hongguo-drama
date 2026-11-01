@@ -12,8 +12,10 @@
 // never reaches the point where the service starts refusing it.
 const EMPTY = 'EMPTY_RESPONSE';
 const REJECTED = 'BUSINESS_REJECTED';
-// Business codes that describe the request itself (an unknown book), so another device cannot help.
+// Business codes that look like a property of the request (an unknown book). They can also be what a service
+// answers to a client it routes elsewhere, so they get a few fresh devices and routes before they are final.
 const PERMANENT_CODES = [101104];
+const PERMANENT_ATTEMPTS = 5;
 // A device that cannot even be registered is not retried for long: the person is waiting on a click.
 const REGISTRATION_ATTEMPTS = 3;
 // A request refused by this many different devices is not going to be served; say so instead of waiting.
@@ -31,13 +33,13 @@ class ApiScheduler {
         call, createSession,
         rate = 1.4, burst = 10, concurrency = 2,
         emptiesToRotate = 3, maxRotations = 3, rotationWindowMs = 10 * 60 * 1000, rotationCooldownMs = 5000,
-        rejectionsToRotate = 2, rejectionPauseMs = 1500, callsPerSession = 70, permanentCodes = PERMANENT_CODES,
+        rejectionsToRotate = 2, rejectionPauseMs = 1500, callsPerSession = 70, permanentCodes = PERMANENT_CODES, permanentAttempts = PERMANENT_ATTEMPTS,
         backoff = [400, 1200, 3000, 6000], maxAttempts = 6,
         now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), random = Math.random,
     } = {}) {
         if (typeof call !== 'function' || typeof createSession !== 'function') throw new TypeError('call and createSession are required');
         Object.assign(this, { call, createSession, rate, burst, concurrency, emptiesToRotate, maxRotations, rotationWindowMs,
-            rotationCooldownMs, rejectionsToRotate, rejectionPauseMs, callsPerSession, backoff, maxAttempts, now, sleep, random });
+            rotationCooldownMs, rejectionsToRotate, rejectionPauseMs, callsPerSession, permanentAttempts, backoff, maxAttempts, now, sleep, random });
         this.permanentCodes = new Set(permanentCodes);
         this.consecutiveRejections = 0;
         this.tokens = burst;
@@ -49,6 +51,7 @@ class ApiScheduler {
         this.session = null;
         this.sessionPromise = null;
         this.generation = 0;
+        this.rotationReason = 'initial';
         this.consecutiveEmpties = 0;
         this.rotations = [];
         this.lastSessionAt = 0;
@@ -131,7 +134,9 @@ class ApiScheduler {
                 const wait = this.lastSessionAt + this.rotationCooldownMs - this.now();
                 if (this.lastSessionAt && wait > 0) await this.sleep(wait);
                 try {
-                    const session = await this.createSession();
+                    const reason = this.rotationReason;
+                    this.rotationReason = 'initial';
+                    const session = await this.createSession({ reason });
                     this.consecutiveEmpties = 0;
                     this.consecutiveRejections = 0;
                     this.session = { value: session, generation: this.generation, calls: 0 };
@@ -157,6 +162,7 @@ class ApiScheduler {
         if (session.calls >= this.callsPerSession && this.session === session) {
             this.session = null;
             this.generation += 1;
+            this.rotationReason = 'retired';
             this.stats.retired += 1;
         }
         let result;
@@ -170,11 +176,20 @@ class ApiScheduler {
         return this.finish(job, result);
     }
 
-    retire() {
+    retire(reason = 'rejected') {
         this.session = null;
         this.generation += 1;
+        this.rotationReason = reason;
         this.rotations.push(this.now());
         this.stats.rotations += 1;
+    }
+
+    // Drop the current device so the next call registers a new one. Counted as a rotation only when asked.
+    replaceSession(counted = false, reason = 'rejected') {
+        this.session = null;
+        this.generation += 1;
+        this.rotationReason = reason;
+        if (counted) this.stats.rotations += 1;
     }
 
     // Registering a device can fail for a moment (network, service). It is retried like any other call.
@@ -202,12 +217,13 @@ class ApiScheduler {
         const code = String(error?.code || '');
         const empty = code === EMPTY;
         const network = RETRYABLE_NETWORK.has(code);
-        const rejected = code === REJECTED && !this.permanentCodes.has(Number(error?.apiCode));
+        const rejected = code === REJECTED;
+        const permanent = rejected && this.permanentCodes.has(Number(error?.apiCode));
         if (!empty && !network && !rejected) return this.finish(job, null, error);
         job.attempt += 1;
         if (rejected) job.rejected = (job.rejected || 0) + 1;
         this.stats.retries += 1;
-        if (job.attempt >= this.maxAttempts || (rejected && job.rejected >= REJECTED_ATTEMPTS)) {
+        if (job.attempt >= this.maxAttempts || (rejected && job.rejected >= (permanent ? this.permanentAttempts : REJECTED_ATTEMPTS))) {
             this.stats.failures += 1;
             if (rejected) return this.finish(job, null, error);
             return this.finish(job, null, empty
@@ -217,15 +233,20 @@ class ApiScheduler {
         let delay = this.backoff[Math.min(job.attempt - 1, this.backoff.length - 1)];
         // A device the service has only just registered may not be known everywhere yet. Give it a moment
         // before deciding it is the problem.
-        if (rejected) delay = Math.max(delay, this.rejectionPauseMs);
-        if (empty || rejected) {
+        if (rejected && !permanent) delay = Math.max(delay, this.rejectionPauseMs);
+        if (permanent) {
+            // Another device on another route right away; a stale answer from a retired device changes nothing.
+            this.stats.rejections += 1;
+            if (session.generation === this.generation) this.replaceSession(true);
+            delay = 0;
+        } else if (empty || rejected) {
             if (empty) this.stats.empties += 1; else this.stats.rejections += 1;
             // Only the session that is still current counts: a late answer from a retired device means nothing.
             if (session.generation === this.generation) {
                 const streak = empty ? ++this.consecutiveEmpties : ++this.consecutiveRejections;
                 if (streak >= (empty ? this.emptiesToRotate : this.rejectionsToRotate)) {
                     if (this.canRotate()) {
-                        this.retire();
+                        this.retire(empty ? 'empty' : 'rejected');
                         delay = 0;
                     } else if (rejected) {
                         this.stats.failures += 1;

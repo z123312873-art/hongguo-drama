@@ -9,7 +9,8 @@ const { gzipSync } = require('node:zlib');
 
 const REGISTER_QUERY = 'tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const REGISTER_HOSTS = ['log5-applog-lf.fqnovel.com', 'log5-applog-hl.fqnovel.com', 'log0-applog-lf.fqnovel.com'];
-const REGISTER_URLS = REGISTER_HOSTS.map(host => `https://${host}/service/2/device_register/?${REGISTER_QUERY}`);
+const registerUrls = hosts => hosts.map(host => `https://${host}/service/2/device_register/?${REGISTER_QUERY}`);
+const REGISTER_URLS = registerUrls(REGISTER_HOSTS);
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
 // A failed attempt registers nothing, so it is safe to try again once this window has passed.
 // Within the window every caller (prefetch, repeated clicks) still shares the one failure.
@@ -35,7 +36,7 @@ function responseId(response, name) {
 }
 
 // One uncached registration attempt. A failed attempt registers nothing, so the caller may retry.
-async function registerDevice(requestJson, profile = HONGGUO_PROFILE) {
+async function registerDevice(requestJson, profile = HONGGUO_PROFILE, options = {}) {
     let reason = 'UNKNOWN';
     try {
         const now = Date.now();
@@ -75,7 +76,8 @@ async function registerDevice(requestJson, profile = HONGGUO_PROFILE) {
         };
         const deadline = Date.now() + 8000;
         let response = null;
-        for (const url of REGISTER_URLS) {
+        const urls = Array.isArray(options?.hosts) && options.hosts.length ? registerUrls(options.hosts) : REGISTER_URLS;
+        for (const url of urls) {
             if (deadline <= Date.now()) break;
             try {
                 response = await requestJson(url, { method: 'POST', headers, data }, deadline, AbortSignal.timeout(Math.max(1, deadline - Date.now())));

@@ -22,6 +22,7 @@ const FIRST_BATCH_WAIT_MS = 8000;
 const POOL_BUILD_BUDGET_MS = 60 * 1000;
 const SEARCH_PAGES_PER_KEYWORD = 2;
 const IMAGE_CONCURRENCY = 4;
+const EMPTY_SEARCHES_TO_REROUTE = 4;
 // Used only when the site catalog yields too few tags to search with.
 const FALLBACK_KEYWORDS = ['都市', '重生', '穿越', '古风', '玄幻', '逆袭', '恋爱', '悬疑', '系统', '总裁', '萌宝', '搞笑'];
 const ID = /^\d{6,30}$/;
@@ -140,13 +141,44 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
     let imageActive = 0;
     const imageWaiters = [];
 
+    // The route the service accepted last is tried first. A refusal moves on to the next one, but only when a
+    // new device is being registered anyway, so a throttled device never makes the route jump around.
+    const routes = Array.isArray(api.ROUTES) && api.ROUTES.length ? api.ROUTES : [undefined];
+    let routeIndex = 0;
+    let emptySearches = 0;
+    let savedRoute = routes[0]?.id;
+
+    function noteRouteWorked(session) {
+        emptySearches = 0;
+        const index = routes.indexOf(session?.route);
+        if (index < 0) return;
+        routeIndex = index;
+        if (routes[index]?.id !== savedRoute) { savedRoute = routes[index]?.id; persist(); }
+    }
+
+    function dispatch(session, task) {
+        if (task.type === 'chapter') return api.fetchChapter(session, task.itemId);
+        if (task.type === 'directory') return api.fetchDirectory(session, task.bookId);
+        if (task.type === 'search') return api.searchComicPage(session, task.query, task.paging);
+        throw new Error('unknown task');
+    }
+
     const scheduler = new ApiScheduler({
-        createSession: () => api.createSession(),
-        call: (session, task) => {
-            if (task.type === 'chapter') return api.fetchChapter(session, task.itemId);
-            if (task.type === 'directory') return api.fetchDirectory(session, task.bookId);
-            if (task.type === 'search') return api.searchComicPage(session, task.query, task.paging);
-            throw new Error('unknown task');
+        createSession: ({ reason } = {}) => {
+            if (reason === 'rejected' || reason === 'empty') routeIndex = (routeIndex + 1) % routes.length;
+            return api.createSession(routes[routeIndex] ? { route: routes[routeIndex] } : undefined);
+        },
+        call: async (session, task) => {
+            const result = await dispatch(session, task);
+            if (task.type !== 'search') noteRouteWorked(session);
+            else if (result?.searchId) noteRouteWorked(session);
+            else if (++emptySearches >= EMPTY_SEARCHES_TO_REROUTE) {
+                // Several keywords in a row without a comic tab at all: the service may be answering this
+                // client with a different catalogue. Ask for another route; a genuinely empty tag costs one device.
+                emptySearches = 0;
+                if (routes.length > 1 && session?.route === routes[routeIndex]) scheduler.replaceSession(false, 'rejected');
+            }
+            return result;
         },
         now, concurrency: 3, ...schedulerOptions,
     });
@@ -162,6 +194,8 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
                 if (Number.isInteger(number) && number >= 1 && number <= 20 && Array.isArray(list)) pages[number] = list.filter(validCard);
             }
             state.site = { pages, totalPages: Number(data.site?.totalPages) || 0, savedAt: Number(data.site?.savedAt) || 0 };
+            const saved = routes.findIndex((route) => route && route.id === data.route);
+            if (saved >= 0) { routeIndex = saved; savedRoute = routes[saved].id; }
             if (Array.isArray(data.pool?.items)) state.pool = { items: data.pool.items.filter(validCard), builtAt: Number(data.pool.builtAt) || 0 };
         } catch (_) { /* a missing or damaged cache only costs one network round trip */ }
     }
@@ -178,7 +212,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             try {
                 fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
                 const temporary = `${cacheFile}.${process.pid}.tmp`;
-                fs.writeFileSync(temporary, JSON.stringify({ version: 1, site: state.site, pool: state.pool }));
+                fs.writeFileSync(temporary, JSON.stringify({ version: 1, site: state.site, pool: state.pool, route: routes[routeIndex]?.id }));
                 fs.renameSync(temporary, cacheFile);
             } catch (_) { /* the cache is an optimisation only */ }
         }, 500);
@@ -389,6 +423,14 @@ function service() {
     return shared;
 }
 
-module.exports = {
+// Shown after every route has been tried. A service that refuses all of them is most likely answering the
+// client's network location, which only a different exit can change.
+function withNetworkHint(error, proxyEnabled) {
+    const message = String(error?.message || '');
+    if (error?.code !== 'BUSINESS_REJECTED' || message.includes('代理')) return message;
+    return `${message}。可能是目前的網路位置無法使用漫畫服務，${proxyEnabled ? '請在設定中改用其他地區的代理後重試' : '請在設定中啟用其他地區的代理後重試'}。`;
+}
+
+module.exports = { withNetworkHint,
     createComicService, service, seededShuffle, episodeLabel, bookToCard, topTags, dayKey, MAX_COMICS, MIN_EPISODES,
 };

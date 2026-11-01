@@ -39,10 +39,45 @@ function exchangeKey(encoded) {
     return Buffer.concat([decipher.update(raw.subarray(16)), decipher.final()]);
 }
 
+// Ways to reach the reading service. The first is used until the service refuses a request; each later one
+// changes what the service can see (edge host, registration host, the region the device claims, a forwarded
+// client address) and is tried one at a time. Nothing here depends on a title.
+const ROUTES = Object.freeze([
+    { id: 'default', host: 'api5-normal-sinfonlineb.fqnovel.com' },
+    { id: 'domestic-lf', host: 'api5-normal-lf.fqnovel.com', region: 'cn-zj', registerHosts: ['log.snssdk.com'] },
+    { id: 'domestic-hl', host: 'api5-normal-hl.fqnovel.com', region: 'cn-sc', registerHosts: ['log3-applog.fqnovel.com'] },
+    { id: 'edge-a-forwarded', host: 'api5-normal-sinfonlinea.fqnovel.com', region: 'cn-zj', forwarded: true },
+    { id: 'api3-forwarded', host: 'api3-normal-sinfonlinea.fqnovel.com', region: 'cn-yn', forwarded: true, registerHosts: ['log.snssdk.com'] },
+].map((route) => Object.freeze(route)));
+
+// A public address in a mainland carrier block, different on every device. Only sent by the routes marked `forwarded`.
+const FORWARD_PREFIXES = Object.freeze([[36, 100], [58, 60], [111, 30], [114, 80], [117, 130], [120, 36], [123, 112], [183, 14], [221, 130], [223, 104]]);
+function forwardedAddress() {
+    const [first, second] = FORWARD_PREFIXES[crypto.randomInt(FORWARD_PREFIXES.length)];
+    return `${first}.${second + crypto.randomInt(8)}.${crypto.randomInt(1, 255)}.${crypto.randomInt(1, 255)}`;
+}
+
+function routeHeaders(route, identity) {
+    if (!route?.region && !route?.forwarded) return {};
+    const headers = {};
+    if (route.region) {
+        headers['x-tt-store-region'] = route.region;
+        headers['x-tt-store-region-src'] = 'did';
+        headers.Cookie = `store-region=${route.region}; store-region-src=did; install_id=${identity.iid}`;
+    }
+    if (route.forwarded) {
+        const address = identity.forwardedFor || (identity.forwardedFor = forwardedAddress());
+        headers['X-Forwarded-For'] = address;
+        headers['X-Real-IP'] = address;
+    }
+    return headers;
+}
+
 async function call(session, apiPath, values, payload, method = 'GET', stage = '') {
-    const signed = signedMetadataRequest(apiPath, values, payload, { profile: 'reader', identity: session.identity });
+    const route = session.route || ROUTES[0];
+    const signed = signedMetadataRequest(apiPath, values, payload, { profile: 'reader', identity: session.identity, host: route.host });
     const timeout = CALL_TIMEOUT_MS;
-    const response = await (session.transport || requestJson)(signed.url, { method, headers: signed.headers, data: signed.body || undefined },
+    const response = await (session.transport || requestJson)(signed.url, { method, headers: { ...signed.headers, ...routeHeaders(route, session.identity) }, data: signed.body || undefined },
         Date.now() + timeout, AbortSignal.timeout(timeout));
     const code = Number(response?.code ?? response?.Code ?? 0);
     if (code !== 0) {
@@ -53,9 +88,9 @@ async function call(session, apiPath, values, payload, method = 'GET', stage = '
 
 // One registered anonymous device. The content key is only needed to read a chapter, so it is fetched on
 // first use: the directory and the search work with the device alone and must not depend on the key step.
-async function createSession({ register = registerDevice, transport = requestJson } = {}) {
-    const identity = await register(transport, READER_PROFILE);
-    return { identity, key: null, keyver: 0, keyPending: null, createdAt: Date.now(), transport };
+async function createSession({ register = registerDevice, transport = requestJson, route = ROUTES[0] } = {}) {
+    const identity = await register(transport, READER_PROFILE, route.registerHosts ? { hosts: route.registerHosts } : undefined);
+    return { identity: { ...identity }, route, key: null, keyver: 0, keyPending: null, createdAt: Date.now(), transport };
 }
 
 async function ensureKey(session) {
@@ -209,5 +244,5 @@ async function downloadImage(url, { fetcher, timeoutMs = 5000, attempts = 2 } = 
 
 module.exports = {
     createSession, fetchChapter, fetchDirectory, searchComicPage, pictureUrl, coverUrl, decryptImage, downloadImage,
-    parseChapter, decodeChapter, exchangePayload, exchangeKey, trustedImageUrl, IMAGE_WIDTHS, READER_VERSION,
+    parseChapter, decodeChapter, exchangePayload, exchangeKey, trustedImageUrl, IMAGE_WIDTHS, READER_VERSION, ROUTES, routeHeaders,
 };

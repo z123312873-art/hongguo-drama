@@ -1300,7 +1300,10 @@ ipcMain.handle('browse-list', (_event, options) =>
 
 const comicReply = (work) => async (_event, payload) => {
   try { return { success: true, ...(await work(payload && typeof payload === 'object' ? payload : {})) }; }
-  catch (error) { return { success: false, error: error?.message || '漫画服务暂时不可用', code: String(error?.code || '') }; }
+  catch (error) {
+    const hint = require('./src/native/comic').withNetworkHint;
+    return { success: false, error: error?.message ? hint(error, getCurrentSettings().proxy_enabled === true) : '漫画服务暂时不可用', code: String(error?.code || '') };
+  }
 };
 ipcMain.handle('comic-snapshot', comicReply(async () => ({ snapshot: require('./src/native/comic').service().snapshot() })));
 ipcMain.handle('comic-extras', comicReply(async (payload) => require('./src/native/comic').service().extras({ exclude: payload.exclude, limit: payload.limit })));
@@ -4216,6 +4219,8 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     store.init(dataFile);
     require('./src/native/public-details').initRatingStore(path.join(app.getPath('userData'), 'ratings-cache.json'));
     require('./src/native/comic').service().configure({ file: path.join(app.getPath('userData'), 'comic-cache.json') });
+    require('./src/native/browse-cache').shared.configure({ file: path.join(app.getPath('userData'), 'browse-cache.json') });
+    require('./src/native/browse-cache').shared.startPeriodicRefresh();
     setDeviceIdentityFile(path.join(app.getPath('userData'), 'danmaku-client.json'));
     loadDownloadTasks();
     loadSeriesRegistry();

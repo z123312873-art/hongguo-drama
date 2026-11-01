@@ -122,12 +122,25 @@ test('when every device is exhausted the caller gets a rate-limit error after a 
     assert.ok(service.calls <= 4);
 });
 
-test('a request-level business code is final: no retry, no new device', async () => {
+test('a request-level business code gets fresh devices, then ends with the original code', async () => {
     let calls = 0;
-    const scheduler = new ApiScheduler({ ...fast, createSession: async () => ({}), call: async () => { calls += 1; throw Object.assign(new Error('bad id'), { code: 'BUSINESS_REJECTED', apiCode: 101104 }); } });
-    await assert.rejects(scheduler.run('x', PRIORITY.click, 1), (error) => error.code === 'BUSINESS_REJECTED');
-    assert.equal(calls, 1);
-    assert.equal(scheduler.snapshot().rotations, 0);
+    let created = 0;
+    const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 1, permanentAttempts: 3,
+        createSession: async () => { created += 1; return {}; },
+        call: async () => { calls += 1; throw Object.assign(new Error('bad id'), { code: 'BUSINESS_REJECTED', apiCode: 101104 }); } });
+    await assert.rejects(scheduler.run('x', PRIORITY.click, 1), (error) => error.code === 'BUSINESS_REJECTED' && error.apiCode === 101104);
+    assert.equal(calls, 3);
+    assert.equal(created, 3);
+});
+
+test('a request-level business code succeeds once a later device is accepted, and the route hint says why', async () => {
+    const reasons = [];
+    const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 1,
+        createSession: async ({ reason }) => { reasons.push(reason); return { id: reasons.length }; },
+        call: async (device) => { if (device.id < 3) throw Object.assign(new Error('not here'), { code: 'BUSINESS_REJECTED', apiCode: 101104 }); return 'ok'; } });
+    assert.equal(await scheduler.run('x', PRIORITY.click, 1), 'ok');
+    assert.deepEqual(reasons, ['initial', 'rejected', 'rejected']);
+    assert.equal(scheduler.snapshot().rotations, 2);
 });
 
 test('a device refused with a business code is replaced and the request still succeeds', async () => {

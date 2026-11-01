@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const realApi = require('./comic-api');
-const { createComicService, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS } = require('./comic');
+const { createComicService, withNetworkHint, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS } = require('./comic');
 
 const fastScheduler = { rate: 500, burst: 20, concurrency: 3, backoff: [2, 4, 8, 16], rotationCooldownMs: 5, rejectionPauseMs: 5 };
 const id = (n) => String(7000000000000000000n + BigInt(n));
@@ -359,4 +359,74 @@ test('a service that refuses every directory request ends with the stage and the
     const api = { ...realApi, createSession: () => realApi.createSession({ register: async () => identity, transport }) };
     const service = createComicService({ api, schedulerOptions: { ...fastScheduler, rejectionPauseMs: 5 } });
     await assert.rejects(service.episodes(id(5)), (error) => error.code === 'BUSINESS_REJECTED' && /分集目录，代码 101021/.test(error.message));
+});
+
+function gatedTransport(accept, seen = []) {
+    return async (url, options = {}) => {
+        const host = new URL(url).host;
+        seen.push({ host, headers: options.headers || {} });
+        if (url.includes('registerkey')) return { code: 101021 };
+        if (!url.includes('directory')) return { code: 0 };
+        if (!accept(host, options.headers || {})) return { code: 101104 };
+        return { code: 0, data: { item_data_list: Array.from({ length: 30 }, (_, i) => ({ item_id: id(9000 + i), title: `第${i + 1}话` })) } };
+    };
+}
+
+test('a service that answers one client with 101104 is reached through another route, and the working route is remembered', async () => {
+    const identity = { device_id: '7500000000000000001', iid: '7500000000000000002', cdid: 'c' };
+    const wanted = realApi.ROUTES[2];
+    const seen = [];
+    let registrations = 0;
+    const api = { ...realApi, createSession: (options) => { registrations += 1; return realApi.createSession({ ...options, register: async () => identity, transport: gatedTransport((host) => host === wanted.host, seen) }); } };
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'comic-route-')), 'cache.json');
+    try {
+        const service = createComicService({ api, schedulerOptions: { ...fastScheduler, rotationCooldownMs: 1 } });
+        service.configure({ file });
+        const outcome = await service.episodes(id(5));
+        assert.equal(outcome.total, 30);
+        assert.deepEqual([...new Set(seen.filter((entry) => !entry.host.includes('log')).map((entry) => entry.host))], [realApi.ROUTES[0].host, realApi.ROUTES[1].host, wanted.host]);
+        const before = registrations;
+        await service.episodes(id(6));
+        assert.equal(registrations, before, 'the next title uses the same device on the same route');
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).route, wanted.id);
+        const reopened = createComicService({ api, schedulerOptions: fastScheduler });
+        reopened.configure({ file });
+        seen.length = 0;
+        await reopened.episodes(id(7));
+        assert.equal(seen.find((entry) => !entry.host.includes('log')).host, wanted.host, 'a restart starts on the remembered route');
+    } finally { fs.rmSync(path.dirname(file), { recursive: true, force: true }); }
+});
+
+test('when every route is refused the code is reported after a bounded number of devices', async () => {
+    const identity = { device_id: '7500000000000000001', iid: '7500000000000000002', cdid: 'c' };
+    let registrations = 0;
+    const api = { ...realApi, createSession: (options) => { registrations += 1; return realApi.createSession({ ...options, register: async () => identity, transport: gatedTransport(() => false) }); } };
+    const service = createComicService({ api, schedulerOptions: { ...fastScheduler, rotationCooldownMs: 1 } });
+    await assert.rejects(service.episodes(id(5)), (error) => error.code === 'BUSINESS_REJECTED' && error.apiCode === 101104);
+    assert.ok(registrations <= 5, `registered ${registrations} devices`);
+});
+
+test('only the later routes pin a region or forward an address, and each device keeps one address', async () => {
+    const identity = { device_id: '7500000000000000001', iid: '7500000000000000002', cdid: 'c' };
+    const plain = realApi.routeHeaders(realApi.ROUTES[0], identity);
+    assert.deepEqual(plain, {});
+    const forwarded = realApi.ROUTES.find((route) => route.forwarded);
+    const device = { ...identity };
+    const first = realApi.routeHeaders(forwarded, device);
+    const second = realApi.routeHeaders(forwarded, device);
+    assert.match(first['X-Forwarded-For'], /^\d{1,3}(\.\d{1,3}){3}$/);
+    assert.equal(first['X-Forwarded-For'], second['X-Forwarded-For']);
+    assert.match(first.Cookie, new RegExp(`install_id=${identity.iid}`));
+    assert.match(first['x-tt-store-region'], /^cn-[a-z]{2}$/);
+    assert.ok(realApi.ROUTES.every((route) => /^[a-z0-9.-]+\.fqnovel\.com$/.test(route.host) && (route.registerHosts || []).every((host) => /(^|\.)(fqnovel|snssdk)\.com$/.test(host))));
+});
+
+test('the network hint is added only to a refusal, once, and follows the proxy setting', () => {
+    const refusal = Object.assign(new Error('漫画服务暂时无法提供该内容（分集目录，代码 101104）'), { code: 'BUSINESS_REJECTED' });
+    assert.match(withNetworkHint(refusal, false), /代码 101104）。.*啟用其他地區的代理/);
+    assert.match(withNetworkHint(refusal, true), /改用其他地區的代理/);
+    assert.equal(withNetworkHint(Object.assign(new Error('漫画服务连接失败'), { code: 'ERR_NETWORK' }), false), '漫画服务连接失败');
+    const hinted = withNetworkHint(refusal, false);
+    assert.equal(withNetworkHint(Object.assign(new Error(hinted), { code: 'BUSINESS_REJECTED' }), false), hinted);
 });

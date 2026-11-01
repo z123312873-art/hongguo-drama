@@ -228,7 +228,7 @@ function signedMetadataRequest(apiPath, values = {}, payload = null, options = {
     for (let n = 0; n < 128; n += 1) {
         requestTicket = ticketBase + n;
         query = pythonUrlEncode({ ...values, ...device, ts: String(khronos), _rticket: String(requestTicket) });
-        url = `https://api5-normal-sinfonlineb.fqnovel.com${apiPath}?${query}`;
+        url = `https://${options?.host || 'api5-normal-sinfonlineb.fqnovel.com'}${apiPath}?${query}`;
         if (branchOf(url, body, khronos) === 0) break;
         if (n === 127) throw new Error('无法生成 App 目录请求签名');
     }
