@@ -1,8 +1,10 @@
 const axios = require('axios');
+const { shared: listCache } = require('./browse-cache');
 
 const ORIGIN = 'https://www.kuaikaw.cn';
 const ID = /^\d{1,30}$/;
 let genreCache;
+let directoryPending;
 
 function plainText(value) {
   return String(value || '').replace(/<[^>]*>/g, '').trim();
@@ -64,7 +66,7 @@ function pageData(html) {
   } catch (_) { throw new Error('河马目录数据异常，请稍后重试'); }
 }
 
-async function browseList(options = {}) {
+async function fetchList(options = {}) {
   try {
     const { genre = '', page = 1, forceRefresh = false } = options || {};
     const pg = Number(page);
@@ -73,8 +75,15 @@ async function browseList(options = {}) {
       throw new Error('河马题材或页码无效，请重新选择');
     }
     let firstHtml;
-    if (forceRefresh || !genreCache || genreCache.expires <= Date.now()) {
-      firstHtml = await request('/browse');
+    const refreshGenres = forceRefresh && pg === 1;
+    const saved = refreshGenres || genreCache?.expires > Date.now() ? null : listCache.getAux('hema:genres');
+    if (Array.isArray(saved) && saved.length && saved.every(item => typeof item?.slug === 'string' && typeof item.label === 'string')) {
+      genreCache = { items: saved, expires: Date.now() + 300000 };
+    }
+    if (refreshGenres || !genreCache || genreCache.expires <= Date.now()) {
+      // Pages of one window start together; they share a single directory request.
+      directoryPending = directoryPending || request('/browse').finally(() => { directoryPending = undefined; });
+      firstHtml = await directoryPending;
       const directory = pageData(firstHtml);
       if (!Array.isArray(directory.typeThreeList)) throw new Error('河马没有返回可用题材，请重试');
       const seen = new Set();
@@ -85,6 +94,7 @@ async function browseList(options = {}) {
         .filter(item => { if (item.slug === '0' || seen.has(item.slug)) return false; seen.add(item.slug); return true; });
       if (!items.length) throw new Error('河马没有返回可用题材，请重试');
       genreCache = { items, expires: Date.now() + 300000 };
+      listCache.setAux('hema:genres', items);
     }
     if (slug !== '0' && !genreCache.items.some(item => item.slug === slug)) throw new Error('河马题材无效，请重新选择');
     const apiPath = slug === '0' && pg === 1 ? '/browse' : `/browse/${slug}${pg > 1 ? `/${pg}` : ''}`;
@@ -166,5 +176,7 @@ async function fetchPlayUrlSingle(vid, sid) {
     return { url, spadeA: null, codec: '', source: 'hema' };
   } catch (error) { return { url: null, spadeA: null, codec: null, source: 'hema', error: error.message }; }
 }
+
+const browseList = listCache.wrap('hema', fetchList);
 
 module.exports = { browseList, search, fetchEpisodeList, fetchPlayUrlSingle };

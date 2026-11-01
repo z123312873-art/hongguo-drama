@@ -268,6 +268,12 @@ function Browse({ onNavigate, active = true }) {
         let combined = firstResults.slice();
         const seen = new Set(combined.map(item => item?.series_id).filter(Boolean));
         let lastHasMore = res.hasMore === true;
+        // A slow link would keep the skeleton up until the last page arrives; the first page can already be browsed.
+        if (!haveCards && windowed.count > 1 && combined.length) {
+          setResults(combined);
+          setMeta({ total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: false });
+          keepGenres(res.genres);
+        }
         // The extra source pages do not depend on each other, so they load together.
         const extras = await Promise.all(Array.from({ length: Math.max(0, windowed.count - 1) }, (_, index) => (
           window.electronAPI.browseList({ source, category: cat, genre: gen, page: windowed.start + index + 1, forceRefresh }).catch(() => null)

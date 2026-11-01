@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { shared: listCache } = require('./browse-cache');
 
 const API = 'https://xifan-api-cn.youlishipin.com';
 const ID = /^[a-zA-Z0-9_-]{1,200}$/;
@@ -46,9 +47,32 @@ function contents(result) {
   return (Array.isArray(result.elements) ? result.elements : []).flatMap(element => Array.isArray(element?.contents) ? element.contents : []);
 }
 
+function savedGenres(maxAge) {
+  const items = listCache.getAux('xifan:genres', maxAge);
+  return Array.isArray(items) && items.length && items.every(item => Number.isSafeInteger(item?.categoryId) && typeof item.slug === 'string'
+    && typeof item.label === 'string') ? items : null;
+}
+
+let genrePending;
+
 async function genres(forceRefresh) {
   if (!forceRefresh && genreCache?.expires > Date.now()) return genreCache.items;
-  const result = await request('/xifan/drama/portalPage', { reqType: 'duanjuCategory' });
+  const recent = forceRefresh ? null : savedGenres();
+  if (recent) { genreCache = { expires: Date.now() + 300000, items: recent }; return recent; }
+  // Pages of one window start together; they share a single genre request.
+  genrePending = genrePending || loadGenres().finally(() => { genrePending = undefined; });
+  return genrePending;
+}
+
+async function loadGenres() {
+  let result;
+  try { result = await request('/xifan/drama/portalPage', { reqType: 'duanjuCategory' }); }
+  catch (error) {
+    const old = savedGenres(30 * 24 * 60 * 60 * 1000);
+    if (!old) throw error;
+    genreCache = { expires: Date.now() + 60000, items: old };
+    return old;
+  }
   const seen = new Set();
   const items = contents(result).flatMap(item => {
     const category = item.categoryItemVo;
@@ -59,6 +83,7 @@ async function genres(forceRefresh) {
     .filter(item => { if (seen.has(item.slug)) return false; seen.add(item.slug); return true; });
   if (!items.length) throw new Error('西饭没有返回可用分类，请重试');
   genreCache = { expires: Date.now() + 300000, items };
+  listCache.setAux('xifan:genres', items);
   return items;
 }
 
@@ -75,7 +100,7 @@ function normalizeList(result, page, categoryItems = []) {
     genres: categoryItems.map(({ slug, label }) => ({ slug, label })), pageTitle: '西饭短剧', sourceUrl: '' };
 }
 
-async function browseList(options = {}) {
+async function fetchList(options = {}) {
   try {
     const { genre = '', page = 1, forceRefresh = false } = options || {};
     const pg = Math.max(1, Number.parseInt(page, 10) || 1);
@@ -134,5 +159,7 @@ async function fetchPlayUrlSingle(vid, sid) {
     return { url, spadeA: null, codec: '', source: 'xifan' };
   } catch (error) { return { url: null, spadeA: null, codec: null, source: 'xifan', error: error.message }; }
 }
+
+const browseList = listCache.wrap('xifan', fetchList);
 
 module.exports = { browseList, search, fetchEpisodeList, fetchPlayUrlSingle };

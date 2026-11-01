@@ -1,3 +1,4 @@
+const passthroughCache = { shared: { wrap: (_name, fetcher) => fetcher, getAux: () => undefined, setAux() {} } };
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -35,7 +36,7 @@ async function check() {
   }
   const context = { module: { exports: {} }, require: name => name === 'axios' ? {
     get: (url, options) => request('GET', url, null, options), post: (url, body, options) => request('POST', url, body, options),
-  } : require(name), Buffer, URL, AbortController, setTimeout: (fn, ms) => setTimeout(fn, expireTimer ? 0 : ms), clearTimeout };
+  } : name === './browse-cache' ? passthroughCache : require(name), Buffer, URL, AbortController, setTimeout: (fn, ms) => setTimeout(fn, expireTimer ? 0 : ms), clearTimeout };
   vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), context, { filename: sourcePath });
   const hema = context.module.exports;
   const search = await hema.search('总裁', 2);
