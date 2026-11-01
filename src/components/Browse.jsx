@@ -13,6 +13,9 @@ import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWin
 import { uiScale } from '../uiScale.mjs';
 import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
+import ComicBrowse from './ComicBrowse';
+
+const COMIC_SOURCE_URL = 'https://hongguoduanju.com/category/comic';
 
 const pageCache = new Map();
 // Category and rank clicks swap this snapshot. A fresh one is not downloaded again.
@@ -99,6 +102,7 @@ function Browse({ onNavigate, active = true }) {
   const [error, setError] = useState('');
   const [unsupported, setUnsupported] = useState(false);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [comicReload, setComicReload] = useState(0);
 
   // 详情抽屉
   const [detail, setDetail] = useState(null); // { series_id, series_title, cover, episodes: [...] }
@@ -368,11 +372,20 @@ function Browse({ onNavigate, active = true }) {
     return () => { cancelled = true; clearTimeout(retryTimer); };
   }, [source, results]);
 
+  const comicView = source === 'hongguo' && category === 'comic';
+
   useEffect(() => {
     if (!active || !sourceIds.split('|').includes(source)) return undefined;
+    if (comicView) {
+      setLoading(false);
+      setError('');
+      setUnsupported(false);
+      setSourceUrl(COMIC_SOURCE_URL);
+      return undefined;
+    }
     loadList(category, genre, page);
     return invalidateList;
-  }, [active, category, genre, page, loadList, source, sourceIds, invalidateList]);
+  }, [active, category, genre, page, loadList, source, sourceIds, invalidateList, comicView]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -455,7 +468,7 @@ function Browse({ onNavigate, active = true }) {
     setSourceUrl(snap?.sourceUrl || '');
     setUnsupported(false);
     setError('');
-    setLoading(!snap?.results?.length);
+    setLoading(!snap?.results?.length && !(nextSource === 'hongguo' && cat === 'comic'));
   };
 
   const switchSource = (next) => {
@@ -648,7 +661,7 @@ function Browse({ onNavigate, active = true }) {
         <div className="browse-header-right">
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
           <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />搜索短剧</button>
-          <button className="btn btn-outline" disabled={loading || sourcesLoading} onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />刷新片单</button>
+          <button className="btn btn-outline" disabled={loading || sourcesLoading} onClick={() => (comicView ? setComicReload(value => value + 1) : loadList(category, genre, page, true))}><RefreshCw size={15} />刷新片单</button>
           {meta.total > 0 && <span className="browse-stat">共 {meta.total} 部</span>}
           {source === 'hongguo' && sourceUrl && <button className="btn btn-outline" onClick={showBrowser}>
             <ExternalLink size={15} />
@@ -682,6 +695,9 @@ function Browse({ onNavigate, active = true }) {
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
+      {comicView && <ComicBrowse active={active} reservedRows={reserveRows} reloadToken={comicReload} />}
+
+      {!comicView && <>
       {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
       {source === 'hongguo' && (
         <div className="browse-genres" role="group" aria-label="标签筛选，可左右滑动，最多同时选择两个">
@@ -818,6 +834,8 @@ function Browse({ onNavigate, active = true }) {
       )}
 
       {source !== 'hongguo' && !totalPages && (page > 1 || meta.hasMore) && <div className="browse-pager"><button className="pager-item" disabled={page <= 1 || loading} onClick={() => gotoPage(page - 1)}>上一页</button><span>第 {page} 页</span><button className="pager-item" disabled={!meta.hasMore || loading} onClick={() => gotoPage(page + 1)}>下一页</button></div>}
+
+      </>}
 
       {/* ===== 剧集详情抽屉 ===== */}
       {(detail || detailLoading) && (
