@@ -266,3 +266,32 @@ test('certificate failures are reported as a trust problem and mixed failures ke
     call = 0;
     await assert.rejects(load()(async () => { if (call++ < 2) throw plain; return { device_id: '0' }; }), { reason: 'REJECTED' });
 });
+
+test('registerDevice sends the reader identity without touching the Hongguo registration cache', async () => {
+    const api = loadModule();
+    let request;
+    const identity = await api.registerDevice(async (...args) => { request = args; return { device_id: '55555', install_id: '66666' }; }, api.READER_PROFILE);
+    assert.equal(identity.device_id, '55555');
+    const [, options] = request;
+    assert.equal(options.headers['x-ss-dp'], '1967');
+    assert.match(options.headers['User-Agent'], /^com\.dragon\.read\/74332 /);
+    const data = options.data;
+    const salt = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
+    const derived = crypto.createHash('sha512').update(Buffer.concat([crypto.createHash('sha512').update(data.subarray(6, 38)).digest(), salt])).digest();
+    const decipher = crypto.createDecipheriv('aes-128-cbc', derived.subarray(0, 16), derived.subarray(16, 32));
+    const header = JSON.parse(gunzipSync(Buffer.concat([decipher.update(data.subarray(38)), decipher.final()]).subarray(64)).toString('utf8')).header;
+    assert.equal(header.aid, 1967);
+    assert.equal(header.package, 'com.dragon.read');
+    assert.equal(header.version_code, 74332);
+    assert.equal(header.app_version, '7.4.3.32');
+    // Registering the reader device twice yields two independent attempts: rotation depends on this.
+    let calls = 0;
+    await api.registerDevice(async () => { calls++; return { device_id: '1', install_id: '2' }; }, api.READER_PROFILE);
+    await api.registerDevice(async () => { calls++; return { device_id: '3', install_id: '4' }; }, api.READER_PROFILE);
+    assert.equal(calls, 2);
+    // The default cache is still empty and the default header is still Hongguo's.
+    let defaultRequest;
+    await api.getPlaybackDevice(async (...args) => { defaultRequest = args; return { device_id: '7', install_id: '8' }; });
+    assert.equal(defaultRequest[1].headers['x-ss-dp'], '8662');
+    await assert.rejects(api.registerDevice(async () => ({ code: 5 }), api.READER_PROFILE), error => error.code === 'DEVICE_REGISTRATION_FAILED' && error.reason === 'REJECTED');
+});
