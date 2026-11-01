@@ -115,11 +115,23 @@ async function main() {
   assert.equal(real.totalPages, 34);
   assert.equal(calls.length, 2, '相同目录并发请求应合并');
   assert.deepEqual(real, same);
-  comic.resolve({ data: html('comic') });
+  const md5 = '0123456789abcdef0123456789abcdef';
+  comic.resolve({ data: html('comic', 1, [
+    { series_id: '7111943588446997534', series_name: '图文漫画', series_cover: `https://p6-novel.byteimg.com/novel-pic/${md5}~tplv-shrink:640:0.image`,
+      episode_cnt: 217, tags: ['都市脑洞', '复仇'], episode_right_text: '全217集', scoreText: '9.9', vid_list: ['1'] },
+    { series_id: '7111943588446997535', series_name: '无封面漫画', series_cover: 'https://example.com/other.jpg', episode_cnt: 30, tags: [] },
+  ]) });
   const comicResult = await slowComic;
-  assert.equal(comicResult.results.length, 0, '图片漫画不能转换为视频卡片');
-  assert.equal(comicResult.unsupported, true);
-  assert.match(comicResult.emptyMessage, /图文|图片/);
+  assert.equal(comicResult.success, true);
+  assert.notEqual(comicResult.unsupported, true, '漫画现在是可浏览的图文分类');
+  assert.equal(comicResult.results.length, 2);
+  assert.equal(comicResult.results[0].cover, `https://p3-novel.byteimg.com/novel-pic/${md5}~tplv-resize:320:0.webp`, '漫画海报使用轻量 WebP 版本');
+  assert.equal(comicResult.results[1].cover, 'https://example.com/other.jpg', '无法识别的封面保持来源原样');
+  assert.equal(comicResult.results[0].rating, null, '漫画不显示星等');
+  assert.equal(comicResult.results[0].is_new, undefined, '漫画不显示新剧标签');
+  assert.equal(comicResult.results[0].episode_count, 217);
+  assert.equal(JSON.stringify(comicResult.results[0].tags), JSON.stringify(['都市脑洞', '复仇']));
+  assert.equal('vid_list' in comicResult.results[0], false, '目录卡片不携带分集清单');
   await browseList({});
   assert.equal(calls.length, 2, '再次访问应使用短缓存');
   await browseList({ forceRefresh: true });
@@ -147,6 +159,6 @@ async function main() {
   assert.equal(removedSeries.success, false);
   assert.match(removedSeries.error, /无效/);
   assert.equal(calls.length, callsBeforeSeries, '系列剧不是官网目录，不能再发请求');
-  console.log('PASS catalog: category isolation, SSR parsing, comic distinction, dedup/cache/refresh, filters/pagination, bounded timeout and invalid data');
+  console.log('PASS catalog: category isolation, SSR parsing, comic cards, dedup/cache/refresh, filters/pagination, bounded timeout and invalid data');
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });
