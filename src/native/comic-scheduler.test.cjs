@@ -29,7 +29,7 @@ function fakeService({ quota = 100, windowMs = 400, burnFirst = false, alwaysEmp
     return service;
 }
 
-const fast = { rate: 140, burst: 10, concurrency: 2, backoff: [4, 12, 30, 60], rotationCooldownMs: 20, maxAttempts: 6 };
+const fast = { rate: 140, burst: 10, concurrency: 2, backoff: [4, 12, 30, 60], rotationCooldownMs: 20, maxAttempts: 6, rejectionPauseMs: 5 };
 
 test('a long sustained run stays under the device allowance: no empty body at all', async () => {
     const service = fakeService();
@@ -37,7 +37,7 @@ test('a long sustained run stays under the device allowance: no empty body at al
     const results = await Promise.all(Array.from({ length: 220 }, (_, index) => scheduler.run(`ch-${index}`, PRIORITY.background, index)));
     assert.equal(results.length, 220);
     assert.equal(service.empties, 0, 'the throttle prevents the empty-body failure instead of reacting to it');
-    assert.equal(service.devices.length, 1);
+    assert.equal(service.devices.length, Math.ceil(220 / scheduler.callsPerSession), 'each device is retired before it can be refused');
     assert.equal(scheduler.snapshot().failures, 0);
 });
 
@@ -122,12 +122,33 @@ test('when every device is exhausted the caller gets a rate-limit error after a 
     assert.ok(service.calls <= 4);
 });
 
-test('business errors are not retried and do not rotate devices', async () => {
+test('a request-level business code is final: no retry, no new device', async () => {
     let calls = 0;
-    const scheduler = new ApiScheduler({ ...fast, createSession: async () => ({}), call: async () => { calls += 1; throw Object.assign(new Error('api 101021'), { code: 'BUSINESS_REJECTED' }); } });
+    const scheduler = new ApiScheduler({ ...fast, createSession: async () => ({}), call: async () => { calls += 1; throw Object.assign(new Error('bad id'), { code: 'BUSINESS_REJECTED', apiCode: 101104 }); } });
     await assert.rejects(scheduler.run('x', PRIORITY.click, 1), (error) => error.code === 'BUSINESS_REJECTED');
     assert.equal(calls, 1);
     assert.equal(scheduler.snapshot().rotations, 0);
+});
+
+test('a device refused with a business code is replaced and the request still succeeds', async () => {
+    const devices = [];
+    const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 5,
+        createSession: async () => { const device = { id: devices.length + 1 }; devices.push(device); return device; },
+        call: async (device, input) => { if (device.id === 1) throw Object.assign(new Error('refused'), { code: 'BUSINESS_REJECTED', apiCode: 101021 }); return { input, device: device.id }; } });
+    const results = await Promise.all([scheduler.run('a', PRIORITY.click, 1), scheduler.run('b', PRIORITY.click, 2), scheduler.run('c', PRIORITY.click, 3)]);
+    assert.deepEqual(results.map((entry) => entry.device), [2, 2, 2]);
+    assert.equal(devices.length, 2, 'simultaneous refusals from one device rotate once');
+    assert.equal(scheduler.snapshot().failures, 0);
+});
+
+test('a service that refuses every device ends with the original code after bounded tries', async () => {
+    let created = 0;
+    const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 5, maxRotations: 2,
+        createSession: async () => { created += 1; return {}; },
+        call: async () => { throw Object.assign(new Error('refused'), { code: 'BUSINESS_REJECTED', apiCode: 101021 }); } });
+    scheduler.maxAttempts = 4;
+    await assert.rejects(scheduler.run('x', PRIORITY.click, 1), (error) => error.code === 'BUSINESS_REJECTED' && error.apiCode === 101021);
+    assert.ok(created <= 3, `devices registered: ${created}`);
 });
 
 test('transient network failures retry and then succeed', async () => {
@@ -138,13 +159,20 @@ test('transient network failures retry and then succeed', async () => {
     assert.equal(scheduler.snapshot().rotations, 0, 'network trouble is not a device problem');
 });
 
-test('a failed device registration rejects only that request and a later one recovers', async () => {
+test('a failed device registration is retried and the request recovers', async () => {
     let attempts = 0;
     const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 10, call: async (_s, input) => input,
         createSession: async () => { attempts += 1; if (attempts === 1) throw Object.assign(new Error('register'), { code: 'DEVICE_REGISTRATION_FAILED' }); return {}; } });
-    await assert.rejects(scheduler.run('a', PRIORITY.click, 1), (error) => error.code === 'DEVICE_REGISTRATION_FAILED');
-    assert.equal(await scheduler.run('b', PRIORITY.click, 2), 2);
+    assert.equal(await scheduler.run('a', PRIORITY.click, 1), 1);
     assert.equal(attempts, 2);
+});
+
+test('a registration that keeps failing ends after a few tries instead of hanging the click', async () => {
+    let attempts = 0;
+    const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 5, call: async (_s, input) => input,
+        createSession: async () => { attempts += 1; throw Object.assign(new Error('register'), { code: 'DEVICE_REGISTRATION_FAILED' }); } });
+    await assert.rejects(scheduler.run('a', PRIORITY.click, 1), (error) => error.code === 'DEVICE_REGISTRATION_FAILED');
+    assert.equal(attempts, 3);
 });
 
 test('the sustained rate never exceeds the configured token bucket', async () => {
@@ -159,4 +187,15 @@ test('the sustained rate never exceeds the configured token bucket', async () =>
 
 test('constructor rejects missing collaborators', () => {
     assert.throws(() => new ApiScheduler({}), TypeError);
+});
+
+test('a refusal right after registration is retried on the same device before it is replaced', async () => {
+    const devices = [];
+    let refused = 0;
+    const scheduler = new ApiScheduler({ ...fast, rotationCooldownMs: 5,
+        createSession: async () => { const device = { id: devices.length + 1 }; devices.push(device); return device; },
+        call: async (device, input) => { if (refused < 1) { refused += 1; throw Object.assign(new Error('not known yet'), { code: 'BUSINESS_REJECTED', apiCode: 101021 }); } return { input, device: device.id }; } });
+    const outcome = await scheduler.run('a', PRIORITY.click, 1);
+    assert.equal(outcome.device, 1, 'one early refusal does not cost a new device');
+    assert.equal(devices.length, 1);
 });

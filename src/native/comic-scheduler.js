@@ -6,7 +6,18 @@
 // fresh allowance. This scheduler keeps a sustained rate well below that, backs off with jitter when an empty
 // body shows up anyway, and only then moves to a new device. It knows nothing about HTTP or comics: the
 // caller supplies `call(session, input)` and `createSession()`.
+//
+// Two further failure shapes are handled: a device the service refuses with a business code (not an empty
+// body) is replaced like an exhausted one, and every device is retired after a fixed number of calls so it
+// never reaches the point where the service starts refusing it.
 const EMPTY = 'EMPTY_RESPONSE';
+const REJECTED = 'BUSINESS_REJECTED';
+// Business codes that describe the request itself (an unknown book), so another device cannot help.
+const PERMANENT_CODES = [101104];
+// A device that cannot even be registered is not retried for long: the person is waiting on a click.
+const REGISTRATION_ATTEMPTS = 3;
+// A request refused by this many different devices is not going to be served; say so instead of waiting.
+const REJECTED_ATTEMPTS = 3;
 const RETRYABLE_NETWORK = new Set(['ETIMEDOUT', 'ECONNABORTED', 'ECONNRESET', 'ERR_NETWORK', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE']);
 
 const PRIORITY = Object.freeze({ click: 0, prefetch: 1, background: 2 });
@@ -20,12 +31,15 @@ class ApiScheduler {
         call, createSession,
         rate = 1.4, burst = 10, concurrency = 2,
         emptiesToRotate = 3, maxRotations = 3, rotationWindowMs = 10 * 60 * 1000, rotationCooldownMs = 5000,
+        rejectionsToRotate = 2, rejectionPauseMs = 1500, callsPerSession = 70, permanentCodes = PERMANENT_CODES,
         backoff = [400, 1200, 3000, 6000], maxAttempts = 6,
         now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), random = Math.random,
     } = {}) {
         if (typeof call !== 'function' || typeof createSession !== 'function') throw new TypeError('call and createSession are required');
         Object.assign(this, { call, createSession, rate, burst, concurrency, emptiesToRotate, maxRotations, rotationWindowMs,
-            rotationCooldownMs, backoff, maxAttempts, now, sleep, random });
+            rotationCooldownMs, rejectionsToRotate, rejectionPauseMs, callsPerSession, backoff, maxAttempts, now, sleep, random });
+        this.permanentCodes = new Set(permanentCodes);
+        this.consecutiveRejections = 0;
         this.tokens = burst;
         this.refilledAt = now();
         this.pausedUntil = 0;
@@ -40,7 +54,7 @@ class ApiScheduler {
         this.lastSessionAt = 0;
         this.pumping = false;
         this.timer = null;
-        this.stats = { calls: 0, empties: 0, rotations: 0, retries: 0, failures: 0 };
+        this.stats = { calls: 0, empties: 0, rejections: 0, rotations: 0, retired: 0, retries: 0, failures: 0 };
     }
 
     // Same key while queued or running: share the result. A more urgent caller raises the priority.
@@ -119,7 +133,8 @@ class ApiScheduler {
                 try {
                     const session = await this.createSession();
                     this.consecutiveEmpties = 0;
-                    this.session = { value: session, generation: this.generation };
+                    this.consecutiveRejections = 0;
+                    this.session = { value: session, generation: this.generation, calls: 0 };
                     return this.session;
                 } finally { this.lastSessionAt = this.now(); this.sessionPromise = null; }
             })();
@@ -136,7 +151,14 @@ class ApiScheduler {
     async attemptJob(job) {
         let session;
         try { session = await this.currentSession(); }
-        catch (error) { return this.finish(job, null, error); }
+        catch (error) { return this.retryWithoutSession(job, error); }
+        session.calls += 1;
+        // Retire the device before the service has a reason to refuse it. This call still uses it.
+        if (session.calls >= this.callsPerSession && this.session === session) {
+            this.session = null;
+            this.generation += 1;
+            this.stats.retired += 1;
+        }
         let result;
         try {
             this.stats.calls += 1;
@@ -144,43 +166,29 @@ class ApiScheduler {
         } catch (error) {
             return this.handleError(job, session, error);
         }
-        if (session.generation === this.generation) this.consecutiveEmpties = 0;
+        if (session.generation === this.generation) { this.consecutiveEmpties = 0; this.consecutiveRejections = 0; }
         return this.finish(job, result);
     }
 
-    async handleError(job, session, error) {
-        const code = String(error?.code || '');
-        const empty = code === EMPTY;
-        const network = RETRYABLE_NETWORK.has(code);
-        if (!empty && !network) return this.finish(job, null, error);
+    retire() {
+        this.session = null;
+        this.generation += 1;
+        this.rotations.push(this.now());
+        this.stats.rotations += 1;
+    }
+
+    // Registering a device can fail for a moment (network, service). It is retried like any other call.
+    retryWithoutSession(job, error) {
         job.attempt += 1;
         this.stats.retries += 1;
-        if (job.attempt >= this.maxAttempts) {
+        if (job.attempt >= Math.min(this.maxAttempts, REGISTRATION_ATTEMPTS)) {
             this.stats.failures += 1;
-            return this.finish(job, null, empty
-                ? fail('漫画服务暂时限流，请稍后再试', 'RATE_LIMITED', { cause: error })
-                : fail('漫画服务连接失败，请检查网络后重试', network ? code : 'ERR_NETWORK', { cause: error }));
+            return this.finish(job, null, error);
         }
-        let delay = this.backoff[Math.min(job.attempt - 1, this.backoff.length - 1)];
-        if (empty) {
-            this.stats.empties += 1;
-            // Only the session that is still current counts: a late answer from a retired device means nothing.
-            if (session.generation === this.generation) {
-                this.consecutiveEmpties += 1;
-                if (this.consecutiveEmpties >= this.emptiesToRotate) {
-                    if (this.canRotate()) {
-                        this.session = null;
-                        this.generation += 1;
-                        this.rotations.push(this.now());
-                        this.stats.rotations += 1;
-                        delay = 0;
-                    } else {
-                        // Too many devices already: wait out the window instead of registering more.
-                        delay = Math.max(delay, 15000);
-                    }
-                }
-            } else delay = 0;
-        }
+        return this.requeue(job, this.backoff[Math.min(job.attempt - 1, this.backoff.length - 1)]);
+    }
+
+    requeue(job, delay) {
         const wait = delay * (0.75 + this.random() * 0.5);
         if (wait > 0) this.pausedUntil = Math.max(this.pausedUntil, this.now() + wait);
         // Back of its priority class, not the head: other work must not starve behind a failing request.
@@ -188,6 +196,48 @@ class ApiScheduler {
         this.queue.push(job);
         this.sortQueue();
         return undefined;
+    }
+
+    async handleError(job, session, error) {
+        const code = String(error?.code || '');
+        const empty = code === EMPTY;
+        const network = RETRYABLE_NETWORK.has(code);
+        const rejected = code === REJECTED && !this.permanentCodes.has(Number(error?.apiCode));
+        if (!empty && !network && !rejected) return this.finish(job, null, error);
+        job.attempt += 1;
+        if (rejected) job.rejected = (job.rejected || 0) + 1;
+        this.stats.retries += 1;
+        if (job.attempt >= this.maxAttempts || (rejected && job.rejected >= REJECTED_ATTEMPTS)) {
+            this.stats.failures += 1;
+            if (rejected) return this.finish(job, null, error);
+            return this.finish(job, null, empty
+                ? fail('漫画服务暂时限流，请稍后再试', 'RATE_LIMITED', { cause: error })
+                : fail('漫画服务连接失败，请检查网络后重试', network ? code : 'ERR_NETWORK', { cause: error }));
+        }
+        let delay = this.backoff[Math.min(job.attempt - 1, this.backoff.length - 1)];
+        // A device the service has only just registered may not be known everywhere yet. Give it a moment
+        // before deciding it is the problem.
+        if (rejected) delay = Math.max(delay, this.rejectionPauseMs);
+        if (empty || rejected) {
+            if (empty) this.stats.empties += 1; else this.stats.rejections += 1;
+            // Only the session that is still current counts: a late answer from a retired device means nothing.
+            if (session.generation === this.generation) {
+                const streak = empty ? ++this.consecutiveEmpties : ++this.consecutiveRejections;
+                if (streak >= (empty ? this.emptiesToRotate : this.rejectionsToRotate)) {
+                    if (this.canRotate()) {
+                        this.retire();
+                        delay = 0;
+                    } else if (rejected) {
+                        this.stats.failures += 1;
+                        return this.finish(job, null, error);
+                    } else {
+                        // Too many devices already: wait out the window instead of registering more.
+                        delay = Math.max(delay, 15000);
+                    }
+                }
+            } else delay = 0;
+        }
+        return this.requeue(job, delay);
     }
 
     finish(job, result, error) {

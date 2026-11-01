@@ -52,16 +52,19 @@ test('a session registers the reader device and signs every call with the reader
     let profileUsed;
     const session = await api.createSession({ register: async (_t, profile) => { profileUsed = profile; return identity; }, transport });
     assert.equal(profileUsed.aid, 1967);
+    assert.equal(seen.length, 0, 'creating a session registers the device only; the key is fetched when a chapter needs it');
+    const chapter = await api.fetchChapter(session, '7113845784809997000');
     assert.ok(session.key.equals(contentKey));
     assert.equal(session.keyver, 77);
     assert.equal(seen[0].options.method, 'POST');
     assert.equal(new URL(seen[0].url).searchParams.get('aid'), '1967');
     assert.equal(new URL(seen[0].url).searchParams.get('device_id'), identity.device_id);
-    const chapter = await api.fetchChapter(session, '7113845784809997000');
     assert.equal(chapter.pictures.length, 2);
     assert.equal(chapter.title, '第1话 标题');
     assert.equal(seen[1].options.method, 'GET');
     assert.equal(new URL(seen[1].url).searchParams.get('item_id'), '7113845784809997000');
+    await api.fetchChapter(session, '7113845784809997000');
+    assert.equal(seen.filter((entry) => entry.url.includes('registerkey')).length, 1, 'the key is exchanged once per session');
     await assert.rejects(api.fetchChapter(session, '12'), (error) => error.code === 'APP_INPUT');
     await assert.rejects(api.fetchChapter(session, 'abc'), (error) => error.code === 'APP_INPUT');
 });
@@ -188,4 +191,25 @@ test('image downloads accept only trusted HTTPS CDN hosts and retry only transie
     calls = 0;
     await assert.rejects(api.downloadImage('https://p9.byteimg.com/a', { fetcher: async () => { calls += 1; throw Object.assign(new Error('bad gateway'), { status: 502 }); } }));
     assert.equal(calls, 2, 'a server error gets one more try');
+});
+
+test('the directory and search work when the key exchange is refused; only chapters need the key', async () => {
+    const calls = [];
+    const transport = async (url) => {
+        calls.push(url);
+        if (url.includes('registerkey')) return { code: 101021 };
+        if (url.includes('directory')) return { code: 0, data: { item_data_list: [{ item_id: '7113845784809997001', title: '第1话' }] } };
+        return { code: 0, search_tabs: [] };
+    };
+    const session = await api.createSession({ register: async () => identity, transport });
+    assert.equal((await api.fetchDirectory(session, '7111960053963295758')).length, 1);
+    assert.deepEqual(await api.searchComicPage(session, '都市'), { books: [], hasMore: false, nextOffset: 0, searchId: '' });
+    await assert.rejects(api.fetchChapter(session, '7113845784809997000'),
+        (error) => error.code === 'BUSINESS_REJECTED' && error.apiCode === 101021 && error.stage === '密钥交换' && /密钥交换，代码 101021/.test(error.message));
+});
+
+test('a rejected call names the stage and the code, never the service reply', async () => {
+    const session = { identity, key: crypto.randomBytes(16), transport: async () => ({ code: 101999, message: 'PRIVATE' }) };
+    await assert.rejects(api.fetchDirectory(session, '7111960053963295758'),
+        (error) => error.stage === '分集目录' && /分集目录，代码 101999/.test(error.message) && !/PRIVATE/.test(error.message));
 });

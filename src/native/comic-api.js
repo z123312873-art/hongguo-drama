@@ -39,26 +39,36 @@ function exchangeKey(encoded) {
     return Buffer.concat([decipher.update(raw.subarray(16)), decipher.final()]);
 }
 
-async function call(session, apiPath, values, payload, method = 'GET') {
+async function call(session, apiPath, values, payload, method = 'GET', stage = '') {
     const signed = signedMetadataRequest(apiPath, values, payload, { profile: 'reader', identity: session.identity });
     const timeout = CALL_TIMEOUT_MS;
     const response = await (session.transport || requestJson)(signed.url, { method, headers: signed.headers, data: signed.body || undefined },
         Date.now() + timeout, AbortSignal.timeout(timeout));
     const code = Number(response?.code ?? response?.Code ?? 0);
     if (code !== 0) {
-        throw Object.assign(new Error('漫画服务暂时无法提供该内容'), { code: 'BUSINESS_REJECTED', apiCode: code });
+        throw Object.assign(new Error(`漫画服务暂时无法提供该内容（${stage ? `${stage}，` : ''}代码 ${code}）`), { code: 'BUSINESS_REJECTED', apiCode: code, stage });
     }
     return response;
 }
 
-// One registered anonymous device plus the content key it was issued.
+// One registered anonymous device. The content key is only needed to read a chapter, so it is fetched on
+// first use: the directory and the search work with the device alone and must not depend on the key step.
 async function createSession({ register = registerDevice, transport = requestJson } = {}) {
     const identity = await register(transport, READER_PROFILE);
-    const session = { identity, key: null, keyver: 0, createdAt: Date.now(), transport };
-    const response = await call(session, '/reading/crypt/registerkey', {}, { content: exchangePayload(identity.device_id), keyver: 1 }, 'POST');
-    session.key = exchangeKey(response.data?.key);
-    session.keyver = Number(response.data?.keyver) || 0;
-    return session;
+    return { identity, key: null, keyver: 0, keyPending: null, createdAt: Date.now(), transport };
+}
+
+async function ensureKey(session) {
+    if (session.key) return session.key;
+    if (!session.keyPending) {
+        session.keyPending = (async () => {
+            const response = await call(session, '/reading/crypt/registerkey', {}, { content: exchangePayload(session.identity.device_id), keyver: 1 }, 'POST', '密钥交换');
+            session.key = exchangeKey(response.data?.key);
+            session.keyver = Number(response.data?.keyver) || 0;
+            return session.key;
+        })().finally(() => { session.keyPending = null; });
+    }
+    return session.keyPending;
 }
 
 function decodeChapter(response, key) {
@@ -107,8 +117,9 @@ function parseChapter(json, title = '') {
 
 async function fetchChapter(session, itemId) {
     if (!ID.test(String(itemId))) throw Object.assign(new Error('分集编号无效'), { code: 'APP_INPUT' });
-    const response = await call(session, '/reading/reader/full/v/', { item_id: String(itemId), key_register_ts: '0' });
-    return decodeChapter(response, session.key);
+    const key = await ensureKey(session);
+    const response = await call(session, '/reading/reader/full/v/', { item_id: String(itemId), key_register_ts: '0' }, undefined, 'GET', '章节');
+    return decodeChapter(response, key);
 }
 
 async function fetchDirectory(session, bookId) {
@@ -116,7 +127,7 @@ async function fetchDirectory(session, bookId) {
     const response = await call(session, '/reading/bookapi/directory/all_items/v/', {
         book_id: String(bookId), book_type: '0', version_code: READER_VERSION, update_version_code: READER_VERSION,
         need_version: 'true', item_data_list_md5: '', book_info_md5: '',
-    });
+    }, undefined, 'GET', '分集目录');
     const rows = Array.isArray(response.data?.item_data_list) ? response.data.item_data_list : [];
     const seen = new Set();
     const episodes = [];
@@ -133,7 +144,7 @@ async function searchComicPage(session, query, { offset = 0, searchId = '', pass
     const base = { query: String(query).slice(0, 40), count: '20', bookshelf_search_plan: '4', use_correct: 'true', user_is_login: '0' };
     let id = searchId;
     if (!id) {
-        const first = await call(session, '/reading/bookapi/search/tab/v', { ...base, tab_type: '1', offset: '0' });
+        const first = await call(session, '/reading/bookapi/search/tab/v', { ...base, tab_type: '1', offset: '0' }, undefined, 'GET', '搜索');
         const tab = (first.search_tabs || []).find((item) => Number(item?.tab_type) === 8);
         if (!tab?.search_id) return { books: [], hasMore: false, nextOffset: 0, searchId: '' };
         id = tab.search_id;
@@ -141,7 +152,7 @@ async function searchComicPage(session, query, { offset = 0, searchId = '', pass
     }
     const response = await call(session, '/reading/bookapi/search/tab/v', {
         ...base, tab_type: '8', offset: String(offset), search_id: id, ...(passback ? { passback } : {}),
-    });
+    }, undefined, 'GET', '搜索');
     const tab = (response.search_tabs || []).find((item) => Number(item?.tab_type) === 8);
     const books = [];
     for (const cell of tab?.data || []) {
