@@ -6,13 +6,17 @@
 // bounded HTTPS transport; exact episode matching; supported codec selection.
 // Crypto tables and SDK protocol constants below are not user credentials.
 const crypto = require('node:crypto');
-const { getPlaybackDevice, refreshPlaybackDevice } = require('./playback-device');
+const { takePlaybackDevice, armPlaybackPool } = require('./playback-device');
 const sm3 = require('./sm3');
 const { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
 const PROCESS_STARTED = Date.now();
-const VIDEO_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
+const VIDEO_PATH = '/novel/player/multi_video_model/v1/';
+// Edge hosts that answer the same signed request. The one that answered last is asked first.
+const VIDEO_HOSTS = Object.freeze(['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-hl.fqnovel.com']);
+const videoApi = host => `https://${host || VIDEO_HOSTS[0]}${VIDEO_PATH}`;
+let preferredHost = 0;
 const VIDEO_UA = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const DEVICE = {
     ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
@@ -126,14 +130,14 @@ function helios(khronos, aid = '8662') {
 }
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
-function signedVideoRequest(payload, identity) {
+function signedVideoRequest(payload, identity, host) {
     // A registered device is signed with its own ids. Tests and the last-resort path keep a synthetic identity.
     const registered = identity && [identity.device_id, identity.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value));
     const device = { ...DEVICE, iid: registered ? identity.iid : localId(), device_id: registered ? identity.device_id : localId(),
         ...(registered && identity.cdid ? { cdid: identity.cdid } : {}) };
     const khronos = Math.floor(Date.now() / 1000); const body = Buffer.from(payload); const ticketBase = Date.now(); let requestTicket = ticketBase; let query = ''; let url = '';
     // branch 1 的签名变体服务端不认：抖动 _rticket 找一个可用的 branch（最多试 32 秒偏移）
-    for (let offset = 0; offset < 32; offset += 1) { requestTicket = ticketBase + offset; const values = { ...device, ts: String(khronos), _rticket: String(requestTicket) }; query = pythonUrlEncode(values); url = `${VIDEO_API}?${query}`; if (branchOf(url, body, khronos) !== 1) break; }
+    for (let offset = 0; offset < 32; offset += 1) { requestTicket = ticketBase + offset; const values = { ...device, ts: String(khronos), _rticket: String(requestTicket) }; query = pythonUrlEncode(values); url = `${videoApi(host)}?${query}`; if (branchOf(url, body, khronos) !== 1) break; }
     const random = Math.floor(Math.random() * 65536); const headers = {
         'User-Agent': VIDEO_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf', 'Content-Type': 'application/json; charset=UTF-8',
         'x-xs-from-web': '0', 'x-ss-req-ticket': String(requestTicket), 'x-tt-request-tag': 't=0;n=0', 'sdk-version': '2', 'passport-sdk-version': '50561',
@@ -188,9 +192,9 @@ function signedSearchRequest({ keyword, page = 1, cursor = null, identity } = {}
     return { url, headers };
 }
 
-function playbackRequest(payload, identity) {
+function playbackRequest(payload, identity, host) {
     const query = pythonUrlEncode({ ...DEVICE, device_id: identity.device_id, iid: identity.iid, cdid: identity.cdid, _rticket: String(Date.now()) });
-    return { url: `${VIDEO_API}?${query}`, body: Buffer.from(payload), headers: {
+    return { url: `${videoApi(host)}?${query}`, body: Buffer.from(payload), headers: {
         'User-Agent': 'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)',
         Accept: 'application/json; charset=utf-8,application/x-protobuf',
         'Content-Type': 'application/json; charset=UTF-8',
@@ -353,9 +357,10 @@ async function fetchAppPlayUrl(vid, options = {}) {
         mixed_video_id_map: { '1004': [vid] },
     });
     const postModel = (signed) => requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
-    // Unsigned playback works from some networks. Others return an empty 200 unless the same device is signed.
-    const readModel = async (identity) => {
-        const attempts = identity ? [playbackRequest(payload, identity), signedVideoRequest(payload, identity)] : [signedVideoRequest(payload)];
+    // The service answers a device for one lookup, so every lookup takes its own device. A signed request goes
+    // first; some networks only accept the unsigned style, and an empty answer costs well under a second.
+    const readModel = async (identity, host) => {
+        const attempts = identity ? [signedVideoRequest(payload, identity, host), playbackRequest(payload, identity, host)] : [signedVideoRequest(payload, undefined, host)];
         let lastError;
         for (const signed of attempts) {
             try { return await postModel(signed); }
@@ -367,21 +372,24 @@ async function fetchAppPlayUrl(vid, options = {}) {
         throw lastError;
     };
     let identity = null, registrationReason = '';
-    try { identity = await getPlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
-    let response;
+    try { identity = await takePlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
+    const firstHost = preferredHost;
+    let response, answeredBy = firstHost;
     try {
-        response = await readModel(identity);
+        response = await readModel(identity, VIDEO_HOSTS[firstHost]);
     } catch (error) {
-        // One fresh registration, then both playback styles. A second empty response stops.
+        // One more device, on the next edge host, then both request styles. A second empty answer stops.
         if (error?.code !== 'EMPTY_RESPONSE') throw error;
         let fresh = null;
-        try { fresh = await refreshPlaybackDevice(requestJson); } catch (failure) { fresh = null; registrationReason = failure?.reason || registrationReason; }
+        try { fresh = await takePlaybackDevice(requestJson, { again: true }); } catch (failure) { fresh = null; registrationReason = failure?.reason || registrationReason; }
         if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) {
             if (!fresh && registrationReason) error.registrationReason = registrationReason;
             throw error;
         }
-        response = await readModel(fresh);
+        answeredBy = (firstHost + 1) % VIDEO_HOSTS.length;
+        response = await readModel(fresh, VIDEO_HOSTS[answeredBy]);
     }
+    preferredHost = answeredBy;
     if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
     const entry = response.data?.[vid];
     const model = typeof entry?.video_model === 'string' ? jsonBody(entry.video_model) : entry?.video_model;
@@ -465,4 +473,7 @@ async function fetchAppPlayUrl(vid, options = {}) {
         : Object.assign(new Error('本集片源地址或密钥无法解析'), { code: 'INVALID_RESPONSE' });
 }
 
-module.exports = { fetchAppPlayUrl, signedSearchRequest, signedMetadataRequest, parseSearchInteger, requestJson };
+// Keeps unused playback devices ready so the next lookup does not wait for a registration.
+function warmPlayback() { armPlaybackPool(requestJson); }
+
+module.exports = { fetchAppPlayUrl, warmPlayback, VIDEO_HOSTS, signedSearchRequest, signedMetadataRequest, parseSearchInteger, requestJson };
