@@ -1,3 +1,4 @@
+const passthroughCache = { shared: { wrap: (_name, fetcher) => fetcher, getAux: () => undefined, setAux() {} } };
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +11,7 @@ async function check() {
   const calls = [];
   let override, failure;
   const context = { module: { exports: {} }, URL, AbortController, setTimeout, clearTimeout,
-    require: name => name === 'axios' ? { get: async (url, options) => {
+    require: name => name === './browse-cache' ? passthroughCache : name === 'axios' ? { get: async (url, options) => {
       calls.push(url);
       assert.equal(new URL(url).origin, 'https://www.kuaikaw.cn');
       assert.equal(options.timeout, 10000);

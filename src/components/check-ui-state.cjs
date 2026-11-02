@@ -297,12 +297,12 @@ async function mount(file, api, props = {}) {
     } finally { ui.unmount(); }
   });
   await test('browse categories: empty refresh preserves cached cards and pagination', async () => {
-    let empty = false, realCalls = 0;
+    let empty = false, realCalls = 0, comicCalls = 0;
     const ui = await mount('Browse', {
       getSeriesList: async () => [],
       browseCategories: async () => [{ slug: 'real-drama', label: '真人剧' }, { slug: 'comic', label: '漫画' }],
       browseList: async request => {
-        if (request.category === 'comic') return { success: true, results: [], unsupported: true, emptyMessage: '这里是图文漫画' };
+        if (request.category === 'comic') comicCalls++;
         realCalls++;
         return empty ? { success: true, results: [] } : { success: true,
           results: [{ series_id: '1000001', series_title: '已加载片单' }], total: 48, totalPages: 2,
@@ -323,11 +323,15 @@ async function mount(file, api, props = {}) {
       assert.ok(ui.nodes().some(n => n.type === 'button' && n.children.includes(2)), 'pagination must remain available');
       const callsAfterRefresh = realCalls;
       ui.button('漫画').props.onClick(); await ui.flush();
-      assert.equal(cards().length, 0, 'unsupported categories must not borrow another category cache');
-      assert.ok(ui.text().includes('这里是图文漫画'));
+      assert.equal(cards().length, 0, 'the comic view must not borrow the drama cache');
+      assert.ok(ui.nodes().some(n => typeof n.type === 'function' && n.type.name === 'ComicBrowse'), 'the comic category renders its own view');
+      assert.equal(comicCalls, 0, 'the drama list loader must not request the comic category itself');
+      assert.equal(ui.find(n => n.props.className === 'browse-genres' && n.props['aria-label']?.includes('最多同时选择两个')), undefined, 'drama tag chips stay out of the comic view');
+      assert.equal(ui.find(n => n.props.className === 'browse-completion-filter'), undefined, 'the drama completion filter stays out of the comic view');
       ui.button('真人剧').props.onClick(); await ui.flush();
       assert.equal(cards().length, 1, 'returning must restore the retained cache');
       assert.equal(realCalls, callsAfterRefresh, 'empty refresh must not delete a still-fresh cache');
+      assert.ok(ui.nodes().every(n => !(typeof n.type === 'function' && n.type.name === 'ComicBrowse')), 'the comic view leaves with its category');
     } finally { ui.unmount(); }
   });
   await test('browse card shows the source 新剧 tag between the rank and the score, only when the source marked it', async () => {
@@ -495,20 +499,120 @@ async function mount(file, api, props = {}) {
     searchResult(detail('A')); ui.render();
     assert.ok(ui.text().includes('《A》')); ui.unmount();
   });
-  await test('browse categories: comic then real returns cached cards and ignores late comic', async () => {
-    const pendingComic = deferred(); let realCalls = 0;
+  await test('browse categories: comic then real returns cached cards and the comic view never calls the drama loader', async () => {
+    let realCalls = 0, comicCalls = 0;
     const list = title => ({ success: true, results: [{ series_id: title, series_title: title }], totalPages: 1 });
-    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [{ slug: 'real-drama', label: '真人剧' }, { slug: 'comic', label: '漫画' }], browseList: async p => p.category === 'comic' ? pendingComic.promise : p.category === 'comic-drama' ? list('动态漫剧') : (realCalls++, list('真人缓存')) });
+    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [{ slug: 'real-drama', label: '真人剧' }, { slug: 'comic', label: '漫画' }], browseList: async p => p.category === 'comic' ? (comicCalls++, list('漫画')) : p.category === 'comic-drama' ? list('动态漫剧') : (realCalls++, list('真人缓存')) });
     await ui.flush(); ui.button('漫画').props.onClick(); await ui.flush();
-    ui.button('真人剧').props.onClick();
-    pendingComic.resolve({ success: true, results: [], unsupported: true, emptyMessage: '这里是图文漫画，暂不支持视频下载；看动态漫画请切换“漫剧”。' }); await Promise.resolve(); await Promise.resolve(); await ui.flush();
-    assert.ok(realCalls >= 1, 'switching back must not queue another request behind comic');
-    assert.ok(ui.text().includes('真人缓存')); assert.ok(!ui.text().includes('这里是图文漫画'));
-    ui.button('漫画').props.onClick(); await ui.flush();
-    assert.ok(ui.text().includes('这里是图文漫画，暂不支持视频下载'));
+    assert.equal(comicCalls, 0);
+    assert.ok(!ui.text().includes('这里是图文漫画'), 'the old unsupported notice is gone');
+    ui.button('真人剧').props.onClick(); await ui.flush();
+    assert.ok(realCalls >= 1);
+    assert.ok(ui.text().includes('真人缓存'));
     assert.ok(!ui.text().includes('暂时没能加载剧集'));
-    ui.button('查看漫剧').props.onClick(); await ui.flush();
-    assert.ok(ui.text().includes('动态漫剧')); ui.unmount();
+    ui.unmount();
+  });
+  await test('comic view: first page shows at once, then pages and extras fill to the cap, pagination follows', async () => {
+    const card = n => ({ series_id: String(7000000 + n), series_title: `漫画${n}`, tags: n % 2 ? ['都市'] : ['古风'], cover: '', episode_count: 30 });
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => card(a + i));
+    const gates = { 2: deferred() };
+    const calls = [];
+    const ui = await mount('ComicBrowse', {
+      comicSnapshot: async () => ({ success: true, snapshot: null }),
+      browseList: async r => { calls.push(r.page); if (r.page === 2) await gates[2].promise; return { success: true, results: r.page === 1 ? range(1, 24) : range(25, 48), page: r.page, totalPages: 2, total: 48 }; },
+      comicExtras: async r => ({ success: true, items: range(100, 100 + r.limit - 1) }),
+    });
+    const cards = () => ui.nodes().filter(n => n.props.className === 'browse-card');
+    const pager = () => ui.nodes().filter(n => String(n.props.className).startsWith('pager-item'));
+    try {
+      await ui.flush();
+      assert.equal(cards().length, 24, 'page 1 appears while page 2 is still loading');
+      assert.ok(ui.text().includes('24/48'), 'progress is visible');
+      assert.ok(pager().length >= 4, 'the pager already shows the pages that are on their way');
+      ui.nodes().find(n => n.props['aria-label'] === '下一页').props.onClick(); await ui.flush();
+      assert.equal(cards().length, 0);
+      assert.equal(ui.nodes().filter(n => n.props.className === 'poster-skeleton').length, 24, 'a page that has not arrived yet shows placeholders, not an empty grid');
+      ui.nodes().find(n => n.props['aria-label'] === '上一页').props.onClick(); await ui.flush();
+      assert.equal(cards().length, 24);
+      gates[2].resolve(); await ui.flush();
+      assert.equal(ui.text().includes('共 140 部'), true);
+      assert.equal(cards().length, 24, 'only one page of posters is rendered at a time');
+      assert.ok(pager().length >= 4, 'pagination exists for 140 comics');
+      assert.ok(cards().every(n => !n.children.flat(Infinity).some(c => c?.props?.className === 'browse-score' || c?.props?.className === 'browse-new-badge')), 'no star or 新剧 label on comics');
+      assert.deepEqual(cards().slice(0, 3).map(n => n.props.title), ['漫画1', '漫画2', '漫画3'], 'site order first');
+      ui.nodes().find(n => n.props['aria-label'] === '下一页').props.onClick(); await ui.flush();
+      assert.equal(cards()[0].props.title, '漫画25');
+      assert.deepEqual(calls.sort(), [1, 2], 'each site page is requested once');
+    } finally { ui.unmount(); }
+  });
+  await test('comic view: tag chips filter, two at most, and an empty result offers a way back', async () => {
+    const card = (n, tags) => ({ series_id: String(7000000 + n), series_title: `漫画${n}`, tags, cover: '' });
+    const ui = await mount('ComicBrowse', {
+      comicSnapshot: async () => ({ success: true, snapshot: null }),
+      browseList: async () => ({ success: true, results: [card(1, ['都市']), card(2, ['古风']), card(3, ['古风', '穿越']), card(4, ['现言甜宠'])], page: 1, totalPages: 1, total: 4 }),
+      comicExtras: async () => ({ success: true, items: [] }),
+    });
+    const cards = () => ui.nodes().filter(n => n.props.className === 'browse-card').map(n => n.props.title);
+    try {
+      await ui.flush();
+      assert.deepEqual(cards(), ['漫画1', '漫画2', '漫画3', '漫画4']);
+      ui.button('古风').props.onClick(); await ui.flush();
+      assert.deepEqual(cards(), ['漫画2', '漫画3']);
+      ui.button('穿越重生').props.onClick(); await ui.flush();
+      assert.deepEqual(cards(), ['漫画3'], 'two chips mean both');
+      assert.equal(ui.button('悬疑灵异'), undefined, 'a chip with no comic never leads to a blank page');
+      ui.button('全部').props.onClick(); await ui.flush();
+      assert.equal(cards().length, 4);
+      assert.equal(ui.nodes().find(n => String(n.props.className).startsWith('pager-item')), undefined, 'one page needs no pager');
+    } finally { ui.unmount(); }
+  });
+  await test('comic view: opening a comic lists episodes only, and no chapter or image is requested until an episode is chosen', async () => {
+    const calls = { episodes: [], chapter: 0, image: 0 };
+    const episodes = Array.from({ length: 120 }, (_, i) => ({ index: i + 1, itemId: String(8000000 + i), title: i === 0 ? '预告' : `第${i} 话`, label: i === 0 ? '预告' : String(i) }));
+    const ui = await mount('ComicBrowse', {
+      comicSnapshot: async () => ({ success: true, snapshot: null }),
+      browseList: async () => ({ success: true, results: [{ series_id: '7000001', series_title: '漫画甲', tags: ['都市'], cover: '' }], page: 1, totalPages: 1, total: 1 }),
+      comicExtras: async () => ({ success: true, items: [] }),
+      comicEpisodes: async id => { calls.episodes.push(id); return { success: true, seriesId: id, total: 120, episodes }; },
+      comicChapter: async () => { calls.chapter++; return { success: false }; },
+      comicImage: async () => { calls.image++; return { success: false }; },
+    });
+    try {
+      await ui.flush();
+      ui.find(n => n.props.className === 'browse-card').props.onClick(); await ui.flush();
+      assert.deepEqual(calls.episodes, ['7000001']);
+      assert.equal(calls.chapter + calls.image, 0, 'no picture work happens before an episode is clicked');
+      assert.ok(ui.text().includes('共 120 话'));
+      const chips = ui.nodes().filter(n => String(n.props.className).startsWith('ep-chip'));
+      assert.equal(chips.length, 50, 'episodes are grouped 50 at a time');
+      assert.ok(ui.button('1-50') && ui.button('50-99') && ui.button('100-119'), 'every group is reachable and named after the episode numbers it holds');
+      ui.button('100-119').props.onClick(); await ui.flush();
+      assert.equal(ui.nodes().filter(n => String(n.props.className).startsWith('ep-chip')).length, 20);
+      ui.nodes().find(n => String(n.props.className).startsWith('ep-chip')).props.onClick(); await ui.flush();
+      assert.ok(ui.nodes().some(n => typeof n.type === 'function' && n.type.name === 'ComicReader'), 'choosing an episode opens the reader');
+      assert.equal(calls.chapter + calls.image, 0, 'the reader itself requests the chapter when it mounts');
+    } finally { ui.unmount(); }
+  });
+  await test('comic view: a failed list shows retry; a failed episode list shows retry and can recover', async () => {
+    let fail = true, dirFail = true;
+    const ui = await mount('ComicBrowse', {
+      comicSnapshot: async () => ({ success: true, snapshot: null }),
+      browseList: async () => fail ? { success: false, error: '来源暂时不可用' } : { success: true, results: [{ series_id: '7000001', series_title: '漫画甲', tags: [], cover: '' }], page: 1, totalPages: 1, total: 1 },
+      comicExtras: async () => ({ success: true, items: [] }),
+      comicEpisodes: async id => dirFail ? { success: false, error: '分集暂时没取到' } : { success: true, seriesId: id, total: 1, episodes: [{ index: 1, itemId: '8000001', title: '第1话', label: '1' }] },
+    });
+    try {
+      await ui.flush();
+      assert.ok(ui.text().includes('来源暂时不可用'));
+      fail = false;
+      await ui.button('重新加载').props.onClick(); await ui.flush();
+      assert.ok(ui.find(n => n.props.className === 'browse-card'), 'retry loads the list');
+      ui.find(n => n.props.className === 'browse-card').props.onClick(); await ui.flush();
+      assert.ok(ui.text().includes('分集暂时没取到'));
+      dirFail = false;
+      await ui.button('重试').props.onClick(); await ui.flush();
+      assert.ok(ui.nodes().some(n => String(n.props.className).startsWith('ep-chip')), 'retry recovers the episode list');
+    } finally { ui.unmount(); }
   });
   await test('browse categories: timeout ends skeleton and retry rejects the old response', async () => {
     const pending = deferred(); let calls = 0; let hang = true;

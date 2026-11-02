@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.1-pre-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.2-pre-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -116,7 +116,7 @@ jobs:
           path: dist/windows-verification/
   publish-pre:
     needs: windows
-    if: startsWith(github.ref, 'refs/heads/windows/4.1-pre-')
+    if: startsWith(github.ref, 'refs/heads/windows/4.2-pre-')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -125,36 +125,38 @@ jobs:
         with:
           name: windows-release-candidate
           path: release
-      - name: Publish the 4.1 pre-release
+      - name: Publish the 4.2 pre-release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag=installer-4.1-traditional-pre
-          setup="release/hongguo-downloader-4.1-win-x64-setup.exe"
-          portable="release/hongguo-downloader-4.1-win-x64.zip"
+          tag=installer-4.2-traditional-pre
+          setup="release/hongguo-downloader-4.2-win-x64-setup.exe"
+          portable="release/hongguo-downloader-4.2-win-x64.zip"
           test -f "$setup"
           test -f "$portable"
           setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
           portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
           notes=$(cat <<EOF
-          預發佈，不會取代 4.0 正式版的自動更新。僅提供安裝版與便攜 ZIP，安裝檔未簽章。
+          摘要：
+          - 新增「漫畫」分類，可選集閱讀
+          - 漫畫圖片清晰度隨視窗自動調整
+          - 各分類首頁顯示更多海報，數量一致
+          - 西飯、河馬首頁至少顯示 40 部
+          - 漫畫載入更穩定，失敗會自動重試
 
-          - 修正加密片源按方向鍵快進、快退 5 秒時重新播放的問題。
-          - 搜尋結果的海報無法顯示時，改用相容的圖片版本，仍失敗才顯示佔位圖。
-          - 熱播榜四個榜單的卡片，來源標示「新劇」時顯示綠色標籤（排名與評分之間）。
-          - 末集播完時，劇名帶標點或查詢暫時失敗也能找到並自動播放下一季。
+          這是預發佈版本，不會取代 4.1 正式版。安裝檔未簽章。
 
           SHA256
-          - hongguo-downloader-4.1-win-x64-setup.exe: $setup_sha
-          - hongguo-downloader-4.1-win-x64.zip: $portable_sha
+          - hongguo-downloader-4.2-win-x64-setup.exe: $setup_sha
+          - hongguo-downloader-4.2-win-x64.zip: $portable_sha
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
             gh release edit "$tag" --prerelease --notes "$notes"
           else
-            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.1 預發佈" --notes "$notes"
+            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.2 預發佈" --notes "$notes"
           fi
           gh release upload "$tag" "$setup" "$portable" --clobber
           keep=$(printf '%s\n%s\n' "$(basename "$setup")" "$(basename "$portable")")

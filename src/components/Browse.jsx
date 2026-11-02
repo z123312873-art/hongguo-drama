@@ -9,10 +9,13 @@ import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseT
 import { applyPublicRatings } from '../publicRatings.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
-import { cushionedSlots, pagesToFill, posterColumns, posterSlots, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
-import { uiScale } from '../uiScale.mjs';
+import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, pagesToFill, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
+import { firstPagePosters } from '../comicLayout.mjs';
 import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
+import ComicBrowse from './ComicBrowse';
+
+const COMIC_SOURCE_URL = 'https://hongguoduanju.com/category/comic';
 
 const pageCache = new Map();
 // Category and rank clicks swap this snapshot. A fresh one is not downloaded again.
@@ -48,23 +51,26 @@ function writeSnapshot(source, category, genre, page, entry) {
 
 // Window size only. The live grid's top moves when genre chips, skeletons, or
 // scrolling appear, and that was flipping a full window between one and two source pages.
-function readPosterCapacity(reservedRows = 0) {
+// Hongguo lists use the comic page size, so every category opens with the same poster count.
+// Sources added by the user open with at least MIN_SOURCE_POSTERS.
+function readPosterCapacity(reservedRows = 0, minimum = 0) {
   try {
     const width = window.innerWidth;
     if (!Number.isFinite(width) || width <= 0) return { slots: 0, columns: 0 };
-    const scale = uiScale(width);
-    const minCard = 150 * scale;
     const sidebar = document.querySelector?.('.sidebar');
     const sidebarWidth = sidebar && getComputedStyle(sidebar).display !== 'none' ? sidebar.getBoundingClientRect().width : 0;
-    const boxWidth = Math.max(0, width - sidebarWidth - 72);
-    const boxHeight = Math.max(0, window.innerHeight - 300);
-    return {
-      slots: posterSlots({ width: boxWidth, height: boxHeight, minCard, reservedRows }),
-      columns: posterColumns({ width: boxWidth, minCard }),
-    };
+    return firstPagePosters({ width, height: window.innerHeight, reservedRows, sidebarWidth, minimum });
   } catch {
     return { slots: 0, columns: 0 };
   }
+}
+
+function minimumPosters(source) {
+  return source === 'hongguo' ? 0 : MIN_SOURCE_POSTERS;
+}
+
+function maxJoinedPages(source) {
+  return source === 'hongguo' ? undefined : MAX_OPEN_PAGES;
 }
 
 /**
@@ -99,6 +105,7 @@ function Browse({ onNavigate, active = true }) {
   const [error, setError] = useState('');
   const [unsupported, setUnsupported] = useState(false);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [comicReload, setComicReload] = useState(0);
 
   // 详情抽屉
   const [detail, setDetail] = useState(null); // { series_id, series_title, cover, episodes: [...] }
@@ -186,8 +193,7 @@ function Browse({ onNavigate, active = true }) {
     async (cat, gen, pg, forceRefresh = false) => {
       invalidateList();
       const request = listRequest.current;
-      const capacity = readPosterCapacity(reserveRowsRef.current);
-      const slots = cushionedSlots(capacity.slots, capacity.columns);
+      const slots = readPosterCapacity(reserveRowsRef.current, minimumPosters(source)).slots;
       const key = snapshotKey(source, cat, gen, pg);
       const cached = pageCache.get(key);
       const haveCards = Boolean(cached?.results?.length);
@@ -221,7 +227,7 @@ function Browse({ onNavigate, active = true }) {
         setSourceUrl(fallbackUrl);
       }
       const neededSpan = haveCards && pg === 1
-        ? pagesToFill(slots, cached.perPage || cached.results.length, cached.sourcePages || 1)
+        ? pagesToFill(slots, cached.perPage || cached.results.length, cached.sourcePages || 1, maxJoinedPages(source))
         : 1;
       const stale = !haveCards || Date.now() - cached.savedAt >= PAGE_CACHE_TTL_MS;
       // A category click keeps the posters it already has. Only a short first page of a fresh list grows.
@@ -245,22 +251,37 @@ function Browse({ onNavigate, active = true }) {
         if (!res?.success) throw new Error(res?.error || '来源暂时不可用');
         const firstResults = Array.isArray(res.results) ? res.results : [];
         const reportedPages = Number(res.totalPages) || 0;
-        if (pg === 1 && reportedPages >= 2 && slots > 0) {
-          const nextSpan = pagesToFill(slots, firstResults.length, reportedPages);
+        const openEnded = source !== 'hongguo' && reportedPages < 2 && res.hasMore === true;
+        const knownPages = openEnded ? OPEN_SOURCE_PAGES : reportedPages;
+        if (pg === 1 && knownPages >= 2 && slots > 0) {
+          const nextSpan = pagesToFill(slots, firstResults.length, knownPages, maxJoinedPages(source));
           const width = window.innerWidth || 0;
           // Refresh uses the same window and must not drop back to a short page.
           pageSpan.current = sameCatalogWindow(spanWidth.current, width) ? Math.max(pageSpan.current, nextSpan) : nextSpan;
           spanWidth.current = width;
-        } else if (pg === 1 && reportedPages < 2) {
+        } else if (pg === 1 && knownPages < 2) {
           pageSpan.current = 1;
         }
-        const windowed = reportedPages >= 2 ? sourcePageWindow(pg, pageSpan.current, reportedPages) : { start: pg, count: 1, uiPages: reportedPages };
+        const windowed = reportedPages >= 2 ? sourcePageWindow(pg, pageSpan.current, reportedPages)
+          : openEnded ? { start: planned.start, count: Math.max(1, pageSpan.current), uiPages: 0 }
+            : { start: pg, count: 1, uiPages: reportedPages };
         let combined = firstResults.slice();
         const seen = new Set(combined.map(item => item?.series_id).filter(Boolean));
-        for (let extra = 1; extra < windowed.count; extra++) {
-          const more = await window.electronAPI.browseList({ source, category: cat, genre: gen, page: windowed.start + extra, forceRefresh });
-          if (request !== listRequest.current) return;
-          if (!more?.success || !Array.isArray(more.results) || !more.results.length) break;
+        let lastHasMore = res.hasMore === true;
+        // A slow link would keep the skeleton up until the last page arrives; the first page can already be browsed.
+        if (!haveCards && windowed.count > 1 && combined.length) {
+          setResults(combined);
+          setMeta({ total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: false });
+          keepGenres(res.genres);
+        }
+        // The extra source pages do not depend on each other, so they load together.
+        const extras = await Promise.all(Array.from({ length: Math.max(0, windowed.count - 1) }, (_, index) => (
+          window.electronAPI.browseList({ source, category: cat, genre: gen, page: windowed.start + index + 1, forceRefresh }).catch(() => null)
+        )));
+        if (request !== listRequest.current) return;
+        for (const more of extras) {
+          if (!more?.success || !Array.isArray(more.results) || !more.results.length) { lastHasMore = false; break; }
+          lastHasMore = more.hasMore === true;
           for (const item of more.results) {
             if (!item?.series_id || seen.has(item.series_id)) continue;
             seen.add(item.series_id);
@@ -269,12 +290,12 @@ function Browse({ onNavigate, active = true }) {
         }
         const next = {
           results: combined,
-          meta: { total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: res.hasMore === true && windowed.count < 2 },
+          meta: { total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: lastHasMore && (windowed.count < 2 || windowed.uiPages === 0) },
           sourceUrl: res.sourceUrl || fallbackUrl,
           savedAt: Date.now(),
           pageSpan: pageSpan.current,
           perPage: firstResults.length,
-          sourcePages: reportedPages,
+          sourcePages: openEnded && lastHasMore ? OPEN_SOURCE_PAGES : reportedPages,
         };
         if (!next.results.length && haveCards && res.unsupported !== true) {
           throw new Error(res.emptyMessage || '来源这次没有返回片单，请稍后重试。');
@@ -368,11 +389,20 @@ function Browse({ onNavigate, active = true }) {
     return () => { cancelled = true; clearTimeout(retryTimer); };
   }, [source, results]);
 
+  const comicView = source === 'hongguo' && category === 'comic';
+
   useEffect(() => {
     if (!active || !sourceIds.split('|').includes(source)) return undefined;
+    if (comicView) {
+      setLoading(false);
+      setError('');
+      setUnsupported(false);
+      setSourceUrl(COMIC_SOURCE_URL);
+      return undefined;
+    }
     loadList(category, genre, page);
     return invalidateList;
-  }, [active, category, genre, page, loadList, source, sourceIds, invalidateList]);
+  }, [active, category, genre, page, loadList, source, sourceIds, invalidateList, comicView]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -435,27 +465,28 @@ function Browse({ onNavigate, active = true }) {
       clearTimeout(timer);
       timer = setTimeout(() => {
         const perPage = Math.max(1, Math.round(results.length / pageSpan.current));
-        const sourcePages = Math.max(1, (meta.totalPages || 1) * pageSpan.current);
-        const capacity = readPosterCapacity(reserveRows);
-        const next = pagesToFill(cushionedSlots(capacity.slots, capacity.columns), perPage, sourcePages);
+        const sourcePages = meta.totalPages ? meta.totalPages * pageSpan.current : meta.hasMore ? OPEN_SOURCE_PAGES : 1;
+        const next = pagesToFill(readPosterCapacity(reserveRows, minimumPosters(source)).slots, perPage, sourcePages, maxJoinedPages(source));
         if (next > pageSpan.current) loadList(category, genre, 1, false);
       }, 300);
     };
     onResize();
     window.addEventListener?.('resize', onResize);
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
-  }, [active, page, results.length, category, genre, loadList, meta.totalPages, reserveRows]);
+  }, [active, page, results.length, category, genre, loadList, meta.totalPages, meta.hasMore, reserveRows, source]);
 
-  const showSnapshot = (nextSource, cat, gen, pg) => {
+  // Moving to another page of the same list keeps the number of source pages joined per page; a different
+  // list starts over. Resetting here put page 2 on the source page that page 1 had already shown.
+  const showSnapshot = (nextSource, cat, gen, pg, sameList = false) => {
     const snap = readSnapshot(nextSource, cat, gen, pg);
     if (snap?.pageSpan) pageSpan.current = snap.pageSpan;
-    else { pageSpan.current = 1; spanWidth.current = 0; }
+    else if (!sameList) { pageSpan.current = 1; spanWidth.current = 0; }
     setResults(snap?.results || []);
     setMeta(snap?.meta || { total: 0, totalPages: 0, genres: [] });
     setSourceUrl(snap?.sourceUrl || '');
     setUnsupported(false);
     setError('');
-    setLoading(!snap?.results?.length);
+    setLoading(!snap?.results?.length && !(nextSource === 'hongguo' && cat === 'comic'));
   };
 
   const switchSource = (next) => {
@@ -494,7 +525,7 @@ function Browse({ onNavigate, active = true }) {
     if (next === page) return;
     invalidateList();
     setPage(next);
-    showSnapshot(source, category, genre, next);
+    showSnapshot(source, category, genre, next, true);
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -648,7 +679,7 @@ function Browse({ onNavigate, active = true }) {
         <div className="browse-header-right">
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
           <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />搜索短剧</button>
-          <button className="btn btn-outline" disabled={loading || sourcesLoading} onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />刷新片单</button>
+          <button className="btn btn-outline" disabled={loading || sourcesLoading} onClick={() => (comicView ? setComicReload(value => value + 1) : loadList(category, genre, page, true))}><RefreshCw size={15} />刷新片单</button>
           {meta.total > 0 && <span className="browse-stat">共 {meta.total} 部</span>}
           {source === 'hongguo' && sourceUrl && <button className="btn btn-outline" onClick={showBrowser}>
             <ExternalLink size={15} />
@@ -682,6 +713,9 @@ function Browse({ onNavigate, active = true }) {
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
+      {comicView && <ComicBrowse active={active} reservedRows={reserveRows} reloadToken={comicReload} />}
+
+      {!comicView && <>
       {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
       {source === 'hongguo' && (
         <div className="browse-genres" role="group" aria-label="标签筛选，可左右滑动，最多同时选择两个">
@@ -818,6 +852,8 @@ function Browse({ onNavigate, active = true }) {
       )}
 
       {source !== 'hongguo' && !totalPages && (page > 1 || meta.hasMore) && <div className="browse-pager"><button className="pager-item" disabled={page <= 1 || loading} onClick={() => gotoPage(page - 1)}>上一页</button><span>第 {page} 页</span><button className="pager-item" disabled={!meta.hasMore || loading} onClick={() => gotoPage(page + 1)}>下一页</button></div>}
+
+      </>}
 
       {/* ===== 剧集详情抽屉 ===== */}
       {(detail || detailLoading) && (

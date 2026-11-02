@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { net } = require('electron');
 const { rememberWebEpisodes } = require('./episode-prelude');
+const { comicCover } = require('./cover-url');
 
 const SITE = 'https://hongguoduanju.com';
 const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
@@ -63,22 +64,21 @@ function parseCatalog(html, category, page, sourceUrl) {
     throw new Error('来源目录暂不可用，请重试或打开来源页面');
   }
   const pageTitle = data.seo?.title || '';
-  if (category === 'comic') {
-    return { success: true, results: [], page: 1, total: 0, totalPages: 0, genres: [], pageTitle, sourceUrl,
-      unsupported: true, emptyMessage: '漫画属于图文阅读，暂不支持视频播放或下载；请切换「漫剧」或打开来源页面阅读。' };
-  }
+  const comic = category === 'comic';
   const seen = new Set();
   const results = data.recommendList.filter(item => {
     if (!/^\d{6,}$/.test(item?.series_id) || typeof item.series_name !== 'string' || !item.series_name.trim() || seen.has(String(item.series_id))) return false;
     seen.add(String(item.series_id));
     return true;
   }).map(item => {
-    rememberWebEpisodes(item.series_id, item);
+    // Comics are read, not played: no web episode memory, no score, and a lighter poster rendition.
+    if (!comic) rememberWebEpisodes(item.series_id, item);
     return {
-      series_id: String(item.series_id), series_title: item.series_name.trim(), cover: item.series_cover || '',
+      series_id: String(item.series_id), series_title: item.series_name.trim(),
+      cover: (comic && comicCover(item.series_cover)) || item.series_cover || '',
       episode_count: Number(item.episode_cnt) || 0,
       tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
-      rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
+      rating: comic ? null : ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
       ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${item.series_id}`,
     };
@@ -245,6 +245,10 @@ async function browseList(options = {}, proxyLogin) {
       const html = await Promise.race([fetchCatalogPage(url, controller.signal, proxyLogin), timeout]);
       const data = (ranking ? parseRanking : parseCatalog)(html, category, pg, url);
       cache.set(url, { expires: Date.now() + CACHE_MS, data });
+      if (category === 'comic' && !genre) {
+        // The comic snapshot is an optimisation; it must never fail a catalog request.
+        try { require('./comic').service().noteSitePage({ page: data.page, totalPages: data.totalPages, items: data.results }); } catch (_) { /* ignored */ }
+      }
       // Bound memory while retaining the latest category/filter pages.
       if (cache.size > 32) cache.delete(cache.keys().next().value);
       return data;

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const passthroughCache = { shared: { wrap: (_name, fetcher) => fetcher, getAux: () => undefined, setAux() {} } };
 const sourcePath = path.join(__dirname, '../src/native/xifan.js');
 const sid = 'xifan:huabo:drama1';
 const vid = `${sid}:episode1`;
@@ -27,7 +28,7 @@ async function check() {
       ] }] } : list;
     return { data: { ret: 0, result: structuredClone(data) } };
   } };
-  const context = { module: { exports: {} }, require: name => name === 'axios' ? axios : require(name),
+  const context = { module: { exports: {} }, require: name => name === 'axios' ? axios : name === './browse-cache' ? passthroughCache : require(name),
     Buffer, URL, AbortController, setTimeout, clearTimeout };
   vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), context, { filename: sourcePath });
   const xifan = context.module.exports;

@@ -1,0 +1,23 @@
+.comic-reader { position: fixed; inset: 0; z-index: 1200; display: flex; flex-direction: column; background: #141210; color: #f1ede6; outline: none; }
+.comic-reader-bar { flex: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 16px; background: #1d1a17; border-bottom: 1px solid #ffffff1a; }
+.comic-reader-title { min-width: 0; text-align: center; display: flex; flex-direction: column; gap: 2px; }
+.comic-reader-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--font-scale, 1)); }
+.comic-reader-title span { color: #b9b2a6; font-size: calc(12px * var(--font-scale, 1)); font-variant-numeric: tabular-nums; }
+.comic-reader-nav { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border: 1px solid #ffffff2e; border-radius: 7px; background: transparent; color: inherit; font-size: calc(13px * var(--font-scale, 1)); }
+.comic-reader-nav:hover:not(:disabled) { background: #ffffff14; }
+.comic-reader-nav:disabled { opacity: .35; cursor: not-allowed; }
+.comic-reader-close { color: inherit; }
+.comic-reader-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.comic-reader-column { margin: 0 auto; max-width: 100%; background: #0c0b0a; min-height: 100%; }
+.comic-page { position: relative; width: 100%; background: #1a1714; overflow: hidden; }
+.comic-page img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.comic-page-wait { position: absolute; inset: 0; background: linear-gradient(110deg, #1a1714 30%, #26221e 50%, #1a1714 70%); background-size: 200% 100%; animation: comic-shimmer 1.4s linear infinite; }
+.comic-page-failed { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #b9b2a6; font-size: calc(13px * var(--font-scale, 1)); }
+.comic-page-failed p { margin: 0; }
+.comic-reader-state { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 90px 16px; color: #b9b2a6; text-align: center; }
+.comic-reader-state p { margin: 0; overflow-wrap: anywhere; }
+.comic-reader-end { padding: 40px 16px 60px; text-align: center; color: #b9b2a6; }
+.comic-reader-end p { margin: 0 0 16px; }
+.comic-reader-end div { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+@keyframes comic-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .comic-page-wait { animation: none; } }

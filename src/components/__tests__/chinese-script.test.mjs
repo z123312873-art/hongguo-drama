@@ -111,9 +111,23 @@ test('catalog pages grow only when the window can show more than one source page
   assert.equal(pagesToFill(0, 20, 5), 1);
   assert.equal(pagesToFill(wide, 0, 5), 1);
   assert.equal(pagesToFill(80, 20, 8), 4);
+  assert.equal(pagesToFill(80, 20, 8, 6), 4, 'a larger cap still stops at the page count that covers the slots');
+  assert.equal(pagesToFill(60, 10, 99, 6), 6, 'a ten-poster source joins up to six pages');
+  assert.equal(pagesToFill(60, 10, 99), 4, 'the default cap is unchanged');
+  assert.equal(pagesToFill(60, 10, 99, 0), 4);
+  assert.equal(pagesToFill(60, 30, 99, 6), 2);
   assert.deepEqual(sourcePageWindow(1, 1, 5), { start: 1, count: 1, uiPages: 5 });
   assert.deepEqual(sourcePageWindow(2, 2, 5), { start: 3, count: 2, uiPages: 3 });
   assert.equal(sourcePageWindow(3, 2, 5).count, 1);
+});
+
+test('paging inside one list keeps the joined source pages so page 2 never repeats page 1', () => {
+  const browse = fs.readFileSync(new URL('../Browse.jsx', import.meta.url), 'utf8');
+  assert.match(browse, /showSnapshot\(source, category, genre, next, true\)/);
+  assert.match(browse, /else if \(!sameList\) \{ pageSpan\.current = 1;/);
+  assert.deepEqual(sourcePageWindow(1, 2, 34), { start: 1, count: 2, uiPages: 17 });
+  assert.deepEqual(sourcePageWindow(2, 2, 34), { start: 3, count: 2, uiPages: 17 });
+  assert.equal(sourcePageWindow(2, 1, 34).start, 2, 'a span reset to 1 would restart at source page 2, which page 1 already showed');
 });
 
 test('font size defaults to the original interface size', () => {
