@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadComicCatalog } from '../../comicCatalog.mjs';
+import { COMIC_MAX } from '../../comicLayout.mjs';
+
+const ROOM = COMIC_MAX - 74;
 
 const card = (n) => ({ series_id: String(7000000 + n), series_title: `漫画${n}`, tags: ['都市'], cover: '' });
 const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => card(from + i));
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function fakeApi({ pages = { 1: range(1, 24), 2: range(25, 48), 3: range(49, 72), 4: range(73, 74) }, extras = range(1000, 1065), snapshot = null, failPages = [], delays = {}, extrasFail = false, overshoot = 0 } = {}) {
+function fakeApi({ pages = { 1: range(1, 24), 2: range(25, 48), 3: range(49, 72), 4: range(73, 74) }, extras = range(1000, 1000 + COMIC_MAX), snapshot = null, failPages = [], delays = {}, extrasFail = false, overshoot = 0 } = {}) {
   const calls = { browse: [], extras: [], active: 0, peak: 0 };
   return {
     calls,
@@ -23,17 +26,17 @@ function fakeApi({ pages = { 1: range(1, 24), 2: range(25, 48), 3: range(49, 72)
   };
 }
 
-test('the first page shows before the rest, the site order is kept, and extras fill to 140', async () => {
+test('the first page shows before the rest, the site order is kept, and extras fill to the cap', async () => {
   const api = fakeApi();
   const states = [];
   const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });
   assert.equal(states[0].items.length, 24, 'page 1 alone is the first paint');
   assert.equal(states[0].pending, true);
   assert.equal(states[0].expectedTotal, 74);
-  assert.equal(result.items.length, 140);
+  assert.equal(result.items.length, COMIC_MAX);
   assert.deepEqual(result.items.slice(0, 74).map((item) => item.series_id), range(1, 74).map((item) => item.series_id), 'site order first');
   assert.equal(result.items[74].series_id, String(7000000 + 1000));
-  assert.deepEqual(api.calls.extras[0].limit, 66);
+  assert.deepEqual(api.calls.extras[0].limit, ROOM);
   assert.equal(api.calls.extras[0].exclude.length, 74);
   assert.ok(api.calls.peak <= 3, `page requests stay at three at a time, saw ${api.calls.peak}`);
   assert.equal(states.at(-1).pending, false);
@@ -52,18 +55,18 @@ test('a late page never appears before an earlier one: only a contiguous prefix 
 });
 
 test('duplicates between pages and between site and extras are removed', async () => {
-  const api = fakeApi({ pages: { 1: range(1, 24), 2: range(20, 40) }, extras: [...range(30, 45), ...range(100, 300)], overshoot: 200 });
+  const api = fakeApi({ pages: { 1: range(1, 24), 2: range(20, 40) }, extras: [...range(30, 45), ...range(100, 100 + COMIC_MAX)], overshoot: 200 });
   const result = await loadComicCatalog({ api });
   const ids = result.items.map((item) => item.series_id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.equal(ids.length, 140);
+  assert.equal(ids.length, COMIC_MAX);
 });
 
-test('a site larger than the cap needs no extras and is truncated to 140', async () => {
-  const big = {}; for (let n = 1; n <= 8; n += 1) big[n] = range(n * 100, n * 100 + 23);
+test('a site larger than the cap needs no extras and is truncated to the cap', async () => {
+  const big = {}; for (let n = 1; n <= 12; n += 1) big[n] = range(n * 100, n * 100 + 29);
   const api = fakeApi({ pages: big });
   const result = await loadComicCatalog({ api });
-  assert.equal(result.items.length, 140);
+  assert.equal(result.items.length, COMIC_MAX);
   assert.equal(api.calls.extras.length, 0);
 });
 
@@ -93,7 +96,7 @@ test('a snapshot paints at once and is replaced only when the fresh site pages a
   const staleStates = states.filter((state) => state.stale);
   assert.equal(staleStates.length, 1, 'no intermediate partial list replaces the snapshot');
   assert.equal(states.at(-1).stale, false);
-  assert.equal(states.at(-1).items.length, 140);
+  assert.equal(states.at(-1).items.length, COMIC_MAX);
 });
 
 test('a missing middle page still shows the rest in order and offers a retry', async () => {
@@ -137,24 +140,24 @@ test('a thrown snapshot call or a single-page site does not break loading', asyn
   const api = fakeApi({ pages: { 1: range(1, 10) } });
   api.comicSnapshot = async () => { throw new Error('ipc'); };
   const result = await loadComicCatalog({ api });
-  assert.equal(result.items.length, 76, '10 site titles plus 66 extras');
+  assert.equal(result.items.length, COMIC_MAX, '10 site titles plus the rest as extras');
   assert.equal(api.calls.browse.length, 1);
 });
 
-test('extras that are still being gathered are asked for again and the list grows to 140', async () => {
+test('extras that are still being gathered are asked for again and the list grows to the cap', async () => {
   const api = fakeApi();
-  const all = range(1000, 1065);
-  const sizes = [0, 20, 45, 66];
+  const all = range(1000, 1000 + ROOM);
+  const sizes = [0, 20, 45, ROOM];
   let round = 0;
   api.comicExtras = async (payload) => {
     api.calls.extras.push(payload);
     const size = sizes[Math.min(round++, sizes.length - 1)];
-    return { success: true, items: all.slice(0, size), refreshing: size < 66, partial: size < 66 };
+    return { success: true, items: all.slice(0, size), refreshing: size < ROOM, partial: size < ROOM };
   };
   api.wait = async () => {};
   const states = [];
   const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });
-  assert.equal(result.items.length, 140);
+  assert.equal(result.items.length, COMIC_MAX);
   assert.equal(api.calls.extras.length, 4);
   const pending = states.filter((state) => state.pending && state.items.length > 74);
   assert.ok(pending.length >= 2, 'titles appear while the rest is still arriving');
@@ -173,7 +176,7 @@ test('when no extras can be fetched the notice carries the stage and code the se
   assert.match(states.at(-1).detail, /搜索，代码 101021/, 'the reason stays available as a hover hint');
 });
 
-test('extras that stop short of 140 say so instead of staying silent', async () => {
+test('extras that stop short of the cap say so instead of staying silent', async () => {
   const api = fakeApi({ extras: range(1000, 1019) });
   const states = [];
   const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });

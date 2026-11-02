@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, SOURCE_PAGE_SIZE, alignedPageSize, pagesToFill } from '../../catalogFill.mjs';
 import {
-  COMIC_MAX, IMAGE_WIDTHS, firstPagePosters, clampPage, comicPageSize, desiredImageWidth, episodeGroups, groupIndexOf, nextImageWidth,
+  COMIC_MAX, IMAGE_WIDTHS, readerImageWidth, firstPagePosters, clampPage, comicPageSize, desiredImageWidth, episodeGroups, groupIndexOf, nextImageWidth,
   pageCount, pageSlice, pagerNumbers, readerColumnWidth, skeletonCount,
 } from '../../comicLayout.mjs';
 
@@ -15,7 +15,7 @@ const SCREENS = [
   { name: 'small', width: 1100, height: 700, sidebarWidth: 220 },
 ];
 
-test('every screen gets whole source pages and at least two pages for the full 140 comics', () => {
+test('every screen gets whole source pages and at least two pages for the full list of comics', () => {
   for (const screen of SCREENS) {
     const { columns, pageSize } = comicPageSize({ ...screen, reservedRows: 1 });
     assert.ok(columns >= 4, `${screen.name} columns ${columns}`);
@@ -63,7 +63,7 @@ test('placeholders fill only the page that is still waiting for posters', () => 
   assert.equal(skeletonCount({ loaded: 74, page: 3, pageSize: 27, expectedTotal: 140, pending: true }), 27 - 20);
   assert.equal(skeletonCount({ loaded: 0, page: 1, pageSize: 27, expectedTotal: 140, pending: true }), 27, 'nothing loaded yet: a full page of cells');
   assert.equal(skeletonCount({ loaded: 5, page: 1, pageSize: 0, expectedTotal: 140, pending: true }), 0);
-  assert.equal(skeletonCount({ loaded: 5, page: 1, pageSize: 27, expectedTotal: 9999, pending: true }), 22, 'never more than one page of cells, never beyond 140');
+  assert.equal(skeletonCount({ loaded: 5, page: 1, pageSize: 27, expectedTotal: 9999, pending: true }), 22, 'never more than one page of cells, never beyond the cap');
 });
 
 test('the reader column and image width stay sensible from 1K to 4K at 100%, 125% and 200% scaling', () => {
@@ -148,4 +148,11 @@ test('every window opens the drama lists with the comic poster count and user so
   }
   assert.deepEqual(firstPagePosters({ width: 0, height: 0, minimum: 40 }), { columns: 0, slots: 0 });
   assert.equal(firstPagePosters({ ...SCREENS[0], minimum: 'x' }).slots, comicPageSize(SCREENS[0]).pageSize);
+});
+
+test('the rendition asked for on a hover is the one the reader asks for when it opens', () => {
+  for (const [width, ratio] of [[1100, 1], [1366, 1], [1920, 1], [1920, 2], [2560, 1.25], [3840, 1], [3840, 2], [0, 1], [NaN, 1]]) {
+    assert.equal(readerImageWidth(width, ratio), nextImageWidth(0, desiredImageWidth(readerColumnWidth(width), ratio)), `${width}x${ratio}`);
+    assert.ok(IMAGE_WIDTHS.includes(readerImageWidth(width, ratio)));
+  }
 });

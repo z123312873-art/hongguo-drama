@@ -9,7 +9,7 @@ const path = require('node:path');
 const realApi = require('./comic-api');
 const { ApiScheduler, PRIORITY } = require('./comic-scheduler');
 
-const MAX_COMICS = 140;
+const MAX_COMICS = 300;
 const MIN_EPISODES = 20;
 const POOL_TTL_MS = 24 * 60 * 60 * 1000;
 const DIRECTORY_TTL_MS = 30 * 60 * 1000;
@@ -20,9 +20,11 @@ const POOL_RETRY_MS = 30 * 60 * 1000;
 const POOL_CONTINUE_MS = 60 * 1000;
 // The first listing waits this long for a first batch of extras, then answers and lets the caller poll.
 const FIRST_BATCH_WAIT_MS = 8000;
-const POOL_BUILD_BUDGET_MS = 60 * 1000;
+const POOL_BUILD_BUDGET_MS = 90 * 1000;
+const POOL_LIMIT = 700;
+const SERVED_LIMIT = 600;
 const SEARCH_PAGES_PER_KEYWORD = 2;
-const IMAGE_CONCURRENCY = 4;
+const IMAGE_CONCURRENCY = 6;
 const CATEGORY_PAGES = 5;
 const MAX_CATEGORIES = 12;
 const DETAIL_SAMPLE = 20;
@@ -78,6 +80,12 @@ function seededShuffle(items, seedText, keyOf = (item) => String(item)) {
         [list[i], list[j]] = [list[j], list[i]];
     }
     return list;
+}
+
+// Same idea, but a title's place depends only on the title and the seed: removing or adding others never moves it.
+function seededRank(items, seedText, keyOf = (item) => String(item)) {
+    return items.map((item) => ({ item, key: keyOf(item), rank: hashString(`${seedText}:${keyOf(item)}`) }))
+        .sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key)).map((entry) => entry.item);
 }
 
 function dayKey(at) {
@@ -145,7 +153,11 @@ function topTags(cards, count) {
 function createComicService({ api = realApi, now = Date.now, schedulerOptions = {}, imageFetcher, seed = [] } = {}) {
     let cacheFile = '';
     let persistTimer = null;
-    const state = { site: { pages: {}, totalPages: 0, savedAt: 0 }, pool: { items: [], builtAt: 0 } };
+    // `served` is the order in which extra titles were first shown. It is what keeps a list steady: a refresh adds
+    // to it, and only a title that turned out unreadable is taken out.
+    const state = { site: { pages: {}, totalPages: 0, savedAt: 0 }, pool: { items: [], builtAt: 0 }, served: { day: '', ids: [] } };
+    // The shuffle day is fixed when the service first picks, so the order never turns over under a person who is browsing.
+    let sessionDay = '';
     // Titles whose directory came back empty are left out of the extra titles for a week, then tried again.
     const dead = new Set();
     const deadAt = new Map();
@@ -216,6 +228,9 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
                 if (ID.test(String(id)) && now() - Number(at) < DEAD_TTL_MS) { dead.add(String(id)); deadAt.set(String(id), Number(at)); }
             }
             if (Array.isArray(data.pool?.items)) state.pool = { items: data.pool.items.filter(validCard), builtAt: Number(data.pool.builtAt) || 0 };
+            if (typeof data.served?.day === 'string' && Array.isArray(data.served.ids)) {
+                state.served = { day: data.served.day, ids: data.served.ids.map(String).filter((id) => ID.test(id)).slice(0, SERVED_LIMIT) };
+            }
         } catch (_) { /* a missing or damaged cache only costs one network round trip */ }
     }
 
@@ -231,7 +246,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             try {
                 fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
                 const temporary = `${cacheFile}.${process.pid}.tmp`;
-                fs.writeFileSync(temporary, JSON.stringify({ version: 1, site: state.site, pool: state.pool, route: routes[routeIndex]?.id, dead: [...deadAt.entries()].slice(-200) }));
+                fs.writeFileSync(temporary, JSON.stringify({ version: 1, site: state.site, pool: state.pool, served: state.served, route: routes[routeIndex]?.id, dead: [...deadAt.entries()].slice(-200) }));
                 fs.renameSync(temporary, cacheFile);
             } catch (_) { /* the cache is an optimisation only */ }
         }, 500);
@@ -268,20 +283,55 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return out;
     }
 
+    // Extra titles keep the order they were first shown in. A pick only adds titles after the ones already
+    // served, so a refresh, a growing pool or a second call never swaps a poster that is on screen. A title
+    // that cannot be read (parked as dead) is the one thing that leaves the list. Live titles are taken first,
+    // the shipped list tops up what is still missing.
+    function selectExtras(exclude, limit, at, { record = true } = {}) {
+        const want = Math.max(0, limit);
+        const day = sessionDay || (sessionDay = dayKey(at));
+        if (state.served.day !== day) state.served = { day, ids: [] };
+        const blocked = new Set([...exclude, ...dead]);
+        const known = new Map();
+        for (const card of seedCards) known.set(card.series_id, card);
+        for (const card of state.pool.items) known.set(card.series_id, card);
+
+        const kept = [];
+        const keptIds = new Set();
+        const stillServed = [];
+        for (const id of state.served.ids) {
+            const card = known.get(id);
+            if (!card || dead.has(id) || !eligible(card, new Set())) continue;
+            stillServed.push(id);
+            if (kept.length < want && !blocked.has(id) && !keptIds.has(id)) { kept.push(card); keptIds.add(id); }
+        }
+        const added = [];
+        const take = (cards) => {
+            for (const card of cards) {
+                if (kept.length >= want) break;
+                kept.push(card);
+                keptIds.add(card.series_id);
+                added.push(card.series_id);
+            }
+        };
+        const open = () => new Set([...blocked, ...keptIds]);
+        take(seededRank(state.pool.items.filter((card) => eligible(card, open())), `comic-extras:${day}`, (card) => card.series_id));
+        if (kept.length < want && seedCards.length) {
+            take(seededRank(seedCards.filter((card) => eligible(card, open())), `comic-seed:${day}`, (card) => card.series_id));
+        }
+        const ids = [...stillServed, ...added].slice(0, SERVED_LIMIT);
+        const changed = ids.length !== state.served.ids.length || ids.some((id, index) => id !== state.served.ids[index]);
+        if (record) {
+            state.served = { day, ids };
+            if (changed) persist();
+        }
+        return kept;
+    }
+
     function selectLive(exclude, limit, at) {
         const blocked = new Set([...exclude, ...dead]);
         const pool = state.pool.items.filter((card) => eligible(card, blocked));
-        return seededShuffle(pool, `comic-extras:${dayKey(at)}`, (card) => card.series_id).slice(0, Math.max(0, limit));
-    }
-
-    // Live titles first; the shipped list only tops up what is still missing.
-    function selectExtras(exclude, limit, at) {
-        const picked = selectLive(exclude, limit, at);
-        const missing = Math.max(0, limit) - picked.length;
-        if (missing <= 0 || !seedCards.length) return picked;
-        const blocked = new Set([...exclude, ...dead, ...picked.map((card) => card.series_id)]);
-        const filler = seededShuffle(seedCards.filter((card) => eligible(card, blocked)), `comic-seed:${dayKey(at)}`, (card) => card.series_id);
-        return [...picked, ...filler.slice(0, missing)];
+        return pool.slice(0, Math.max(0, limit));
     }
 
     // The last complete listing, shown at once while the network refreshes it.
@@ -398,7 +448,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
 
     // Extra titles never block the listing: a stale pool is served while a new one is built.
     async function extras({ exclude = [], limit = MAX_COMICS, waitMs = FIRST_BATCH_WAIT_MS } = {}) {
-        const blocked = (Array.isArray(exclude) ? exclude : []).map(String).filter((id) => ID.test(id)).slice(0, 400);
+        const blocked = (Array.isArray(exclude) ? exclude : []).map(String).filter((id) => ID.test(id)).slice(0, POOL_LIMIT);
         const cap = Math.max(0, Math.min(MAX_COMICS, Number.parseInt(limit, 10) || 0));
         if (!cap) return { success: true, items: [], partial: false, refreshing: false, diagnostic: '' };
         const at = now();
@@ -414,7 +464,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             const merge = (cards) => {
                 const merged = new Map(state.pool.items.map((card) => [card.series_id, card]));
                 for (const card of cards) merged.set(card.series_id, card);
-                state.pool = { items: [...merged.values()].slice(0, 400), builtAt: now() };
+                state.pool = { items: [...merged.values()].slice(0, POOL_LIMIT), builtAt: now() };
                 persist();
             };
             poolBuild = buildPool(siteItems(), blocked, cap, merge).then((built) => {
@@ -424,7 +474,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             }).catch((error) => { lastPoolError = error; lastBuildGain = 0; }).finally(() => { lastBuildAt = now(); poolBuild = null; });
         }
         // Nothing to show yet: wait a little for a first batch, then answer and let the caller ask again.
-        if (poolBuild && selectExtras(blocked, cap, now()).length < cap) {
+        if (poolBuild && selectExtras(blocked, cap, now(), { record: false }).length < cap) {
             const running = poolBuild;
             let timer;
             await Promise.race([running, new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, Number(waitMs) || 0)); })]);
@@ -547,5 +597,5 @@ function withNetworkHint(error, proxyEnabled) {
 }
 
 module.exports = { withNetworkHint,
-    createComicService, service, loadSeed, seededShuffle, episodeLabel, bookToCard, topTags, dayKey, MAX_COMICS, MIN_EPISODES,
+    createComicService, service, loadSeed, seededShuffle, episodeLabel, bookToCard, topTags, dayKey, MAX_COMICS, MIN_EPISODES, IMAGE_CONCURRENCY, seededRank,
 };

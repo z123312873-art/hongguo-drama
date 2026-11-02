@@ -5,12 +5,15 @@ import ComicReader from './ComicReader';
 import useDialogKeyboard from './useDialogKeyboard';
 import { loadComicCatalog } from '../comicCatalog.mjs';
 import { COMIC_CHIPS, comicChipCounts, comicMatchesChips, toggleComicChips } from '../comicTags.mjs';
-import { clampPage, comicPageSize, episodeGroups, groupIndexOf, pageCount, pagerNumbers, skeletonCount } from '../comicLayout.mjs';
+import { clampPage, comicPageSize, episodeGroups, groupIndexOf, pageCount, pagerNumbers, readerImageWidth, skeletonCount } from '../comicLayout.mjs';
+import { firstPictureUrls } from '../comicPreload.mjs';
 import { markRead, readProgress } from '../comicProgress.mjs';
 import './ComicBrowse.css';
 
 const CATALOG_TTL_MS = 10 * 60 * 1000;
 const RESIZE_DELAY_MS = 250;
+const HOVER_PREFETCH_MS = 160;
+const HINT_LIMIT = 12;
 let catalogMemory = null;
 
 function storage() {
@@ -48,6 +51,9 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
   const seenReload = useRef(reloadToken);
   const [progress, setProgress] = useState({ read: new Set(), last: '' });
   const detailRef = useRef(null);
+  const hoverTimer = useRef(null);
+  const asked = useRef(new Set());
+  const firstImages = useRef([]);
   catalogRef.current = catalog;
   detailRef.current = detail;
 
@@ -85,7 +91,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
     return undefined;
   }, [active, reloadToken, load]);
 
-  useEffect(() => () => { ticket.current += 1; detailTicket.current += 1; }, []);
+  useEffect(() => () => { ticket.current += 1; detailTicket.current += 1; clearTimeout(hoverTimer.current); for (const image of firstImages.current) image.src = ''; }, []);
 
   useEffect(() => {
     let timer;
@@ -121,16 +127,63 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const closeDetail = useCallback(() => { detailTicket.current += 1; setDetail(null); setReading(''); }, []);
+  // Pointing at an episode asks for its list of pictures and warms its first picture, so the click that follows
+  // finds both ready. Only a few episodes are asked for, and only after the pointer rests on one.
+  const hint = useCallback((itemId) => {
+    clearTimeout(hoverTimer.current);
+    if (asked.current.has(itemId) || asked.current.size >= HINT_LIMIT) return;
+    hoverTimer.current = setTimeout(async () => {
+      asked.current.add(itemId);
+      try {
+        const ratio = window.devicePixelRatio || 1;
+        const reply = await window.electronAPI?.comicChapter?.({ itemId, width: readerImageWidth(window.innerWidth, ratio), priority: 'prefetch' });
+        const [url] = reply?.success ? firstPictureUrls(reply, 1) : [];
+        if (url && typeof Image === 'function') {
+          const image = new Image();
+          image.src = url;
+          firstImages.current.push(image);
+        }
+      } catch (_) { /* a missed hint is harmless */ }
+    }, HOVER_PREFETCH_MS);
+  }, []);
+  const unhint = useCallback(() => clearTimeout(hoverTimer.current), []);
+  const forgetHints = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    asked.current = new Set();
+    for (const image of firstImages.current) image.src = '';
+    firstImages.current = [];
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    detailTicket.current += 1;
+    forgetHints();
+    window.electronAPI?.comicCancelPrefetch?.();
+    setDetail(null);
+    setReading('');
+  }, []);
+  const dropCard = useCallback((seriesId) => {
+    setCatalog((value) => {
+      const items = value.items.filter((entry) => entry.series_id !== seriesId);
+      if (items.length === value.items.length) return value;
+      const next = { ...value, items, expectedTotal: Math.max(items.length, value.expectedTotal - 1) };
+      if (catalogMemory && !value.pending) catalogMemory = { state: next, at: catalogMemory.at };
+      return next;
+    });
+  }, []);
   const openComic = async (card) => {
     const mine = ++detailTicket.current;
+    forgetHints();
     setReading('');
     setProgress(readProgress(storage(), card.series_id));
     setDetail({ card, loading: true, error: '', episodes: [], group: 0 });
     try {
       const reply = await window.electronAPI.comicEpisodes(card.series_id);
       if (mine !== detailTicket.current) return;
-      if (!reply?.success) throw new Error(reply?.error || '分集暂时没取到');
+      if (!reply?.success) {
+        // A title the source lists without any episodes is parked by the service; take its poster off the page too.
+        if (reply?.code === 'EMPTY_DIRECTORY') dropCard(card.series_id);
+        throw new Error(reply?.error || '分集暂时没取到');
+      }
       const known = readProgress(storage(), card.series_id);
       const groups = episodeGroups(reply.total);
       const lastAt = known.last ? reply.episodes.findIndex(entry => entry.itemId === known.last) : -1;
@@ -249,7 +302,8 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
               <div className="browse-eps comic-eps">
                 {groupEpisodes.map(entry => (
                   <button type="button" key={entry.itemId} className={`ep-chip ${progress.read.has(entry.itemId) ? 'ep-completed' : ''} ${entry.itemId === progress.last ? 'ep-picked' : ''}`}
-                    title={entry.title || `第 ${entry.label} 话`} onClick={() => openEpisode(entry.itemId)}>
+                    title={entry.title || `第 ${entry.label} 话`} onClick={() => openEpisode(entry.itemId)}
+                    onMouseEnter={() => hint(entry.itemId)} onFocus={() => hint(entry.itemId)} onMouseLeave={unhint} onBlur={unhint}>
                     <span className="ep-num">{entry.label}</span>
                     {progress.read.has(entry.itemId) && <Check size={11} className="ep-badge" />}
                   </button>

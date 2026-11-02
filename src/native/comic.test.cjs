@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const realApi = require('./comic-api');
-const { createComicService, withNetworkHint, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS } = require('./comic');
+const { createComicService, withNetworkHint, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS, IMAGE_CONCURRENCY, seededRank } = require('./comic');
 
 const fastScheduler = { rate: 500, burst: 20, concurrency: 3, backoff: [2, 4, 8, 16], rotationCooldownMs: 5, rejectionPauseMs: 5 };
 const id = (n) => String(7000000000000000000n + BigInt(n));
@@ -245,7 +245,7 @@ test('fallback images are downloaded, authenticated-decrypted and size-detected;
     const service = createComicService({ api, schedulerOptions: fastScheduler, imageFetcher: async () => { downloads += 1; active += 1; peak = Math.max(peak, active); await new Promise((r) => setTimeout(r, 5)); active -= 1; return blob; } });
     const results = await Promise.all(Array.from({ length: 10 }, (_, i) => service.image({ itemId: id(300), index: i })));
     assert.equal(downloads, 10);
-    assert.ok(peak <= 4, `image concurrency capped, saw ${peak}`);
+    assert.ok(peak <= IMAGE_CONCURRENCY && peak > 1, `image concurrency capped at ${IMAGE_CONCURRENCY}, saw ${peak}`);
     for (const result of results) { assert.equal(result.mime, 'image/jpeg'); assert.ok(result.data.equals(plain)); }
     await assert.rejects(service.image({ itemId: id(300), index: -1 }), (error) => error.code === 'APP_INPUT');
     await assert.rejects(service.image({ itemId: id(300), index: 1.5 }), (error) => error.code === 'APP_INPUT');
@@ -301,10 +301,11 @@ test('the listing snapshot appears once every site page is known and survives a 
 
 test('the total listing is capped at the maximum even when the site alone is larger', () => {
     const service = createComicService({ api: fakeApi(), schedulerOptions: fastScheduler });
-    for (let page = 1; page <= 8; page += 1) service.noteSitePage({ page, totalPages: 8, items: Array.from({ length: 24 }, (_, i) => sitePage(1, [page * 100 + i]).items[0]) });
+    const pages = Math.ceil(MAX_COMICS / 24) + 2;
+    for (let page = 1; page <= pages; page += 1) service.noteSitePage({ page, totalPages: pages, items: Array.from({ length: 24 }, (_, i) => sitePage(1, [page * 100 + i]).items[0]) });
     const snapshot = service.snapshot();
     assert.equal(snapshot.items.length, MAX_COMICS);
-    assert.equal(snapshot.siteCount, 192);
+    assert.equal(snapshot.siteCount, pages * 24);
 });
 
 test('a slow first build answers at once with what it has, keeps growing, and a later call sees the rest', async () => {
@@ -532,7 +533,7 @@ function seedBooks(from, count) {
 
 test('when no live listing returns anything, the shipped titles fill the list up to the cap without waiting', async () => {
     const api = fakeApi({ async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; } });
-    const service = createComicService({ api, schedulerOptions: fastScheduler, seed: seedBooks(5000, 200) });
+    const service = createComicService({ api, schedulerOptions: fastScheduler, seed: seedBooks(5000, MAX_COMICS + 100) });
     service.noteSitePage(sitePage(1, [5000, 5001, 1, 2]));
     const exclude = [id(5000), id(5001), id(1), id(2)];
     const started = Date.now();
@@ -569,7 +570,7 @@ test('live titles come before the shipped ones, and a shipped title with no epis
 test('the shipped list is valid, unique, and large enough to fill the cap on its own', () => {
     const { loadSeed } = require('./comic');
     const list = loadSeed();
-    assert.ok(list.length >= MAX_COMICS * 2, `${list.length} shipped titles`);
+    assert.ok(list.length >= MAX_COMICS + 100, `${list.length} shipped titles`);
     const ids = new Set();
     for (const card of list) {
         assert.match(card.series_id, /^\d{6,30}$/);
@@ -578,4 +579,103 @@ test('the shipped list is valid, unique, and large enough to fill the cap on its
         assert.ok(card.series_title && card.episode_count >= 20 && card.tags.length > 0);
         assert.match(card.cover, /^https:\/\/p3-novel\.byteimg\.com\/novel-(pic|images)\/[0-9a-f]{32}~tplv-resize:320:0\.webp$/);
     }
+});
+
+const ids = (outcome) => outcome.items.map((item) => item.series_id);
+
+test('extra titles keep their order while the pool grows and across refreshes', async () => {
+    let breadth = 3;
+    const api = fakeApi({
+        async searchComicPage(_session, query, paging = {}) {
+            const offset = paging.offset || 0;
+            const base = (query.codePointAt(0) % 20) * 100 + offset;
+            return { books: Array.from({ length: breadth }, (_, i) => book(base + i + 1)), hasMore: offset < 20, nextOffset: offset + 20, searchId: 's' };
+        },
+    });
+    let now = Date.parse('2026-03-01T10:00:00');
+    const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1]));
+    const exclude = [id(1)];
+    const first = await settled(service, { exclude, limit: 12, waitMs: 5000 });
+    assert.ok(first.items.length >= 6, `first ${first.items.length}`);
+    breadth = 20;
+    now += 2 * 60 * 60 * 1000;
+    for (let round = 0; round < 5; round += 1) {
+        now += POOL_RETRY_FOR_TEST;
+        const next = await settled(service, { exclude, limit: 40, waitMs: 5000 });
+        assert.deepEqual(ids(next).slice(0, ids(first).length), ids(first), `round ${round}: titles already shown keep their place`);
+        assert.equal(new Set(ids(next)).size, ids(next).length);
+    }
+    assert.ok(service._state.pool.items.length > first.items.length, 'the pool did grow');
+});
+
+const POOL_RETRY_FOR_TEST = 31 * 60 * 1000;
+
+test('a refresh never swaps shipped titles for live ones that arrive later, and the order survives a restart on the same day', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comic-served-'));
+    const file = path.join(dir, 'cache.json');
+    try {
+        const now = () => Date.parse('2026-03-01T10:00:00');
+        let live = false;
+        const api = fakeApi({ async searchComicPage(_session, query, paging = {}) {
+            if (!live) return { books: [], hasMore: false, nextOffset: 0, searchId: '' };
+            return { books: Array.from({ length: 20 }, (_, i) => book(9000 + (query.codePointAt(0) % 30) * 100 + (paging.offset || 0) + i)), hasMore: false, nextOffset: 0, searchId: 's' };
+        } });
+        const service = createComicService({ api, now, schedulerOptions: fastScheduler, seed: seedBooks(5000, 80) });
+        service.configure({ file });
+        service.noteSitePage(sitePage(1, [1]));
+        const exclude = [id(1)];
+        const first = await settled(service, { exclude, limit: 50, waitMs: 5000 });
+        assert.equal(first.items.length, 50);
+        live = true;
+        const again = await settled(service, { exclude, limit: 50, waitMs: 5000 });
+        assert.deepEqual(ids(again), ids(first), 'nothing on screen is replaced');
+        const wider = await settled(service, { exclude, limit: 60, waitMs: 5000 });
+        assert.deepEqual(ids(wider).slice(0, 50), ids(first));
+        await new Promise((resolve) => setTimeout(resolve, 700));
+
+        const restarted = createComicService({ api: fakeApi(), now, schedulerOptions: fastScheduler, seed: seedBooks(5000, 80) });
+        restarted.configure({ file });
+        const back = await restarted.extras({ exclude, limit: 60, waitMs: 0 });
+        assert.deepEqual(ids(back), ids(wider), 'same list after a restart');
+
+        const tomorrow = createComicService({ api: fakeApi(), now: () => Date.parse('2026-03-02T10:00:00'), schedulerOptions: fastScheduler, seed: seedBooks(5000, 80) });
+        tomorrow.configure({ file });
+        const rotated = await tomorrow.extras({ exclude, limit: 60, waitMs: 0 });
+        assert.notDeepEqual(ids(rotated), ids(wider), 'a new day gives a new order');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the day does not turn over while the app stays open; a title that cannot be read is the only one that leaves', async () => {
+    let now = Date.parse('2026-03-01T23:50:00');
+    let victim = '';
+    const api = fakeApi({
+        async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; },
+        async fetchDirectory(_session, bookId) { return bookId === victim ? [] : [{ index: 1, itemId: id(9), title: '第1话' }]; },
+    });
+    const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler, seed: seedBooks(5000, 60) });
+    service.noteSitePage(sitePage(1, [1]));
+    const exclude = [id(1)];
+    const before = await service.extras({ exclude, limit: 20, waitMs: 0 });
+    assert.equal(before.items.length, 20);
+    now = Date.parse('2026-03-02T00:20:00');
+    const after = await service.extras({ exclude, limit: 20, waitMs: 0 });
+    assert.deepEqual(ids(after), ids(before), 'midnight does not reshuffle an open session');
+
+    victim = ids(before)[4];
+    await assert.rejects(service.episodes(victim), (error) => error.code === 'EMPTY_DIRECTORY');
+    const gone = await service.extras({ exclude, limit: 20, waitMs: 0 });
+    assert.equal(gone.items.length, 20, 'the gap is filled');
+    assert.deepEqual(ids(gone).slice(0, 19), ids(before).filter((value) => value !== victim), 'the others keep their order');
+    assert.ok(!ids(gone).includes(victim));
+});
+
+test('seededRank keeps the relative order of the rest when a title is added or removed', () => {
+    const items = Array.from({ length: 200 }, (_, i) => String(1000 + i));
+    const full = seededRank(items, 'day-1');
+    assert.deepEqual(seededRank(items.slice().reverse(), 'day-1'), full);
+    const without = seededRank(items.filter((value) => value !== full[7]), 'day-1');
+    assert.deepEqual(without, full.filter((value) => value !== full[7]));
+    assert.notDeepEqual(seededRank(items, 'day-2'), full);
+    assert.deepEqual(seededRank([], 'x'), []);
 });

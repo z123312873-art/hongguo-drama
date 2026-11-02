@@ -532,9 +532,10 @@ async function mount(file, api, props = {}) {
       assert.equal(pager().length, 0, 'the pager lists only pages that already have posters, so nothing flashes or collapses later');
       assert.equal(ui.nodes().filter(n => n.props.className === 'poster-skeleton').length, 0, 'a full first page needs no placeholders');
       gates[2].resolve(); await ui.flush();
-      assert.equal(ui.text().includes('共 140 部'), true);
+      const { COMIC_MAX } = await import('../comicLayout.mjs');
+      assert.equal(ui.text().includes(`共 ${COMIC_MAX} 部`), true);
       assert.equal(cards().length, 24, 'only one page of posters is rendered at a time');
-      assert.ok(pager().length >= 4, 'pagination exists for 140 comics');
+      assert.ok(pager().length >= 4, 'pagination exists for the full list');
       assert.ok(cards().every(n => !n.children.flat(Infinity).some(c => c?.props?.className === 'browse-score' || c?.props?.className === 'browse-new-badge')), 'no star or 新剧 label on comics');
       assert.deepEqual(cards().slice(0, 3).map(n => n.props.title), ['漫画1', '漫画2', '漫画3'], 'site order first');
       ui.nodes().find(n => n.props['aria-label'] === '下一页').props.onClick(); await ui.flush();
@@ -609,6 +610,27 @@ async function mount(file, api, props = {}) {
       dirFail = false;
       await ui.button('重试').props.onClick(); await ui.flush();
       assert.ok(ui.nodes().some(n => String(n.props.className).startsWith('ep-chip')), 'retry recovers the episode list');
+    } finally { ui.unmount(); }
+  });
+  await test('comic view: a title with no episodes leaves the page, the others keep their order', async () => {
+    const card = n => ({ series_id: String(7000000 + n), series_title: `漫画${n}`, tags: ['都市'], cover: '' });
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => card(a + i));
+    const episodes = [];
+    const ui = await mount('ComicBrowse', {
+      comicSnapshot: async () => ({ success: true, snapshot: null }),
+      browseList: async r => ({ success: true, results: range(1, 24), page: r.page, totalPages: 1, total: 24 }),
+      comicExtras: async r => ({ success: true, items: range(100, 100 + Math.min(r.limit, 30) - 1) }),
+      comicEpisodes: async id => { episodes.push(id); return id === '7000003' ? { success: false, error: '这部漫画暂时没有分集', code: 'EMPTY_DIRECTORY' } : { success: true, seriesId: id, total: 1, episodes: [{ index: 1, itemId: '8000001', title: '第1话', label: '1' }] }; },
+    });
+    const titles = () => ui.nodes().filter(n => n.props.className === 'browse-card').map(n => n.props.title);
+    try {
+      await ui.flush();
+      const before = titles();
+      assert.ok(before.includes('漫画3'));
+      ui.nodes().filter(n => n.props.className === 'browse-card').find(n => n.props.title === '漫画3').props.onClick(); await ui.flush();
+      assert.ok(ui.text().includes('这部漫画暂时没有分集'));
+      assert.ok(!titles().includes('漫画3'), 'the unreadable title is taken off the page');
+      assert.deepEqual(titles().slice(0, before.length - 1), before.filter(t => t !== '漫画3'), 'every other poster keeps its order');
     } finally { ui.unmount(); }
   });
   await test('browse categories: timeout ends skeleton and retry rejects the old response', async () => {

@@ -1,7 +1,7 @@
 import { alignedPageSize, posterColumns, posterSlots } from './catalogFill.mjs';
 import { uiScale } from './uiScale.mjs';
 
-export const COMIC_MAX = 140;
+export const COMIC_MAX = 300;
 // Renditions the image CDN is asked for (kept in step with native/comic-api.js).
 export const IMAGE_WIDTHS = Object.freeze([360, 540, 720, 900, 1080, 1440]);
 const MIN_ROWS = 3;
@@ -81,6 +81,11 @@ export function desiredImageWidth(cssWidth, devicePixelRatio = 1) {
   const dpr = ratio > 0 && Number.isFinite(ratio) ? Math.min(ratio, 3) : 1;
   const need = Math.ceil(width * dpr);
   return IMAGE_WIDTHS.find(step => step >= need) || IMAGE_WIDTHS[IMAGE_WIDTHS.length - 1];
+}
+
+// The rendition the reader asks for when it opens at this window width and pixel ratio.
+export function readerImageWidth(viewportWidth, devicePixelRatio = 1) {
+  return desiredImageWidth(readerColumnWidth(viewportWidth), devicePixelRatio);
 }
 
 // Resizing only ever asks for a sharper rendition; shrinking keeps what is already on screen.
