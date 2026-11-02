@@ -329,6 +329,23 @@ const checks = [
     f.state.app = true;
     assert.equal((await f.fetchPlayUrlSingle('11', '1')).source, 'app', 'failures must not be cached');
   }],
+  ['A series whose page has no video goes straight to the App for its other episodes; timeouts never count', async () => {
+    const f = routeFixture(); f.state.app = true;
+    assert.equal((await f.fetchPlayUrlSingle('12', '1')).source, 'app');
+    assert.ok(f.state.calls.includes('web') && f.state.calls.at(-1) === 'app', 'the first miss still asks the page');
+    f.state.calls.length = 0;
+    assert.equal((await f.fetchPlayUrlSingle('13', '1')).source, 'app');
+    assert.deepEqual(f.state.calls, ['app'], 'the next episode of that series does not wait for the page');
+    let asked = 0;
+    const counted = load('hongguo.js', {
+      axios: { get: async () => { asked++; throw Object.assign(new Error('x'), { code: 'ETIMEDOUT' }); }, post: async () => ({ status: 200, headers: {}, data: Buffer.alloc(0) }) },
+      './app-source': { fetchAppPlayUrl: async () => ({ url: media('app'), source: 'app' }) },
+    });
+    assert.equal((await counted.fetchPlayUrlSingle('21', '9')).source, 'app');
+    const afterFirst = asked;
+    assert.equal((await counted.fetchPlayUrlSingle('22', '9')).source, 'app');
+    assert.ok(asked > afterFirst, 'a timeout says nothing about the page, so it is asked again');
+  }],
 ];
 (async () => {
   let failed = 0;

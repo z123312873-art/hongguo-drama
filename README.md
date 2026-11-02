@@ -8,7 +8,7 @@
 
 <p align="center">
   <img alt="目前正式版 4.1" src="https://img.shields.io/badge/正式版-4.1-8b3a3a?style=flat-square">
-  <img alt="預發佈 4.2" src="https://img.shields.io/badge/預發佈-4.2-b08a3a?style=flat-square">
+  <img alt="預發佈 4.3" src="https://img.shields.io/badge/預發佈-4.3-b08a3a?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -29,7 +29,7 @@
 
 **[下載 4.1 正式版（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.1/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.1) 附 SHA256 與大小。
 
-想先試新功能：[4.2 預發佈](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.2-traditional-pre)（新增「漫畫」分類；不會觸發自動更新，也不取代 4.1 正式版）。
+想先試新功能：[4.3 預發佈](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.3-traditional-pre)（在線播放更快更穩、漫畫補齊 140 部；不會觸發自動更新，也不取代 4.1 正式版）。
 
 也可使用 [4.1 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.1/hongguo-downloader-4.1-win-x64.zip)。
 
@@ -43,6 +43,8 @@
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 
 ## 這個版本
+
+4.3 預發佈重點：在線播放更快更穩，切換集數幾乎不用等；漫畫分類補齊到 140 部；漫畫閱讀頁底部按鈕清楚可見。詳見 [4.3 更新說明](docs/release-4.3.md)。
 
 4.2 預發佈重點：新增「漫畫」分類，可挑漫畫、選集數閱讀；各分類首頁顯示更多海報且數量一致，西飯、河馬首頁至少 40 部；漫畫載入更穩定。詳見 [4.2 說明](docs/release-4.2.md)。
 

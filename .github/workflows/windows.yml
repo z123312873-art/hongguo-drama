@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.2-pre-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.3-pre-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -116,7 +116,7 @@ jobs:
           path: dist/windows-verification/
   publish-pre:
     needs: windows
-    if: startsWith(github.ref, 'refs/heads/windows/4.2-pre-')
+    if: startsWith(github.ref, 'refs/heads/windows/4.3-pre-')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -125,38 +125,36 @@ jobs:
         with:
           name: windows-release-candidate
           path: release
-      - name: Publish the 4.2 pre-release
+      - name: Publish the 4.3 pre-release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag=installer-4.2-traditional-pre
-          setup="release/hongguo-downloader-4.2-win-x64-setup.exe"
-          portable="release/hongguo-downloader-4.2-win-x64.zip"
+          tag=installer-4.3-traditional-pre
+          setup="release/hongguo-downloader-4.3-win-x64-setup.exe"
+          portable="release/hongguo-downloader-4.3-win-x64.zip"
           test -f "$setup"
           test -f "$portable"
           setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
           portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
           notes=$(cat <<EOF
           摘要：
-          - 新增「漫畫」分類，可選集閱讀
-          - 漫畫圖片清晰度隨視窗自動調整
-          - 各分類首頁顯示更多海報，數量一致
-          - 西飯、河馬首頁至少顯示 40 部
-          - 漫畫載入更穩定，失敗會自動重試
+          - 在線播放更快更穩，切換集數幾乎不用等
+          - 漫畫分類補齊到 140 部
+          - 漫畫閱讀頁底部按鈕在深色背景下清楚可見
 
           這是預發佈版本，不會取代 4.1 正式版。安裝檔未簽章。
 
           SHA256
-          - hongguo-downloader-4.2-win-x64-setup.exe: $setup_sha
-          - hongguo-downloader-4.2-win-x64.zip: $portable_sha
+          - hongguo-downloader-4.3-win-x64-setup.exe: $setup_sha
+          - hongguo-downloader-4.3-win-x64.zip: $portable_sha
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
             gh release edit "$tag" --prerelease --notes "$notes"
           else
-            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.2 預發佈" --notes "$notes"
+            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "4.3 預發佈" --notes "$notes"
           fi
           gh release upload "$tag" "$setup" "$portable" --clobber
           keep=$(printf '%s\n%s\n' "$(basename "$setup")" "$(basename "$portable")")

@@ -149,6 +149,24 @@ function markWebMediaFailure(playInfo) {
   if (failedWebMedia.size > 128) failedWebMedia.delete(failedWebMedia.keys().next().value);
 }
 
+// A page with no full video (a preview only, or a missing page) is the same answer for the next episode of that
+// series, and asking costs a second or more before the App is tried. Such a series goes straight to the App for a
+// while; the page is still the last resort. Timeouts and server errors say nothing about the page and never count.
+const webMisses = new Map();
+const WEB_MISS_MS = 5 * 60 * 1000;
+function webMissed(sid) {
+  const key = String(sid || '');
+  return Boolean(key) && (webMisses.get(key) || 0) > Date.now();
+}
+function noteWebMiss(sid, error) {
+  const key = String(sid || '');
+  if (!key) return;
+  const { code } = sourceFailure('web', error);
+  if (!['PREVIEW_ONLY', 'MISSING_MODEL', 'NO_PLAYABLE_SOURCE', 'BUSINESS_REJECTED', 'HTTP_403', 'HTTP_404', 'HTTP_410'].includes(code)) return;
+  webMisses.set(key, Date.now() + WEB_MISS_MS);
+  if (webMisses.size > 128) webMisses.delete(webMisses.keys().next().value);
+}
+
 /** 仅保留短期成功结果；重复点击共享请求，失败后立即允许重试。 */
 async function cachedRequest(key, ttl, load, { force = false } = {}) {
   const cached = responseCache.get(key);
@@ -685,7 +703,7 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
     const allowLowerQuality = options.allowLowerQuality === true && quality !== 'auto';
     const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}${skipWeb ? ':fallback' : ''}${allowLowerQuality ? ':lower-quality' : ''}`;
     const result = await cachedRequest(cacheKey, 30000, () => quality === 'auto'
-      ? fetchPlayUrlFresh(vid, sid, skipWeb)
+      ? fetchPlayUrlFresh(vid, sid, skipWeb || webMissed(sid))
       : require('./app-source').fetchAppPlayUrl(String(vid), { quality, allowLowerQuality }).catch(error => {
         throw unavailableSources([sourceFailure('app', error)], allowLowerQuality ? 'auto' : quality);
       }), options);
@@ -734,7 +752,7 @@ function unavailableSources(sources, quality = 'auto') {
 
 async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
   const sources = [];
-  const web = !skipWeb && await fetchPlayUrlFromWeb(vid, sid, error => sources.push(sourceFailure('web', error)));
+  const web = !skipWeb && await fetchPlayUrlFromWeb(vid, sid, error => { noteWebMiss(sid, error); sources.push(sourceFailure('web', error)); });
   if (web && web.url) return web;
 
   try {
