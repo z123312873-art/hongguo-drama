@@ -197,6 +197,40 @@ async function searchComicPage(session, query, { offset = 0, searchId = '', pass
     return { books, hasMore: Boolean(tab?.has_more), nextOffset: Number(tab?.next_offset) || 0, searchId: tab?.search_id || id };
 }
 
+// Comics carry this genre type everywhere in the reading service (search, category pages, details).
+const COMIC_GENRE = '110';
+const DETAIL_BATCH = 20;
+
+function categoriesOf(book) {
+    let rows;
+    try { rows = JSON.parse(typeof book?.category_schema === 'string' ? book.category_schema : '[]'); } catch (_) { return []; }
+    const out = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const id = Number(row?.category_id);
+        if (Number.isSafeInteger(id) && id > 0 && !out.some((entry) => entry.id === id)) out.push({ id, name: typeof row?.name === 'string' ? row.name.slice(0, 20) : '' });
+    }
+    return out;
+}
+
+// Details of known titles. Their categories are how the category pages (below) are found.
+async function fetchBookDetails(session, ids) {
+    const list = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter((id) => ID.test(id)))].slice(0, DETAIL_BATCH);
+    if (!list.length) return [];
+    const response = await call(session, '/reading/bookapi/multi-detail/v/', { book_id: list.join(',') }, undefined, 'GET', '详情');
+    return Array.isArray(response.data) ? response.data.filter((book) => book && typeof book === 'object') : [];
+}
+
+// One page of a comic category: ten titles and where the next page starts.
+async function fetchCategoryPage(session, categoryId, offset = 0) {
+    if (!Number.isSafeInteger(Number(categoryId)) || Number(categoryId) <= 0) throw Object.assign(new Error('分类编号无效'), { code: 'APP_INPUT' });
+    const response = await call(session, '/reading/bookapi/new_category/landing/v', {
+        category_id: String(categoryId), genre_type: COMIC_GENRE, gender: '2', offset: String(Math.max(0, Number(offset) || 0)),
+    }, undefined, 'GET', '分类');
+    const data = response.data || {};
+    const books = Array.isArray(data.book_info) ? data.book_info.filter((book) => book && typeof book === 'object') : [];
+    return { books, hasMore: data.has_more === true && books.length > 0, nextOffset: Number(data.offset) || 0 };
+}
+
 function pictureUrl(md5, width) {
     if (!MD5.test(String(md5))) throw new Error('图片编号无效');
     const wanted = Math.max(1, Math.floor(Number(width) || 0));
@@ -245,4 +279,5 @@ async function downloadImage(url, { fetcher, timeoutMs = 5000, attempts = 2 } = 
 module.exports = {
     createSession, fetchChapter, fetchDirectory, searchComicPage, pictureUrl, coverUrl, decryptImage, downloadImage,
     parseChapter, decodeChapter, exchangePayload, exchangeKey, trustedImageUrl, IMAGE_WIDTHS, READER_VERSION, ROUTES, routeHeaders,
+    COMIC_GENRE, categoriesOf, fetchBookDetails, fetchCategoryPage,
 };

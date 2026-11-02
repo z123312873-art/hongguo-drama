@@ -205,7 +205,7 @@ const HONGGUO_METADATA_PATHS = ['/reading/distribution/category/landpage/v/', '/
 const READER_PROFILE = {
     aid: '1967', appName: 'novelapp', version: '74332', versionName: '7.4.3.32',
     paths: ['/reading/crypt/registerkey', '/reading/reader/full/v/', '/reading/bookapi/directory/all_items/v/',
-        '/reading/bookapi/search/tab/v', '/reading/bookapi/multi-detail/v/'],
+        '/reading/bookapi/search/tab/v', '/reading/bookapi/multi-detail/v/', '/reading/bookapi/new_category/landing/v'],
 };
 function registeredIdentity(identity) {
     return Boolean(identity) && [identity.device_id, identity.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value));

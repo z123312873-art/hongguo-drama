@@ -18,7 +18,7 @@ function book(n, extra = {}) {
 }
 
 function fakeApi(overrides = {}) {
-    const calls = { search: 0, directory: 0, chapter: 0, download: 0, session: 0 };
+    const calls = { details: 0, category: 0, search: 0, directory: 0, chapter: 0, download: 0, session: 0 };
     const api = {
         ...realApi, calls,
         async createSession() { calls.session += 1; return { n: calls.session }; },
@@ -28,6 +28,8 @@ function fakeApi(overrides = {}) {
             const base = (query.codePointAt(0) % 50) * 100 + offset;
             return { books: Array.from({ length: 20 }, (_, i) => book(base + i + 1)), hasMore: offset < 20, nextOffset: offset + 20, searchId: 's' };
         },
+        async fetchBookDetails() { calls.details += 1; return []; },
+        async fetchCategoryPage() { calls.category += 1; return { books: [], hasMore: false, nextOffset: 0 }; },
         async fetchDirectory(_session, bookId) {
             calls.directory += 1;
             return Array.from({ length: 120 }, (_, i) => ({ index: i + 1, itemId: id(Number(bookId.slice(-6)) * 1000 + i), title: i === 0 ? '预告' : `第${i}话 标题` }));
@@ -104,6 +106,46 @@ test('extras fill up to the cap from the search sweep, honour exclusions and fil
     const second = await service.extras({ exclude, limit: 40 });
     assert.deepEqual(second.items.map((item) => item.series_id), first.items.map((item) => item.series_id), 'stable order for the same day');
     assert.equal(api.calls.search, searches, 'a fresh pool answers without searching again');
+});
+
+test('category pages fill the pool when the keyword search returns nothing at all', async () => {
+    let category = 0;
+    const api = fakeApi({
+        async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; },
+        async fetchBookDetails(_session, ids) {
+            return ids.map((bookId, index) => ({ book_id: bookId, genre_type: '110', category_schema: JSON.stringify([{ category_id: 100 + (index % 3), name: 'c' }, { category_id: 100 }]) }));
+        },
+        async fetchCategoryPage(_session, categoryId, offset = 0) {
+            category += 1;
+            const base = (categoryId - 100) * 1000 + offset;
+            return { books: Array.from({ length: 10 }, (_, i) => book(base + i + 1)), hasMore: offset < 40, nextOffset: offset + 10 };
+        },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1, 2, 3, 4]));
+    const outcome = await settled(service, { exclude: [id(1), id(2), id(3), id(4)], limit: 60, waitMs: 5000 });
+    assert.equal(outcome.items.length, 60);
+    assert.equal(new Set(outcome.items.map((item) => item.series_id)).size, 60);
+    assert.ok(category >= 6, 'several category pages were read');
+});
+
+test('with every source empty the reply explains what was tried', async () => {
+    const api = fakeApi({ async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; } });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1, 2]));
+    const outcome = await settled(service, { exclude: [], limit: 30, waitMs: 5000 });
+    assert.deepEqual(outcome.items, []);
+    assert.match(outcome.diagnostic, /分类 0 页、搜索 \d+ 页都没有返回可用漫画/);
+});
+
+test('a failing category source does not stop the keyword search from filling the pool', async () => {
+    const api = fakeApi({
+        async fetchBookDetails() { throw Object.assign(new Error('x'), { code: 'BUSINESS_REJECTED' }); },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1, 2]));
+    const outcome = await settled(service, { exclude: [], limit: 30, waitMs: 5000 });
+    assert.equal(outcome.items.length, 30);
 });
 
 test('extras never exceed the 140 cap in total and a zero or invalid limit returns nothing', async () => {
@@ -302,6 +344,15 @@ test('when nothing can be fetched the reply says why, with the stage and code bu
     assert.match(outcome.diagnostic, /搜索，代码 101021/);
 });
 
+async function settled(service, args) {
+    let outcome = await service.extras(args);
+    for (let guard = 0; outcome.refreshing && guard < 400; guard += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        outcome = await service.extras(args);
+    }
+    return outcome;
+}
+
 test('a pool that is still growing is continued after a minute; one that stopped growing waits much longer', async () => {
     let now = Date.parse('2026-03-01T10:00:00');
     let available = 10;
@@ -315,20 +366,20 @@ test('a pool that is still growing is continued after a minute; one that stopped
     });
     const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler });
     service.noteSitePage(sitePage(1, [1]));
-    const first = await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    const first = await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     assert.ok(first.items.length > 0 && first.items.length < 130);
     const searchesAfterFirst = searches;
     now += 61 * 1000;
     available = 20;
-    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     assert.ok(searches > searchesAfterFirst, 'a pool that grew is continued after about a minute');
     const second = searches;
     available = 0;
     now += 61 * 1000;
-    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     now += 61 * 1000;
     const third = searches;
-    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     assert.equal(searches, third, 'no growth: not retried again within the long window');
     assert.ok(second <= third);
 });

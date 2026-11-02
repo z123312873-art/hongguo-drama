@@ -22,7 +22,9 @@ const FIRST_BATCH_WAIT_MS = 8000;
 const POOL_BUILD_BUDGET_MS = 60 * 1000;
 const SEARCH_PAGES_PER_KEYWORD = 2;
 const IMAGE_CONCURRENCY = 4;
-const EMPTY_SEARCHES_TO_REROUTE = 4;
+const CATEGORY_PAGES = 5;
+const MAX_CATEGORIES = 12;
+const DETAIL_SAMPLE = 20;
 // Used only when the site catalog yields too few tags to search with.
 const FALLBACK_KEYWORDS = ['都市', '重生', '穿越', '古风', '玄幻', '逆袭', '恋爱', '悬疑', '系统', '总裁', '萌宝', '搞笑'];
 const ID = /^\d{6,30}$/;
@@ -138,6 +140,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
     let lastBuildAt = 0;
     let lastBuildGain = 0;
     let lastPoolError = null;
+    let lastPoolNote = '';
     let imageActive = 0;
     const imageWaiters = [];
 
@@ -145,11 +148,9 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
     // new device is being registered anyway, so a throttled device never makes the route jump around.
     const routes = Array.isArray(api.ROUTES) && api.ROUTES.length ? api.ROUTES : [undefined];
     let routeIndex = 0;
-    let emptySearches = 0;
     let savedRoute = routes[0]?.id;
 
     function noteRouteWorked(session) {
-        emptySearches = 0;
         const index = routes.indexOf(session?.route);
         if (index < 0) return;
         routeIndex = index;
@@ -160,6 +161,8 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         if (task.type === 'chapter') return api.fetchChapter(session, task.itemId);
         if (task.type === 'directory') return api.fetchDirectory(session, task.bookId);
         if (task.type === 'search') return api.searchComicPage(session, task.query, task.paging);
+        if (task.type === 'category') return api.fetchCategoryPage(session, task.categoryId, task.offset);
+        if (task.type === 'details') return api.fetchBookDetails(session, task.ids);
         throw new Error('unknown task');
     }
 
@@ -170,14 +173,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         },
         call: async (session, task) => {
             const result = await dispatch(session, task);
-            if (task.type !== 'search') noteRouteWorked(session);
-            else if (result?.searchId) noteRouteWorked(session);
-            else if (++emptySearches >= EMPTY_SEARCHES_TO_REROUTE) {
-                // Several keywords in a row without a comic tab at all: the service may be answering this
-                // client with a different catalogue. Ask for another route; a genuinely empty tag costs one device.
-                emptySearches = 0;
-                if (routes.length > 1 && session?.route === routes[routeIndex]) scheduler.replaceSession(false, 'rejected');
-            }
+            noteRouteWorked(session);
             return result;
         },
         now, concurrency: 3, ...schedulerOptions,
@@ -264,37 +260,84 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return { items: [...site, ...extras].slice(0, MAX_COMICS), siteCount: site.length, savedAt: state.site.savedAt };
     }
 
+    // Extra titles come from two independent listings: the comic category pages (found through the categories
+    // of titles we already know) and, when those fall short, a keyword search. Either may be empty on its own.
     async function buildPool(site, blocked, needed, onFound = () => {}) {
         const exclude = new Set([...site.map((card) => card.series_id), ...blocked]);
         const found = new Map();
-        const keywords = [...topTags(site, 10), ...FALLBACK_KEYWORDS].filter((word, index, all) => all.indexOf(word) === index);
-        const order = seededShuffle(keywords, `comic-keywords:${dayKey(now())}`);
         const target = needed + 30;
         const deadline = now() + POOL_BUILD_BUDGET_MS;
-        let cursor = 0;
+        const stats = { categoryPages: 0, searchPages: 0 };
         let failures = 0;
         let lastError = null;
-        const sweep = async () => {
-            while (cursor < order.length && found.size < target && now() < deadline && failures < 3) {
-                const query = order[cursor++];
-                let paging = {};
-                for (let page = 0; page < SEARCH_PAGES_PER_KEYWORD && found.size < target && now() < deadline; page += 1) {
-                    let result;
-                    try { result = await scheduler.run(`search:${query}:${paging.offset || 0}`, PRIORITY.background, { type: 'search', query, paging }); }
-                    catch (error) { failures += 1; lastError = error; break; }
-                    const fresh = [];
-                    for (const book of result.books) {
-                        const card = bookToCard(book, api);
-                        if (card && String(book.genre_type) === '110' && eligible(card, exclude) && !found.has(card.series_id)) { found.set(card.series_id, card); fresh.push(card); }
-                    }
-                    if (fresh.length) onFound(fresh);
-                    if (!result.hasMore) break;
-                    paging = { offset: result.nextOffset, searchId: result.searchId };
+        const open = () => found.size < target && now() < deadline && failures < 3;
+        const run = async (key, task) => {
+            try { return await scheduler.run(key, PRIORITY.background, task); } catch (error) { failures += 1; lastError = error; return null; }
+        };
+        const take = (books) => {
+            const fresh = [];
+            for (const book of books) {
+                const card = bookToCard(book, api);
+                if (card && String(book.genre_type) === api.COMIC_GENRE && eligible(card, exclude) && !found.has(card.series_id)) { found.set(card.series_id, card); fresh.push(card); }
+            }
+            if (fresh.length) onFound(fresh);
+        };
+
+        const categories = await discoverCategories(site, run);
+        let nextCategory = 0;
+        const categoryWorker = async () => {
+            while (nextCategory < categories.length && open()) {
+                const id = categories[nextCategory++];
+                let offset = 0;
+                for (let page = 0; page < CATEGORY_PAGES && open(); page += 1) {
+                    const result = await run(`category:${id}:${offset}`, { type: 'category', categoryId: id, offset });
+                    if (!result) break;
+                    stats.categoryPages += 1;
+                    take(result.books);
+                    if (!result.hasMore || !(result.nextOffset > offset)) break;
+                    offset = result.nextOffset;
                 }
             }
         };
-        await Promise.all([sweep(), sweep(), sweep()]);
-        return { items: [...found.values()], failed: failures >= 3, error: lastError };
+        await Promise.all([categoryWorker(), categoryWorker(), categoryWorker()]);
+
+        if (open()) {
+            const keywords = [...topTags(site, 10), ...FALLBACK_KEYWORDS].filter((word, index, all) => all.indexOf(word) === index);
+            const order = seededShuffle(keywords, `comic-keywords:${dayKey(now())}`);
+            let cursor = 0;
+            const sweep = async () => {
+                while (cursor < order.length && open()) {
+                    const query = order[cursor++];
+                    let paging = {};
+                    for (let page = 0; page < SEARCH_PAGES_PER_KEYWORD && open(); page += 1) {
+                        const result = await run(`search:${query}:${paging.offset || 0}`, { type: 'search', query, paging });
+                        if (!result) break;
+                        stats.searchPages += 1;
+                        take(result.books);
+                        if (!result.hasMore) break;
+                        paging = { offset: result.nextOffset, searchId: result.searchId };
+                    }
+                }
+            };
+            await Promise.all([sweep(), sweep(), sweep()]);
+        }
+        const note = found.size || lastError ? '' : `分类 ${stats.categoryPages} 页、搜索 ${stats.searchPages} 页都没有返回可用漫画`;
+        return { items: [...found.values()], failed: failures >= 3, error: lastError, note };
+    }
+
+    // Categories of the known titles, most common first. One details call covers a spread of the site listing.
+    async function discoverCategories(site, run) {
+        const known = site.map((card) => card.series_id);
+        if (!known.length) return [];
+        const step = Math.max(1, Math.floor(known.length / DETAIL_SAMPLE));
+        const sample = known.filter((_, index) => index % step === 0).slice(0, DETAIL_SAMPLE);
+        const books = await run(`details:${sample[0]}:${sample.length}`, { type: 'details', ids: sample });
+        const frequency = new Map();
+        for (const book of Array.isArray(books) ? books : []) {
+            if (String(book?.genre_type) !== api.COMIC_GENRE) continue;
+            for (const category of api.categoriesOf(book)) frequency.set(category.id, (frequency.get(category.id) || 0) + 1);
+        }
+        return [...frequency.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, MAX_CATEGORIES).map(([id]) => id);
     }
 
     // Extra titles never block the listing: a stale pool is served while a new one is built.
@@ -320,6 +363,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             };
             poolBuild = buildPool(siteItems(), blocked, cap, merge).then((built) => {
                 lastPoolError = built.items.length ? null : built.error;
+                lastPoolNote = built.items.length ? '' : String(built.note || '');
                 lastBuildGain = state.pool.items.length - before;
             }).catch((error) => { lastPoolError = error; lastBuildGain = 0; }).finally(() => { lastBuildAt = now(); poolBuild = null; });
         }
@@ -332,7 +376,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         }
         const items = selectExtras(blocked, cap, now());
         const refreshing = Boolean(poolBuild);
-        return { success: true, items, partial: items.length < cap, refreshing, diagnostic: items.length < cap && !refreshing ? String(lastPoolError?.message || '') : '' };
+        return { success: true, items, partial: items.length < cap, refreshing, diagnostic: items.length < cap && !refreshing ? String(lastPoolError?.message || lastPoolNote || '') : '' };
     }
 
     async function episodes(seriesId, { priority = PRIORITY.click } = {}) {
