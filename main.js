@@ -1298,6 +1298,19 @@ ipcMain.handle('browse-list', (_event, options) =>
       else callback();
     }));
 
+// The pages the discover view opens with are requested while the window is still starting, so they are
+// already on their way (or answered) when the view asks for them. Failures are ignored; the view retries.
+function prewarmBrowseLists() {
+  const catalog = require('./src/native/catalog');
+  const login = (authInfo, callback) => {
+    if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
+    else callback();
+  };
+  for (const options of [{ category: 'hot-drama', page: 1 }, { category: 'real-drama', page: 1 }, { category: 'real-drama', page: 2 }]) {
+    catalog.browseList(options, login).catch(() => {});
+  }
+}
+
 const comicReply = (work) => async (_event, payload) => {
   try { return { success: true, ...(await work(payload && typeof payload === 'object' ? payload : {})) }; }
   catch (error) {
@@ -4304,6 +4317,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     }
     startupStage = '创建主窗口';
     createWindow();
+    prewarmBrowseLists();
     setTimeout(() => { void refreshWatchHistory(); }, 10000).unref();
     setInterval(() => { void refreshWatchHistory(); }, 15 * 60 * 1000).unref();
   } catch (_) {

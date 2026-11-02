@@ -61,6 +61,7 @@ async function mount(file, api, props = {}) {
     electronAPI: new Proxy(api, { get: (obj, key) => (key in obj ? obj[key] : key === 'getMediaSources' ? undefined : typeof key === 'string' && key.startsWith('on') ? () => () => {} : fallback) }),
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
     location: { href: 'http://localhost/' },
+    ...(api.__viewport || {}),
   });
   class ResizeObserver { observe() {} unobserve() {} disconnect() {} }
   const shared = { window, document, localStorage, navigator: window.navigator, console, crypto: require('node:crypto').webcrypto, Event, CustomEvent, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, queueMicrotask, structuredClone, ResizeObserver, setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), setInterval: () => 1, clearInterval() {}, requestAnimationFrame: fn => { const id = ++timerId; timers.set(id, { fn, delay: 16 }); return id; }, cancelAnimationFrame: id => timers.delete(id) };
@@ -528,12 +529,8 @@ async function mount(file, api, props = {}) {
       await ui.flush();
       assert.equal(cards().length, 24, 'page 1 appears while page 2 is still loading');
       assert.ok(ui.text().includes('24/48'), 'progress is visible');
-      assert.ok(pager().length >= 4, 'the pager already shows the pages that are on their way');
-      ui.nodes().find(n => n.props['aria-label'] === '下一页').props.onClick(); await ui.flush();
-      assert.equal(cards().length, 0);
-      assert.equal(ui.nodes().filter(n => n.props.className === 'poster-skeleton').length, 24, 'a page that has not arrived yet shows placeholders, not an empty grid');
-      ui.nodes().find(n => n.props['aria-label'] === '上一页').props.onClick(); await ui.flush();
-      assert.equal(cards().length, 24);
+      assert.equal(pager().length, 0, 'the pager lists only pages that already have posters, so nothing flashes or collapses later');
+      assert.equal(ui.nodes().filter(n => n.props.className === 'poster-skeleton').length, 0, 'a full first page needs no placeholders');
       gates[2].resolve(); await ui.flush();
       assert.equal(ui.text().includes('共 140 部'), true);
       assert.equal(cards().length, 24, 'only one page of posters is rendered at a time');
@@ -624,6 +621,53 @@ async function mount(file, api, props = {}) {
     ui.button('重新加载').props.onClick(); await ui.flush();
     pending.resolve({ success: true, results: [{ series_id: 'old', series_title: '旧片单' }] }); await ui.flush();
     assert.ok(ui.text().includes('重试成功')); assert.ok(!ui.text().includes('旧片单')); ui.unmount();
+  });
+  await test('browse first open: posters of each source page appear as they arrive, a stuck page is retried, and nothing already shown is lost', async () => {
+    const card = n => ({ series_id: String(8100000 + n), series_title: `剧${n}`, cover: '' });
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => card(a + i));
+    const gate = deferred(); const asked = [];
+    let failedOnce = false;
+    const ui = await mount('Browse', {
+      __viewport: { innerWidth: 1920, innerHeight: 1080 },
+      getSeriesList: async () => [], browseCategories: async () => [],
+      browseList: async p => {
+        if (p.category === 'hot-drama') return { success: true, results: [] };
+        asked.push(p.page);
+        if (p.page === 2) await gate.promise;
+        if (p.page === 2 && !failedOnce) { failedOnce = true; return { success: false, error: '目录加载超时，请重试' }; }
+        return { success: true, results: range((p.page - 1) * 24 + 1, p.page * 24), page: p.page, totalPages: 4, total: 96, hasMore: p.page < 4 };
+      },
+    });
+    const posters = () => ui.nodes().filter(n => n.props.className === 'browse-card').length;
+    try {
+      await ui.flush();
+      assert.equal(posters(), 24, 'the first page is on screen while the other pages are still loading');
+      ui.advanceTimers(1000); await ui.flush();
+      assert.equal(posters(), 24, 'a window check while loading does not clear the posters');
+      assert.equal(asked.filter(page => page === 1).length, 1, 'and does not start the list over');
+      assert.ok(ui.text().includes('正在加载') || ui.button('取消加载'), 'loading stays visible');
+      gate.resolve(); await ui.flush();
+      assert.equal(posters(), 48, 'the second page joins once it arrives');
+      assert.ok(asked.filter(page => page === 2).length === 2, 'the page that failed was asked for once more');
+      assert.equal(ui.text().includes('加载超时'), false);
+    } finally { ui.unmount(); }
+  });
+  await test('browse first open: a source page that never answers leaves the earlier pages on screen with a retry', async () => {
+    const card = n => ({ series_id: String(8200000 + n), series_title: `剧${n}`, cover: '' });
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => card(a + i));
+    const ui = await mount('Browse', {
+      __viewport: { innerWidth: 1920, innerHeight: 1080 },
+      getSeriesList: async () => [], browseCategories: async () => [],
+      browseList: p => p.category === 'hot-drama' ? Promise.resolve({ success: true, results: [] })
+        : p.page === 2 ? new Promise(() => {}) : Promise.resolve({ success: true, results: range((p.page - 1) * 24 + 1, p.page * 24), page: p.page, totalPages: 4, total: 96, hasMore: p.page < 4 }),
+    });
+    const posters = () => ui.nodes().filter(n => n.props.className === 'browse-card').length;
+    try {
+      await ui.flush(); ui.advanceTimers(30000); await ui.flush();
+      assert.ok(posters() >= 24, 'the posters that arrived stay');
+      assert.ok(ui.text().includes('超时'), 'the stuck page ends as a visible timeout');
+      assert.ok(ui.button('重试') || ui.button('重新加载'), 'with a way to try again');
+    } finally { ui.unmount(); }
   });
   await test('browse categories: cancel is immediate and cached cards survive refresh errors', async () => {
     const pending = deferred(); let calls = 0; let hang = false;
