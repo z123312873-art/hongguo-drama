@@ -5,7 +5,7 @@ import ComicReader from './ComicReader';
 import useDialogKeyboard from './useDialogKeyboard';
 import { loadComicCatalog } from '../comicCatalog.mjs';
 import { COMIC_CHIPS, comicChipCounts, comicMatchesChips, toggleComicChips } from '../comicTags.mjs';
-import { COMIC_MAX, clampPage, comicPageSize, episodeGroups, groupIndexOf, pageCount, pagerNumbers, skeletonCount } from '../comicLayout.mjs';
+import { clampPage, comicPageSize, episodeGroups, groupIndexOf, pageCount, pagerNumbers, skeletonCount } from '../comicLayout.mjs';
 import { markRead, readProgress } from '../comicProgress.mjs';
 import './ComicBrowse.css';
 
@@ -32,7 +32,7 @@ function groupName(episodes, group) {
   return /^\d+$/.test(first || '') && /^\d+$/.test(last || '') ? `${first}-${last}` : `${group.start}-${group.end}`;
 }
 
-const EMPTY = { items: [], siteCount: 0, expectedTotal: 0, pending: true, stale: false, notice: '' };
+const EMPTY = { items: [], siteCount: 0, expectedTotal: 0, pending: true, stale: false, notice: '', detail: '' };
 
 export default function ComicBrowse({ active = true, reservedRows = 0, reloadToken = 0 }) {
   const [catalog, setCatalog] = useState(() => catalogMemory?.state || EMPTY);
@@ -101,13 +101,14 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
   const filtered = useMemo(() => catalog.items.filter(card => comicMatchesChips(card, chips)), [catalog.items, chips]);
   const counts = useMemo(() => comicChipCounts(catalog.items), [catalog.items]);
   const size = layout.pageSize || 24;
-  // While posters are still arriving the pager already counts the pages that are on their way.
-  const knownTotal = catalog.pending && !chips.length ? Math.max(filtered.length, Math.min(catalog.expectedTotal || 0, COMIC_MAX)) : filtered.length;
+  // The pager counts only the posters that are here, so it never shows pages that have nothing on them yet.
+  // Empty cells fill the end of the last page while more titles are on their way.
+  const knownTotal = filtered.length;
   const currentPage = clampPage(page, knownTotal, size);
   const visible = filtered.slice((currentPage - 1) * size, currentPage * size);
   const pages = pageCount(knownTotal, size);
   const waiting = skeletonCount({
-    loaded: filtered.length, page: currentPage, pageSize: size, expectedTotal: knownTotal,
+    loaded: filtered.length, page: currentPage, pageSize: size, expectedTotal: catalog.expectedTotal,
     pending: catalog.pending && !chips.length,
   });
   const chipList = COMIC_CHIPS.filter(chip => counts.get(chip.label) > 0 || chips.includes(chip.label));
@@ -172,7 +173,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
         </span>
       </div>
 
-      {catalog.notice && <div className="alert browse-update-error comic-notice" role="status"><span>{catalog.notice}</span></div>}
+      {catalog.notice && <div className="alert browse-update-error comic-notice" role="status" title={catalog.detail || undefined}><span>{catalog.notice}</span></div>}
       {error && <div className={catalog.items.length ? 'alert alert-error browse-update-error' : 'browse-error-state'} role="alert">
         {!catalog.items.length && <Film size={36} />}
         {!catalog.items.length && <h3>暂时没能加载漫画</h3>}

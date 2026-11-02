@@ -129,8 +129,8 @@ export async function loadComicCatalog({ api, onProgress, isCurrent = () => true
   const short = items.length < Math.min(COMIC_MAX, site.length + room);
   let notice = '';
   if (!complete) notice = PAGES_NOTICE;
-  else if (extrasFailed || (short && extras.length === 0)) notice = `补充漫画暂时没取到，先显示站内片单。${diagnostic ? `（${diagnostic}）` : ''}`;
+  else if (extrasFailed || (short && extras.length === 0)) notice = '补充漫画暂时没取到，先显示站内片单，稍后点「刷新片单」可再试。';
   else if (short) notice = '补充漫画还没取满，稍后点「刷新片单」可继续补齐。';
-  emit({ items, siteCount: site.length, expectedTotal: items.length, pending: false, stale: false, notice });
+  emit({ items, siteCount: site.length, expectedTotal: items.length, pending: false, stale: false, notice, detail: notice ? diagnostic : '' });
   return { items };
 }

@@ -212,6 +212,18 @@ function categoriesOf(book) {
     return out;
 }
 
+// The directory call of any title also carries the title's own record. It answers wherever the directory does,
+// so it can stand in for the details call when that one comes back empty.
+async function fetchBookInfo(session, bookId) {
+    if (!ID.test(String(bookId))) throw Object.assign(new Error('漫画编号无效'), { code: 'APP_INPUT' });
+    const response = await call(session, '/reading/bookapi/directory/all_items/v/', {
+        book_id: String(bookId), book_type: '0', version_code: READER_VERSION, update_version_code: READER_VERSION,
+        need_version: 'true', item_data_list_md5: '', book_info_md5: '',
+    }, undefined, 'GET', '分集目录');
+    const info = response.data?.book_info;
+    return info && typeof info === 'object' ? info : null;
+}
+
 // Details of known titles. Their categories are how the category pages (below) are found.
 async function fetchBookDetails(session, ids) {
     const list = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter((id) => ID.test(id)))].slice(0, DETAIL_BATCH);
@@ -279,5 +291,5 @@ async function downloadImage(url, { fetcher, timeoutMs = 5000, attempts = 2 } = 
 module.exports = {
     createSession, fetchChapter, fetchDirectory, searchComicPage, pictureUrl, coverUrl, decryptImage, downloadImage,
     parseChapter, decodeChapter, exchangePayload, exchangeKey, trustedImageUrl, IMAGE_WIDTHS, READER_VERSION, ROUTES, routeHeaders,
-    COMIC_GENRE, categoriesOf, fetchBookDetails, fetchCategoryPage,
+    COMIC_GENRE, categoriesOf, fetchBookDetails, fetchBookInfo, fetchCategoryPage,
 };

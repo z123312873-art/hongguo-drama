@@ -168,7 +168,9 @@ test('when no extras can be fetched the notice carries the stage and code the se
   const states = [];
   const result = await loadComicCatalog({ api, onProgress: (state) => states.push(state) });
   assert.equal(result.items.length, 74, 'the site list is still shown in full');
-  assert.match(states.at(-1).notice, /补充漫画暂时没取到.*搜索，代码 101021/);
+  assert.match(states.at(-1).notice, /补充漫画暂时没取到/);
+  assert.doesNotMatch(states.at(-1).notice, /代码|搜索|分类 \d/, 'the notice carries no technical wording');
+  assert.match(states.at(-1).detail, /搜索，代码 101021/, 'the reason stays available as a hover hint');
 });
 
 test('extras that stop short of 140 say so instead of staying silent', async () => {

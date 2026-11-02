@@ -25,3 +25,13 @@ test('covers that cannot be decoded or trusted become blank', () => {
     '//img.example/a.jpg', 'not a url', '', null, undefined, 42,
   ]) assert.equal(compatibleCover(value), '', String(value));
 });
+
+test('comic covers keep the image folder they were published in and reject anything else', () => {
+  const { comicCover } = require('./cover-url');
+  const md5 = '0123456789abcdef0123456789abcdef';
+  assert.equal(comicCover(`novel-pic/${md5}`), `https://p3-novel.byteimg.com/novel-pic/${md5}~tplv-resize:320:0.webp`);
+  assert.equal(comicCover(`novel-images/${md5}`), `https://p3-novel.byteimg.com/novel-images/${md5}~tplv-resize:320:0.webp`);
+  assert.equal(comicCover(`https://p3-reading-sign.fqnovelpic.com/novel-images/${md5.toUpperCase()}~tplv-x.heic?sig=1`, 540), `https://p3-novel.byteimg.com/novel-images/${md5}~tplv-resize:540:0.webp`);
+  assert.equal(comicCover(md5), `https://p3-novel.byteimg.com/novel-pic/${md5}~tplv-resize:320:0.webp`);
+  for (const value of ['', null, undefined, 'novel-other/' + md5, 'novel-images/zz', 'https://example.com/a.jpg']) assert.equal(comicCover(value), '', String(value));
+});
