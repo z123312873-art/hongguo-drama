@@ -7,8 +7,7 @@
 <p align="center">在電腦上找劇、接著看、下載與合併。介面預設繁體，Windows 安裝檔由這個倉庫自己發行。</p>
 
 <p align="center">
-  <img alt="目前正式版 4.1" src="https://img.shields.io/badge/正式版-4.1-8b3a3a?style=flat-square">
-  <img alt="預發佈 4.3" src="https://img.shields.io/badge/預發佈-4.3-b08a3a?style=flat-square">
+  <img alt="目前正式版 4.3" src="https://img.shields.io/badge/正式版-4.3-8b3a3a?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -27,24 +26,22 @@
 
 只發行 **Windows x64** 安裝檔。媒體工具已內建，不必另外安裝 Node.js 或 FFmpeg。
 
-**[下載 4.1 正式版（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.1/hongguo-downloader-4.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.1) 附 SHA256 與大小。
+**[下載 4.3 正式版（Windows x64，NSIS 安裝精靈）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.3/hongguo-downloader-4.3-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.3) 附 SHA256 與大小。
 
-想先試新功能：[4.3 預發佈](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.3-traditional-pre)（新增漫畫分類、海報載入更快、在線播放更快更穩；不會觸發自動更新，也不取代 4.1 正式版）。
-
-也可使用 [4.1 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.1/hongguo-downloader-4.1-win-x64.zip)。
+也可使用 [4.3 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.3/hongguo-downloader-4.3-win-x64.zip)。
 
 - 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
-- 安裝檔未簽章。請從 [4.1 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.1) 下載，並對照該頁的 SHA256。舊版仍可在 [4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 取得。
+- 安裝檔未簽章。請從 [4.3 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.3) 下載，並對照該頁的 SHA256。舊版仍可在 [4.1 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.1)、[4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 取得。
 - 已安裝 AdGuard 或防毒軟體時，重裝後若在線播放連不上，請把紅果短劇加入它們的例外，或暫時關閉 HTTPS 過濾再重新播放，不需要重開 App。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
-- 已安裝的 3.4／4.0 會看到更新摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
+- 已安裝的 3.4／4.0／4.1 會看到更新摘要。已安裝的 2.9 只會看到有新版本。下載與安裝都要自己確認。[2.9 安裝檔](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-2.9-traditional)仍留在原發行頁。
 
 
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 
 ## 這個版本
 
-4.3 預發佈重點（含 4.2 的全部內容）：新增「漫畫」分類，可挑漫畫、選集數閱讀，最多 140 部；各分類首頁顯示更多海報且數量一致，西飯、河馬首頁至少 40 部，剛開啟時海報出現得更快；在線播放更快更穩，切換集數幾乎不用等。詳見 [4.3 更新說明](docs/release-4.3.md)。
+4.3 正式版重點：新增「漫畫」分類，可挑漫畫、選集數閱讀，最多 300 部，圖片會提前載入、往下滑幾乎不用等；按「刷新片單」不會換掉畫面上的漫畫；各分類首頁顯示更多海報且數量一致，西飯、河馬首頁至少 40 部，剛開啟時海報出現得更快；在線播放更快更穩，切換集數幾乎不用等。詳見 [4.3 更新說明](docs/release-4.3.md)。
 
 4.1 正式版重點：加密片源按快進、快退（預設方向鍵，每次 5 秒）或拖動進度條不再從頭重播；同次開啟 App 內切集會記住各集進度；搜尋海報載入失敗時自動改用相容圖片；熱播榜卡片顯示來源的綠色「新劇」標籤；末集播完時更穩定地找到並自動播放下一季；更新提醒完整列出所有條目並可捲動；裝有 AdGuard 等軟體時播放連線更穩。詳見 [4.1 說明](docs/release-4.1.md)。
 
