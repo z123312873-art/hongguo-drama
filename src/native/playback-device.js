@@ -15,6 +15,7 @@ const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a19
 // A failed attempt registers nothing, so it is safe to try again once this window has passed.
 // Within the window every caller (prefetch, repeated clicks) still shares the one failure.
 const FAILURE_COOLDOWN_MS = 5000;
+const REGISTER_ATTEMPT_MS = 3500;
 // The device header is the only part that differs between applications. Hongguo stays the default.
 const HONGGUO_PROFILE = Object.freeze({
     displayName: '红果免费短剧', version: 73932, versionName: '7.3.9.32', aid: 8662, packageName: 'com.phoenix.read',
@@ -79,8 +80,10 @@ async function registerDevice(requestJson, profile = HONGGUO_PROFILE, options = 
         const urls = Array.isArray(options?.hosts) && options.hosts.length ? registerUrls(options.hosts) : REGISTER_URLS;
         for (const url of urls) {
             if (deadline <= Date.now()) break;
+            // One host that never answers must not use up the time the other hosts need.
+            const attemptEnd = Math.min(deadline, Date.now() + REGISTER_ATTEMPT_MS);
             try {
-                response = await requestJson(url, { method: 'POST', headers, data }, deadline, AbortSignal.timeout(Math.max(1, deadline - Date.now())));
+                response = await requestJson(url, { method: 'POST', headers, data }, attemptEnd, AbortSignal.timeout(Math.max(1, attemptEnd - Date.now())));
                 break;
             } catch (error) {
                 response = null;
@@ -127,16 +130,86 @@ function refreshPlaybackDevice(requestJson) {
     return run;
 }
 
+// The video service lets one registered device ask for a single episode, then answers it with empty bodies.
+// Playback therefore takes a device of its own for every lookup. Registering takes about half a second, so a
+// few unused devices are kept ready and refilled in the background once playback has asked for the first one.
+const POOL_SIZE = 2;
+const POOL_TTL_MS = 5 * 60 * 1000;
+const POOL_FAILURE_PAUSE_MS = 15 * 1000;
+let pool = [];
+let poolRequest = null;
+let pending = new Set();
+let poolFailedAt = 0;
+let poolFailure = null;
+let takeFailure = null;
+let poolGeneration = 0;
+
+function livePool() {
+    const limit = Date.now() - POOL_TTL_MS;
+    pool = pool.filter(entry => entry.at > limit);
+    return pool;
+}
+
+function refillPool() {
+    if (!poolRequest || Date.now() - poolFailedAt < POOL_FAILURE_PAUSE_MS) return;
+    const requestJson = poolRequest;
+    const generation = poolGeneration;
+    while (livePool().length + pending.size < POOL_SIZE) {
+        const job = registerDevice(requestJson).then(
+            identity => { if (generation === poolGeneration) pool.push({ identity, at: Date.now() }); },
+            error => { poolFailedAt = Date.now(); poolFailure = error; },
+        ).finally(() => pending.delete(job));
+        pending.add(job);
+    }
+}
+
+// Starts keeping devices ready. Nothing registers until playback (or a caller) asks for this.
+function armPlaybackPool(requestJson) {
+    if (typeof requestJson !== 'function') return;
+    poolRequest = requestJson;
+    refillPool();
+}
+
+// A device that has not been used yet. Rejects like registerDevice does when registration is blocked.
+// `again` is the second device of one lookup: it asks the service even inside the pause that follows a failure.
+async function takePlaybackDevice(requestJson, { again = false } = {}) {
+    if (!again && takeFailure && Date.now() - takeFailure.at < FAILURE_COOLDOWN_MS) throw takeFailure.error;
+    takeFailure = null;
+    if (!livePool().length && pending.size) await Promise.race([...pending]);
+    const ready = livePool().shift();
+    if (ready) { refillPool(); return ready.identity; }
+    // A background registration that has just been refused is the answer; asking again at once would only repeat it.
+    if (poolFailure && Date.now() - poolFailedAt < 2000) { takeFailure = { at: Date.now(), error: poolFailure }; throw poolFailure; }
+    try {
+        const identity = await registerDevice(requestJson);
+        refillPool();
+        return identity;
+    } catch (error) {
+        takeFailure = { at: Date.now(), error };
+        throw error;
+    }
+}
+
 // Network or proxy settings changed: a failure under the old route says nothing about the new one.
 // A registration that is still running or already succeeded is kept.
 function forgetFailedPlaybackDevice() {
     if (registration && failedAt) { registration = null; failedAt = 0; }
+    takeFailure = null;
+    poolFailedAt = 0;
+    refillPool();
 }
 
 function resetPlaybackDevice() {
     registration = null;
     failedAt = 0;
     refreshing = null;
+    pool = [];
+    poolRequest = null;
+    pending = new Set();
+    poolFailedAt = 0;
+    poolFailure = null;
+    takeFailure = null;
+    poolGeneration += 1;
 }
 
-module.exports = { getPlaybackDevice, refreshPlaybackDevice, forgetFailedPlaybackDevice, resetPlaybackDevice, registerDevice, HONGGUO_PROFILE, READER_PROFILE };
+module.exports = { getPlaybackDevice, refreshPlaybackDevice, takePlaybackDevice, armPlaybackPool, forgetFailedPlaybackDevice, resetPlaybackDevice, registerDevice, HONGGUO_PROFILE, READER_PROFILE };

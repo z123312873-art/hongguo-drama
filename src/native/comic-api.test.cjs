@@ -147,6 +147,31 @@ test('comic search first opens a general search, then pages the comic tab with i
     assert.ok(next.books.length >= 0);
 });
 
+test('category pages and details ask for comics only, and reject malformed input', async () => {
+    const urls = [];
+    const session = { identity, key: Buffer.alloc(16), transport: async (url) => {
+        const parsed = new URL(url);
+        urls.push(parsed);
+        if (parsed.pathname.includes('multi-detail')) return { code: 0, data: [{ book_id: '1', category_schema: JSON.stringify([{ category_id: 5, name: '都市' }, { category_id: '5' }, { category_id: 'x' }, { category_id: 9 }]) }, null, 'x'] };
+        return { code: 0, data: { book_info: [{ book_id: '1' }, null, { book_id: '2' }], has_more: true, offset: 10 } };
+    } };
+    const page = await api.fetchCategoryPage(session, 123, 0);
+    assert.equal(urls[0].searchParams.get('genre_type'), '110');
+    assert.equal(urls[0].searchParams.get('category_id'), '123');
+    assert.deepEqual([page.books.length, page.hasMore, page.nextOffset], [2, true, 10]);
+    await assert.rejects(api.fetchCategoryPage(session, 'abc'), (error) => error.code === 'APP_INPUT');
+    await assert.rejects(api.fetchCategoryPage(session, -1), (error) => error.code === 'APP_INPUT');
+    const details = await api.fetchBookDetails(session, ['7111943588446997534', '7111943588446997534', 'bad']);
+    assert.equal(urls[1].searchParams.get('book_id'), '7111943588446997534', 'duplicates and malformed ids are dropped');
+    assert.equal(details.length, 1);
+    assert.deepEqual(api.categoriesOf(details[0]).map((entry) => entry.id), [5, 9]);
+    assert.deepEqual(api.categoriesOf({ category_schema: 'not json' }), []);
+    assert.deepEqual(api.categoriesOf({}), []);
+    assert.deepEqual(await api.fetchBookDetails(session, []), []);
+    const end = { ...session, transport: async () => ({ code: 0, data: { book_info: [], has_more: true, offset: 20 } }) };
+    assert.equal((await api.fetchCategoryPage(end, 1, 10)).hasMore, false, 'an empty page never claims there is more');
+});
+
 test('picture and cover URLs pick the nearest rendition and reject anything that is not a hash', () => {
     const hash = md5('x').toUpperCase();
     assert.equal(api.pictureUrl(hash, 700), `https://p3-novel.byteimg.com/novel-pic/${hash.toLowerCase()}~tplv-resize:720:0.webp`);

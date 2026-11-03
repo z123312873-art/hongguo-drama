@@ -69,7 +69,7 @@ test('binary request decrypts to authenticated gzip JSON with the fixed anonymou
     assert.equal(url, endpoint);
     assert.equal(options.method, 'POST');
     assert.ok(Buffer.isBuffer(options.data), 'send raw binary, not base64 text');
-    assert.ok(deadline >= started + 8000 && deadline <= Date.now() + 8000);
+    assert.ok(deadline >= started + 3500 && deadline <= Date.now() + 3500, 'one host never gets the whole registration window');
     assert.ok(signal instanceof AbortSignal);
     assert.equal(signal.aborted, false);
     assert.equal(options.headers['Content-Type'], 'application/octet-stream;tt-data=a');
@@ -294,4 +294,86 @@ test('registerDevice sends the reader identity without touching the Hongguo regi
     await api.getPlaybackDevice(async (...args) => { defaultRequest = args; return { device_id: '7', install_id: '8' }; });
     assert.equal(defaultRequest[1].headers['x-ss-dp'], '8662');
     await assert.rejects(api.registerDevice(async () => ({ code: 5 }), api.READER_PROFILE), error => error.code === 'DEVICE_REGISTRATION_FAILED' && error.reason === 'REJECTED');
+});
+
+const answer = (n) => ({ device_id_str: String(1000 + n), install_id_str: String(2000 + n) });
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('a device taken for playback is never handed out twice and nothing registers until it is asked for', async () => {
+    const { takePlaybackDevice: take } = loadModule();
+    let calls = 0;
+    const request = async () => answer(++calls);
+    assert.equal(calls, 0);
+    const [a, b, c] = await Promise.all([take(request), take(request), take(request)]);
+    assert.equal(new Set([a.device_id, b.device_id, c.device_id]).size, 3);
+    await settle();
+    assert.equal(calls, 3, 'without a pool nothing registers in the background');
+});
+
+test('an armed pool hands out ready devices at once, refills after each, and shares a failure with the next caller', async () => {
+    const mod = loadModule();
+    let calls = 0;
+    const request = async () => answer(++calls);
+    mod.armPlaybackPool(request);
+    await settle();
+    assert.equal(calls, 2, 'two devices are made ready');
+    const started = calls;
+    const first = await mod.takePlaybackDevice(() => assert.fail('a ready device needs no registration'));
+    assert.equal(first.device_id, '1001');
+    await settle();
+    assert.equal(calls, started + 1, 'the pool is refilled after a device is taken');
+    const taken = new Set([first.device_id]);
+    for (let i = 0; i < 5; i += 1) taken.add((await mod.takePlaybackDevice(request)).device_id);
+    assert.equal(taken.size, 6, 'every device is different');
+});
+
+test('a waiting caller uses the first device that becomes ready instead of registering again', async () => {
+    const mod = loadModule();
+    const finish = [];
+    let calls = 0;
+    mod.armPlaybackPool(() => new Promise((resolve) => { calls += 1; finish.push(resolve); }));
+    const taken = mod.takePlaybackDevice(() => assert.fail('a registration is already running'));
+    await settle();
+    finish[0](answer(7));
+    assert.equal((await taken).device_id, '1007');
+    assert.equal(calls, 3, 'one more is registered to replace the one taken');
+});
+
+test('a pool that cannot register pauses, reports the failure once and recovers after the network is forgotten', async () => {
+    const clock = { now: 20_000_000 };
+    const mod = loadModule(clock);
+    let calls = 0, offline = true;
+    const request = async () => {
+        calls += 1;
+        if (offline) throw Object.assign(new Error('offline'), { code: 'ERR_NETWORK' });
+        return answer(9);
+    };
+    mod.armPlaybackPool(request);
+    await settle();
+    await settle();
+    const attempted = calls;
+    await assert.rejects(mod.takePlaybackDevice(request), { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal(calls, attempted, 'a failure that has just happened is not repeated');
+    offline = false;
+    clock.now += 20_000;
+    mod.forgetFailedPlaybackDevice();
+    await settle();
+    assert.equal((await mod.takePlaybackDevice(() => assert.fail('the pool recovered'))).device_id, '1009');
+});
+
+test('unused pooled devices expire and a second device of one lookup ignores the pause after a failure', async () => {
+    const clock = { now: 40_000_000 };
+    const mod = loadModule(clock);
+    let calls = 0;
+    mod.armPlaybackPool(async () => answer(++calls));
+    await settle();
+    assert.equal(calls, 2);
+    clock.now += 6 * 60_000;
+    const fresh = await mod.takePlaybackDevice(async () => answer(50));
+    assert.equal(fresh.device_id, '1050', 'stale devices are dropped');
+    mod.resetPlaybackDevice();
+    const blocked = async () => ({ code: 1 });
+    await assert.rejects(mod.takePlaybackDevice(blocked), { code: 'DEVICE_REGISTRATION_FAILED' });
+    await assert.rejects(mod.takePlaybackDevice(() => assert.fail('inside the pause')), { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal((await mod.takePlaybackDevice(async () => answer(60), { again: true })).device_id, '1060');
 });

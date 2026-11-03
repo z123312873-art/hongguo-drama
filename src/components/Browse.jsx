@@ -11,6 +11,8 @@ import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, pagesToFill, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
 import { firstPagePosters } from '../comicLayout.mjs';
+import { joinPages, loadPage } from '../catalogPages.mjs';
+import { DEFAULT_BROWSE_CATEGORIES } from '../browseCategories.mjs';
 import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
 import ComicBrowse from './ComicBrowse';
@@ -22,7 +24,10 @@ const pageCache = new Map();
 // The refresh button, a larger window that still needs more pages, or this age starts an update.
 const PAGE_CACHE_TTL_MS = 10 * 60 * 1000;
 const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
-const LIST_TIMEOUT_MS = 25_000;
+// Each source page has its own limit and one retry (catalogPages.mjs); this bounds the whole list.
+// The posters in the first screen start loading at once instead of waiting for the lazy-load margin.
+const EAGER_POSTERS = 12;
+const LIST_TIMEOUT_MS = 30_000;
 
 function snapshotKey(source, category, genre, page) {
   return JSON.stringify([source, category || '', genre || '', Number(page) || 1]);
@@ -86,7 +91,7 @@ function Browse({ onNavigate, active = true }) {
   const [source, setSource] = useState('hongguo');
   const { sources: mediaSources, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const sourceIds = mediaSources.map(item => item.id).join('|');
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_BROWSE_CATEGORIES);
   const [category, setCategory] = useState('real-drama');
   const [genre, setGenre] = useState('');
   const [tagLabels, setTagLabels] = useState([]);
@@ -245,7 +250,11 @@ function Browse({ onNavigate, active = true }) {
       }, LIST_TIMEOUT_MS);
       try {
         const planned = sourcePageWindow(pg, pageSpan.current, Number.MAX_SAFE_INTEGER);
-        const res = await window.electronAPI.browseList({ source, category: cat, genre: gen, page: planned.start, forceRefresh });
+        const askPage = (number) => loadPage(
+          () => window.electronAPI.browseList({ source, category: cat, genre: gen, page: number, forceRefresh }),
+          { isCurrent: () => request === listRequest.current },
+        );
+        const res = await askPage(planned.start);
         if (request !== listRequest.current) return;
         setSourceUrl(res?.sourceUrl || fallbackUrl);
         if (!res?.success) throw new Error(res?.error || '来源暂时不可用');
@@ -265,29 +274,30 @@ function Browse({ onNavigate, active = true }) {
         const windowed = reportedPages >= 2 ? sourcePageWindow(pg, pageSpan.current, reportedPages)
           : openEnded ? { start: planned.start, count: Math.max(1, pageSpan.current), uiPages: 0 }
             : { start: pg, count: 1, uiPages: reportedPages };
-        let combined = firstResults.slice();
-        const seen = new Set(combined.map(item => item?.series_id).filter(Boolean));
-        let lastHasMore = res.hasMore === true;
-        // A slow link would keep the skeleton up until the last page arrives; the first page can already be browsed.
-        if (!haveCards && windowed.count > 1 && combined.length) {
-          setResults(combined);
-          setMeta({ total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: false });
+        // The extra source pages do not depend on each other, so they load together. Without a list on screen,
+        // each page that has arrived (in order) is shown at once; a slow page never hides the ones before it.
+        const replies = new Array(Math.max(0, windowed.count - 1)).fill(null);
+        let shownCount = firstResults.length;
+        const showArrived = () => {
+          if (haveCards) return;
+          const arrived = joinPages(firstResults, replies, res.hasMore === true);
+          if (arrived.results.length <= shownCount) return;
+          shownCount = arrived.results.length;
+          setResults(arrived.results);
+        };
+        if (!haveCards && windowed.count > 1 && firstResults.length) {
+          setResults(firstResults);
+          setMeta({ total: res.total || firstResults.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: false });
           keepGenres(res.genres);
         }
-        // The extra source pages do not depend on each other, so they load together.
-        const extras = await Promise.all(Array.from({ length: Math.max(0, windowed.count - 1) }, (_, index) => (
-          window.electronAPI.browseList({ source, category: cat, genre: gen, page: windowed.start + index + 1, forceRefresh }).catch(() => null)
-        )));
+        await Promise.all(replies.map(async (_, index) => {
+          replies[index] = await askPage(windowed.start + index + 1);
+          if (request === listRequest.current) showArrived();
+        }));
         if (request !== listRequest.current) return;
-        for (const more of extras) {
-          if (!more?.success || !Array.isArray(more.results) || !more.results.length) { lastHasMore = false; break; }
-          lastHasMore = more.hasMore === true;
-          for (const item of more.results) {
-            if (!item?.series_id || seen.has(item.series_id)) continue;
-            seen.add(item.series_id);
-            combined.push(item);
-          }
-        }
+        const joined = joinPages(firstResults, replies, res.hasMore === true);
+        const combined = joined.results;
+        const lastHasMore = joined.hasMore;
         const next = {
           results: combined,
           meta: { total: res.total || combined.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: lastHasMore && (windowed.count < 2 || windowed.uiPages === 0) },
@@ -458,8 +468,10 @@ function Browse({ onNavigate, active = true }) {
     return () => { cancelled = true; };
   }, [source, sourceIds]);
 
+  // A list that is still loading shows only the pages that arrived so far, so its size says nothing about how
+  // many posters a page holds. Judging it then started the load over and cleared the posters on screen.
   useEffect(() => {
-    if (!active || page !== 1 || !results.length) return undefined;
+    if (!active || page !== 1 || !results.length || loading) return undefined;
     let timer;
     const onResize = () => {
       clearTimeout(timer);
@@ -473,7 +485,7 @@ function Browse({ onNavigate, active = true }) {
     onResize();
     window.addEventListener?.('resize', onResize);
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
-  }, [active, page, results.length, category, genre, loadList, meta.totalPages, meta.hasMore, reserveRows, source]);
+  }, [active, page, results.length, loading, category, genre, loadList, meta.totalPages, meta.hasMore, reserveRows, source]);
 
   // Moving to another page of the same list keeps the number of source pages joined per page; a different
   // list starts over. Resetting here put page 2 on the source page that page 1 had already shown.
@@ -768,7 +780,7 @@ function Browse({ onNavigate, active = true }) {
         <div className="browse-loading-state" role="status"><div className="browse-loading"><RefreshCw size={18} className="spin" /><span>正在加载{categories.find((item) => item.slug === category)?.label || '短剧'}…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div><div className="poster-skeletons" aria-hidden="true">{Array.from({ length: 5 }, (_, i) => <div className="poster-skeleton" key={i}><div /><span /><span /></div>)}</div></div>
       ) : (
         <div className="browse-grid">
-          {visibleResults.map((item) => {
+          {visibleResults.map((item, position) => {
             const dl = downloadedMap[String(item.series_id)];
             return (
               <button
@@ -785,7 +797,7 @@ function Browse({ onNavigate, active = true }) {
                     {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
                   </div>}
                   {item.cover ? (
-                    <img src={item.cover} alt={item.series_title} loading="lazy" />
+                    <img src={item.cover} alt={item.series_title} loading={position < EAGER_POSTERS ? 'eager' : 'lazy'} decoding="async" fetchpriority={position < EAGER_POSTERS ? 'high' : 'auto'} />
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>
                   )}

@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const realApi = require('./comic-api');
-const { createComicService, withNetworkHint, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS } = require('./comic');
+const { createComicService, withNetworkHint, seededShuffle, episodeLabel, bookToCard, topTags, MAX_COMICS, IMAGE_CONCURRENCY, seededRank } = require('./comic');
 
 const fastScheduler = { rate: 500, burst: 20, concurrency: 3, backoff: [2, 4, 8, 16], rotationCooldownMs: 5, rejectionPauseMs: 5 };
 const id = (n) => String(7000000000000000000n + BigInt(n));
@@ -18,7 +18,7 @@ function book(n, extra = {}) {
 }
 
 function fakeApi(overrides = {}) {
-    const calls = { search: 0, directory: 0, chapter: 0, download: 0, session: 0 };
+    const calls = { details: 0, category: 0, search: 0, directory: 0, chapter: 0, download: 0, session: 0 };
     const api = {
         ...realApi, calls,
         async createSession() { calls.session += 1; return { n: calls.session }; },
@@ -28,6 +28,9 @@ function fakeApi(overrides = {}) {
             const base = (query.codePointAt(0) % 50) * 100 + offset;
             return { books: Array.from({ length: 20 }, (_, i) => book(base + i + 1)), hasMore: offset < 20, nextOffset: offset + 20, searchId: 's' };
         },
+        async fetchBookDetails() { calls.details += 1; return []; },
+        async fetchBookInfo() { calls.bookinfo = (calls.bookinfo || 0) + 1; return null; },
+        async fetchCategoryPage() { calls.category += 1; return { books: [], hasMore: false, nextOffset: 0 }; },
         async fetchDirectory(_session, bookId) {
             calls.directory += 1;
             return Array.from({ length: 120 }, (_, i) => ({ index: i + 1, itemId: id(Number(bookId.slice(-6)) * 1000 + i), title: i === 0 ? '预告' : `第${i}话 标题` }));
@@ -104,6 +107,46 @@ test('extras fill up to the cap from the search sweep, honour exclusions and fil
     const second = await service.extras({ exclude, limit: 40 });
     assert.deepEqual(second.items.map((item) => item.series_id), first.items.map((item) => item.series_id), 'stable order for the same day');
     assert.equal(api.calls.search, searches, 'a fresh pool answers without searching again');
+});
+
+test('category pages fill the pool when the keyword search returns nothing at all', async () => {
+    let category = 0;
+    const api = fakeApi({
+        async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; },
+        async fetchBookDetails(_session, ids) {
+            return ids.map((bookId, index) => ({ book_id: bookId, genre_type: '110', category_schema: JSON.stringify([{ category_id: 100 + (index % 3), name: 'c' }, { category_id: 100 }]) }));
+        },
+        async fetchCategoryPage(_session, categoryId, offset = 0) {
+            category += 1;
+            const base = (categoryId - 100) * 1000 + offset;
+            return { books: Array.from({ length: 10 }, (_, i) => book(base + i + 1)), hasMore: offset < 40, nextOffset: offset + 10 };
+        },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1, 2, 3, 4]));
+    const outcome = await settled(service, { exclude: [id(1), id(2), id(3), id(4)], limit: 60, waitMs: 5000 });
+    assert.equal(outcome.items.length, 60);
+    assert.equal(new Set(outcome.items.map((item) => item.series_id)).size, 60);
+    assert.ok(category >= 6, 'several category pages were read');
+});
+
+test('with every source empty the reply explains what was tried', async () => {
+    const api = fakeApi({ async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; } });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1, 2]));
+    const outcome = await settled(service, { exclude: [], limit: 30, waitMs: 5000 });
+    assert.deepEqual(outcome.items, []);
+    assert.match(outcome.diagnostic, /分类 0 个\/0 页，搜索 \d+ 页，收到 0 部，没有可用漫画/);
+});
+
+test('a failing category source does not stop the keyword search from filling the pool', async () => {
+    const api = fakeApi({
+        async fetchBookDetails() { throw Object.assign(new Error('x'), { code: 'BUSINESS_REJECTED' }); },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1, 2]));
+    const outcome = await settled(service, { exclude: [], limit: 30, waitMs: 5000 });
+    assert.equal(outcome.items.length, 30);
 });
 
 test('extras never exceed the 140 cap in total and a zero or invalid limit returns nothing', async () => {
@@ -202,7 +245,7 @@ test('fallback images are downloaded, authenticated-decrypted and size-detected;
     const service = createComicService({ api, schedulerOptions: fastScheduler, imageFetcher: async () => { downloads += 1; active += 1; peak = Math.max(peak, active); await new Promise((r) => setTimeout(r, 5)); active -= 1; return blob; } });
     const results = await Promise.all(Array.from({ length: 10 }, (_, i) => service.image({ itemId: id(300), index: i })));
     assert.equal(downloads, 10);
-    assert.ok(peak <= 4, `image concurrency capped, saw ${peak}`);
+    assert.ok(peak <= IMAGE_CONCURRENCY && peak > 1, `image concurrency capped at ${IMAGE_CONCURRENCY}, saw ${peak}`);
     for (const result of results) { assert.equal(result.mime, 'image/jpeg'); assert.ok(result.data.equals(plain)); }
     await assert.rejects(service.image({ itemId: id(300), index: -1 }), (error) => error.code === 'APP_INPUT');
     await assert.rejects(service.image({ itemId: id(300), index: 1.5 }), (error) => error.code === 'APP_INPUT');
@@ -258,10 +301,11 @@ test('the listing snapshot appears once every site page is known and survives a 
 
 test('the total listing is capped at the maximum even when the site alone is larger', () => {
     const service = createComicService({ api: fakeApi(), schedulerOptions: fastScheduler });
-    for (let page = 1; page <= 8; page += 1) service.noteSitePage({ page, totalPages: 8, items: Array.from({ length: 24 }, (_, i) => sitePage(1, [page * 100 + i]).items[0]) });
+    const pages = Math.ceil(MAX_COMICS / 24) + 2;
+    for (let page = 1; page <= pages; page += 1) service.noteSitePage({ page, totalPages: pages, items: Array.from({ length: 24 }, (_, i) => sitePage(1, [page * 100 + i]).items[0]) });
     const snapshot = service.snapshot();
     assert.equal(snapshot.items.length, MAX_COMICS);
-    assert.equal(snapshot.siteCount, 192);
+    assert.equal(snapshot.siteCount, pages * 24);
 });
 
 test('a slow first build answers at once with what it has, keeps growing, and a later call sees the rest', async () => {
@@ -302,6 +346,15 @@ test('when nothing can be fetched the reply says why, with the stage and code bu
     assert.match(outcome.diagnostic, /搜索，代码 101021/);
 });
 
+async function settled(service, args) {
+    let outcome = await service.extras(args);
+    for (let guard = 0; outcome.refreshing && guard < 400; guard += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        outcome = await service.extras(args);
+    }
+    return outcome;
+}
+
 test('a pool that is still growing is continued after a minute; one that stopped growing waits much longer', async () => {
     let now = Date.parse('2026-03-01T10:00:00');
     let available = 10;
@@ -315,20 +368,20 @@ test('a pool that is still growing is continued after a minute; one that stopped
     });
     const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler });
     service.noteSitePage(sitePage(1, [1]));
-    const first = await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    const first = await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     assert.ok(first.items.length > 0 && first.items.length < 130);
     const searchesAfterFirst = searches;
     now += 61 * 1000;
     available = 20;
-    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     assert.ok(searches > searchesAfterFirst, 'a pool that grew is continued after about a minute');
     const second = searches;
     available = 0;
     now += 61 * 1000;
-    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     now += 61 * 1000;
     const third = searches;
-    await service.extras({ exclude: [id(1)], limit: 130, waitMs: 5000 });
+    await settled(service, { exclude: [id(1)], limit: 130, waitMs: 5000 });
     assert.equal(searches, third, 'no growth: not retried again within the long window');
     assert.ok(second <= third);
 });
@@ -429,4 +482,200 @@ test('the network hint is added only to a refusal, once, and follows the proxy s
     assert.equal(withNetworkHint(Object.assign(new Error('漫画服务连接失败'), { code: 'ERR_NETWORK' }), false), '漫画服务连接失败');
     const hinted = withNetworkHint(refusal, false);
     assert.equal(withNetworkHint(Object.assign(new Error(hinted), { code: 'BUSINESS_REJECTED' }), false), hinted);
+});
+
+test('a title is read from whichever field names its tags and cover, and a missing genre is accepted from a comic listing', async () => {
+    const fromCategory = bookToCard({ book_id: id(1), book_name: '甲', tags: '', pure_category_tags: '热血,都市', serial_count: '30', thumb_uri: '', thumb_url: `https://x.fqnovelpic.com/novel-images/${md5(1)}~tplv-a.heic?s=1` }, realApi);
+    assert.deepEqual(fromCategory.tags, ['热血', '都市']);
+    assert.match(fromCategory.cover, new RegExp(`/novel-images/${md5(1)}~tplv-resize:320:0\\.webp$`));
+    assert.deepEqual(bookToCard({ book_id: id(2), book_name: '乙', category: '悬疑', serial_count: '30', thumb_uri: `novel-pic/${md5(2)}` }, realApi).tags, ['悬疑']);
+
+    const api = fakeApi({
+        async searchComicPage(_session, query, paging = {}) {
+            const base = (query.codePointAt(0) % 40) * 100 + (paging.offset || 0);
+            const books = Array.from({ length: 12 }, (_, i) => book(base + i + 1, i % 2 ? { genre_type: undefined } : {}));
+            books.push(book(base + 90, { genre_type: '1' }));
+            return { books, hasMore: false, nextOffset: 0, searchId: 's' };
+        },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    const outcome = await settled(service, { exclude: [], limit: 30, waitMs: 5000 });
+    assert.equal(outcome.items.length, 30);
+    assert.ok(outcome.items.every((item) => Number(BigInt(item.series_id) - 7000000000000000000n) % 100 !== 90), 'a listing record of another genre is still turned away');
+});
+
+test('categories are found through the directory records when the details call returns nothing', async () => {
+    const pages = [];
+    const api = fakeApi({
+        async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; },
+        async fetchBookInfo(_session, bookId) {
+            return { book_id: bookId, genre_type: '110', category_schema: JSON.stringify([{ category_id: 300 + (Number(bookId.slice(-3)) % 2), name: 'c' }]) };
+        },
+        async fetchCategoryPage(_session, categoryId, offset = 0) {
+            pages.push(categoryId);
+            const base = (categoryId - 300) * 1000 + offset;
+            return { books: Array.from({ length: 10 }, (_, i) => book(base + i + 1)), hasMore: offset < 30, nextOffset: offset + 10 };
+        },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [11, 12, 13, 14]));
+    const outcome = await settled(service, { exclude: [id(11), id(12), id(13), id(14)], limit: 40, waitMs: 5000 });
+    assert.equal(outcome.items.length, 40);
+    assert.ok(new Set(pages).size >= 1, 'category pages were read');
+});
+
+function seedBooks(from, count) {
+    return Array.from({ length: count }, (_, i) => {
+        const card = bookToCard(book(from + i), realApi);
+        return { series_id: card.series_id, series_title: card.series_title, cover: card.cover, episode_count: card.episode_count, tags: card.tags, introduction: '', rating: null, completion_status: 'unknown', score: card.score };
+    });
+}
+
+test('when no live listing returns anything, the shipped titles fill the list up to the cap without waiting', async () => {
+    const api = fakeApi({ async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; } });
+    const service = createComicService({ api, schedulerOptions: fastScheduler, seed: seedBooks(5000, MAX_COMICS + 100) });
+    service.noteSitePage(sitePage(1, [5000, 5001, 1, 2]));
+    const exclude = [id(5000), id(5001), id(1), id(2)];
+    const started = Date.now();
+    const first = await service.extras({ exclude, limit: 66, waitMs: 5000 });
+    assert.ok(Date.now() - started < 1000, 'answers at once');
+    assert.equal(first.items.length, 66);
+    assert.equal(new Set(first.items.map((item) => item.series_id)).size, 66);
+    assert.ok(first.items.every((item) => !exclude.includes(item.series_id)), 'titles already on the site are not repeated');
+    assert.equal(first.diagnostic, '');
+    const second = await service.extras({ exclude, limit: 66 });
+    assert.deepEqual(second.items.map((item) => item.series_id), first.items.map((item) => item.series_id), 'stable within a day');
+    const capped = await service.extras({ exclude: [], limit: 10000 });
+    assert.equal(capped.items.length, MAX_COMICS);
+});
+
+test('live titles come before the shipped ones, and a shipped title with no episodes is dropped from then on', async () => {
+    const api = fakeApi({
+        async fetchDirectory(_session, bookId) { return bookId === id(5003) ? [] : [{ index: 1, itemId: id(9), title: '第1话' }]; },
+    });
+    const service = createComicService({ api, schedulerOptions: fastScheduler, seed: seedBooks(5000, 10) });
+    const outcome = await settled(service, { exclude: [], limit: 30, waitMs: 5000 });
+    assert.equal(outcome.items.length, 30);
+    const live = outcome.items.filter((item) => item.source_kind !== 'seed');
+    assert.equal(live.length, 30, 'enough live titles: the shipped ones are not needed');
+
+    const quiet = createComicService({ api: fakeApi({ async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; }, async fetchDirectory(_session, bookId) { return bookId === id(5003) ? [] : [{ index: 1, itemId: id(9), title: '第1话' }]; } }), schedulerOptions: fastScheduler, seed: seedBooks(5000, 10) });
+    assert.ok((await quiet.extras({ limit: 10 })).items.some((item) => item.series_id === id(5003)));
+    await assert.rejects(quiet.episodes(id(5003)), (error) => error.code === 'EMPTY_DIRECTORY');
+    const after = await quiet.extras({ limit: 10 });
+    assert.ok(!after.items.some((item) => item.series_id === id(5003)));
+    assert.equal(after.items.length, 9);
+});
+
+test('the shipped list is valid, unique, and large enough to fill the cap on its own', () => {
+    const { loadSeed } = require('./comic');
+    const list = loadSeed();
+    assert.ok(list.length >= MAX_COMICS + 100, `${list.length} shipped titles`);
+    const ids = new Set();
+    for (const card of list) {
+        assert.match(card.series_id, /^\d{6,30}$/);
+        assert.ok(!ids.has(card.series_id), 'unique');
+        ids.add(card.series_id);
+        assert.ok(card.series_title && card.episode_count >= 20 && card.tags.length > 0);
+        assert.match(card.cover, /^https:\/\/p3-novel\.byteimg\.com\/novel-(pic|images)\/[0-9a-f]{32}~tplv-resize:320:0\.webp$/);
+    }
+});
+
+const ids = (outcome) => outcome.items.map((item) => item.series_id);
+
+test('extra titles keep their order while the pool grows and across refreshes', async () => {
+    let breadth = 3;
+    const api = fakeApi({
+        async searchComicPage(_session, query, paging = {}) {
+            const offset = paging.offset || 0;
+            const base = (query.codePointAt(0) % 20) * 100 + offset;
+            return { books: Array.from({ length: breadth }, (_, i) => book(base + i + 1)), hasMore: offset < 20, nextOffset: offset + 20, searchId: 's' };
+        },
+    });
+    let now = Date.parse('2026-03-01T10:00:00');
+    const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler });
+    service.noteSitePage(sitePage(1, [1]));
+    const exclude = [id(1)];
+    const first = await settled(service, { exclude, limit: 12, waitMs: 5000 });
+    assert.ok(first.items.length >= 6, `first ${first.items.length}`);
+    breadth = 20;
+    now += 2 * 60 * 60 * 1000;
+    for (let round = 0; round < 5; round += 1) {
+        now += POOL_RETRY_FOR_TEST;
+        const next = await settled(service, { exclude, limit: 40, waitMs: 5000 });
+        assert.deepEqual(ids(next).slice(0, ids(first).length), ids(first), `round ${round}: titles already shown keep their place`);
+        assert.equal(new Set(ids(next)).size, ids(next).length);
+    }
+    assert.ok(service._state.pool.items.length > first.items.length, 'the pool did grow');
+});
+
+const POOL_RETRY_FOR_TEST = 31 * 60 * 1000;
+
+test('a refresh never swaps shipped titles for live ones that arrive later, and the order survives a restart on the same day', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comic-served-'));
+    const file = path.join(dir, 'cache.json');
+    try {
+        const now = () => Date.parse('2026-03-01T10:00:00');
+        let live = false;
+        const api = fakeApi({ async searchComicPage(_session, query, paging = {}) {
+            if (!live) return { books: [], hasMore: false, nextOffset: 0, searchId: '' };
+            return { books: Array.from({ length: 20 }, (_, i) => book(9000 + (query.codePointAt(0) % 30) * 100 + (paging.offset || 0) + i)), hasMore: false, nextOffset: 0, searchId: 's' };
+        } });
+        const service = createComicService({ api, now, schedulerOptions: fastScheduler, seed: seedBooks(5000, 80) });
+        service.configure({ file });
+        service.noteSitePage(sitePage(1, [1]));
+        const exclude = [id(1)];
+        const first = await settled(service, { exclude, limit: 50, waitMs: 5000 });
+        assert.equal(first.items.length, 50);
+        live = true;
+        const again = await settled(service, { exclude, limit: 50, waitMs: 5000 });
+        assert.deepEqual(ids(again), ids(first), 'nothing on screen is replaced');
+        const wider = await settled(service, { exclude, limit: 60, waitMs: 5000 });
+        assert.deepEqual(ids(wider).slice(0, 50), ids(first));
+        await new Promise((resolve) => setTimeout(resolve, 700));
+
+        const restarted = createComicService({ api: fakeApi(), now, schedulerOptions: fastScheduler, seed: seedBooks(5000, 80) });
+        restarted.configure({ file });
+        const back = await restarted.extras({ exclude, limit: 60, waitMs: 0 });
+        assert.deepEqual(ids(back), ids(wider), 'same list after a restart');
+
+        const tomorrow = createComicService({ api: fakeApi(), now: () => Date.parse('2026-03-02T10:00:00'), schedulerOptions: fastScheduler, seed: seedBooks(5000, 80) });
+        tomorrow.configure({ file });
+        const rotated = await tomorrow.extras({ exclude, limit: 60, waitMs: 0 });
+        assert.notDeepEqual(ids(rotated), ids(wider), 'a new day gives a new order');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the day does not turn over while the app stays open; a title that cannot be read is the only one that leaves', async () => {
+    let now = Date.parse('2026-03-01T23:50:00');
+    let victim = '';
+    const api = fakeApi({
+        async searchComicPage() { return { books: [], hasMore: false, nextOffset: 0, searchId: '' }; },
+        async fetchDirectory(_session, bookId) { return bookId === victim ? [] : [{ index: 1, itemId: id(9), title: '第1话' }]; },
+    });
+    const service = createComicService({ api, now: () => now, schedulerOptions: fastScheduler, seed: seedBooks(5000, 60) });
+    service.noteSitePage(sitePage(1, [1]));
+    const exclude = [id(1)];
+    const before = await service.extras({ exclude, limit: 20, waitMs: 0 });
+    assert.equal(before.items.length, 20);
+    now = Date.parse('2026-03-02T00:20:00');
+    const after = await service.extras({ exclude, limit: 20, waitMs: 0 });
+    assert.deepEqual(ids(after), ids(before), 'midnight does not reshuffle an open session');
+
+    victim = ids(before)[4];
+    await assert.rejects(service.episodes(victim), (error) => error.code === 'EMPTY_DIRECTORY');
+    const gone = await service.extras({ exclude, limit: 20, waitMs: 0 });
+    assert.equal(gone.items.length, 20, 'the gap is filled');
+    assert.deepEqual(ids(gone).slice(0, 19), ids(before).filter((value) => value !== victim), 'the others keep their order');
+    assert.ok(!ids(gone).includes(victim));
+});
+
+test('seededRank keeps the relative order of the rest when a title is added or removed', () => {
+    const items = Array.from({ length: 200 }, (_, i) => String(1000 + i));
+    const full = seededRank(items, 'day-1');
+    assert.deepEqual(seededRank(items.slice().reverse(), 'day-1'), full);
+    const without = seededRank(items.filter((value) => value !== full[7]), 'day-1');
+    assert.deepEqual(without, full.filter((value) => value !== full[7]));
+    assert.notDeepEqual(seededRank(items, 'day-2'), full);
+    assert.deepEqual(seededRank([], 'x'), []);
 });

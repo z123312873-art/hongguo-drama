@@ -3,10 +3,12 @@ import { RefreshCw, X, ChevronRight } from './icons';
 import useDialogKeyboard from './useDialogKeyboard';
 import { desiredImageWidth, nextImageWidth, readerColumnWidth } from '../comicLayout.mjs';
 import { neighbours } from '../comicProgress.mjs';
+import { createDirectHealth, firstPictureUrls, inWindow, preloadWindow, reachedEnd } from '../comicPreload.mjs';
 import './ComicReader.css';
 
-const NEAR_MARGIN = '1800px 0px';
-const PREFETCH_DELAY_MS = 1500;
+const NEAR_MARGIN = '2400px 0px';
+const PREFETCH_DELAY_MS = 800;
+const WARM_LIMIT = 6;
 const RESIZE_DELAY_MS = 250;
 
 function readViewport() {
@@ -14,9 +16,8 @@ function readViewport() {
   return { column: readerColumnWidth(width), ratio: window.devicePixelRatio || 1 };
 }
 
-function ComicPage({ picture, itemId, root, position, total }) {
+function ComicPage({ picture, itemId, root, position, total, load, onNear, health }) {
   const holder = useRef(null);
-  const [near, setNear] = useState(false);
   const [src, setSrc] = useState('');
   const [state, setState] = useState('idle');
   const stage = useRef(0);
@@ -26,18 +27,13 @@ function ComicPage({ picture, itemId, root, position, total }) {
 
   useEffect(() => {
     const node = holder.current;
-    if (!node || near) return undefined;
-    if (typeof IntersectionObserver !== 'function') { setNear(true); return undefined; }
+    if (!node || typeof IntersectionObserver !== 'function') return undefined;
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some(entry => entry.isIntersecting)) { setNear(true); observer.disconnect(); }
+      for (const entry of entries) onNear(picture.index, entry.isIntersecting);
     }, { root: root || null, rootMargin: NEAR_MARGIN });
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [near, root]);
-
-  useEffect(() => {
-    if (near && !src && state === 'idle') { stage.current = 0; setState('loading'); setSrc(wantedUrl.current); }
-  }, [near, src, state]);
+    return () => { observer.disconnect(); onNear(picture.index, false); };
+  }, [root, onNear, picture.index]);
 
   useEffect(() => () => { if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); }, []);
 
@@ -57,9 +53,22 @@ function ComicPage({ picture, itemId, root, position, total }) {
     }
   }, [itemId, picture.index]);
 
+  useEffect(() => {
+    if (!load || src || state !== 'idle') return;
+    stage.current = 0;
+    if (health.skipDirect()) { decryptedCopy(); return; }
+    setState('loading');
+    setSrc(wantedUrl.current);
+  }, [load, src, state, health, decryptedCopy]);
+
   const onError = () => {
-    if (stage.current === 0) decryptedCopy();
+    if (stage.current === 0) { health.noteFailed(); decryptedCopy(); }
     else { stage.current = 2; setState('failed'); }
+  };
+
+  const onLoad = () => {
+    if (stage.current === 0) health.noteLoaded();
+    setState('loaded');
   };
 
   const retry = () => {
@@ -73,8 +82,8 @@ function ComicPage({ picture, itemId, root, position, total }) {
   return (
     <div ref={holder} className={`comic-page comic-page-${state}`} style={ratio ? { aspectRatio: ratio } : { minHeight: 280 }} data-position={position}>
       {src && state !== 'failed' && (
-        <img src={src} alt={`第 ${position} / ${total} 张`} decoding="async" draggable={false}
-          onLoad={() => setState('loaded')} onError={onError} />
+        <img src={src} alt={`第 ${position} / ${total} 张`} decoding="async" draggable={false} fetchPriority={picture.index < 2 ? 'high' : undefined}
+          onLoad={onLoad} onError={onError} />
       )}
       {state === 'failed' && (
         <div className="comic-page-failed" role="alert">
@@ -96,8 +105,27 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
   const request = useRef(0);
   const widthRef = useRef(0);
   const prefetchTimer = useRef(null);
+  const nearPages = useRef(new Set());
+  const health = useRef(null);
+  const warmed = useRef(new Map());
+  const [span, setSpan] = useState({ lo: 0, hi: -1 });
   const nav = neighbours(episodes, itemId);
   const current = episodes.find(entry => entry.itemId === itemId);
+  if (!health.current) health.current = createDirectHealth();
+  const total = chapter ? chapter.pictures.length : 0;
+  const totalRef = useRef(0);
+  totalRef.current = total;
+  const observed = typeof IntersectionObserver === 'function';
+
+  // Pages near the viewport, plus a few more after the last of them, are fetched ahead of the reader.
+  const refreshSpan = useCallback((count) => {
+    const next = preloadWindow({ near: nearPages.current, total: count });
+    setSpan((value) => (value.lo === next.lo && value.hi === next.hi ? value : next));
+  }, []);
+  const noteNear = useCallback((index, isNear) => {
+    if (isNear) nearPages.current.add(index); else nearPages.current.delete(index);
+    refreshSpan(totalRef.current);
+  }, [refreshSpan]);
 
   const load = useCallback(async (wanted) => {
     const ticket = ++request.current;
@@ -105,19 +133,24 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
     setError('');
     setChapter(null);
     clearTimeout(prefetchTimer.current);
+    nearPages.current = new Set();
+    totalRef.current = 0;
+    setSpan({ lo: 0, hi: -1 });
     widthRef.current = nextImageWidth(0, desiredImageWidth(wanted.column, wanted.ratio));
     try {
       const reply = await window.electronAPI.comicChapter({ itemId, width: widthRef.current, priority: 'click' });
       if (ticket !== request.current) return;
       if (!reply?.success) throw new Error(reply?.error || '这一话暂时没取到');
       if (!Array.isArray(reply.pictures) || !reply.pictures.length) throw new Error('这一话没有图片');
+      totalRef.current = reply.pictures.length;
       setChapter(reply);
+      refreshSpan(reply.pictures.length);
     } catch (e) {
       if (ticket === request.current) setError(e?.message || '这一话暂时没取到，请稍后重试');
     } finally {
       if (ticket === request.current) setLoading(false);
     }
-  }, [itemId]);
+  }, [itemId, refreshSpan]);
 
   useEffect(() => {
     load(readViewport());
@@ -127,16 +160,47 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId, load]);
 
-  useEffect(() => () => { window.electronAPI?.comicCancelPrefetch?.(); }, []);
+  useEffect(() => () => {
+    window.electronAPI?.comicCancelPrefetch?.();
+    for (const image of warmed.current.values()) image.src = '';
+    warmed.current.clear();
+  }, []);
 
+  // The next episode's list of pictures is asked for early. Its first pictures are fetched once the reader has
+  // reached the end of this episode's pictures, so the two never compete for the same connections.
+  const nextId = nav.next?.itemId || '';
+  const nextChapter = useRef({ id: '', pictures: [] });
   useEffect(() => {
-    if (!chapter || !nav.next) return undefined;
-    const next = nav.next.itemId;
-    prefetchTimer.current = setTimeout(() => {
-      window.electronAPI?.comicChapter?.({ itemId: next, width: widthRef.current || 720, priority: 'prefetch' }).catch?.(() => {});
+    nextChapter.current = { id: '', pictures: [] };
+    if (!chapter || !nextId) return undefined;
+    let live = true;
+    prefetchTimer.current = setTimeout(async () => {
+      try {
+        const reply = await window.electronAPI?.comicChapter?.({ itemId: nextId, width: widthRef.current || 720, priority: 'prefetch' });
+        if (live && reply?.success) nextChapter.current = { id: nextId, pictures: firstPictureUrls(reply) };
+      } catch (_) { /* a missed prefetch only costs the wait on the next click */ }
     }, PREFETCH_DELAY_MS);
-    return () => clearTimeout(prefetchTimer.current);
-  }, [chapter, nav.next]);
+    return () => { live = false; clearTimeout(prefetchTimer.current); };
+  }, [chapter, nextId]);
+
+  const atEnd = chapter ? !observed || reachedEnd(span, total) : false;
+  useEffect(() => {
+    if (!atEnd || !nextId) return undefined;
+    let timer;
+    const warm = () => {
+      if (nextChapter.current.id !== nextId) { timer = setTimeout(warm, 400); return; }
+      for (const url of nextChapter.current.pictures) {
+        if (warmed.current.has(url)) continue;
+        if (warmed.current.size >= WARM_LIMIT) { const oldest = warmed.current.keys().next().value; warmed.current.get(oldest).src = ''; warmed.current.delete(oldest); }
+        const image = new Image();
+        image.decoding = 'async';
+        image.src = url;
+        warmed.current.set(url, image);
+      }
+    };
+    warm();
+    return () => clearTimeout(timer);
+  }, [atEnd, nextId]);
 
   useEffect(() => {
     let timer;
@@ -173,14 +237,14 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
   }, [nav.previous, nav.next, onSelect]);
 
   const label = current ? (/^\d+$/.test(current.label) ? `第 ${current.label} 话` : current.label) : '';
-  const total = episodes.length;
+  const episodeTotal = episodes.length;
   return (
     <div className="comic-reader" role="dialog" aria-modal="true" aria-label={`${seriesTitle || '漫画'} ${label}`} tabIndex={-1}>
       <header className="comic-reader-bar">
         <button type="button" className="comic-reader-nav" disabled={!nav.previous} onClick={() => nav.previous && onSelect(nav.previous.itemId)} aria-label="上一话"><ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} />上一话</button>
         <div className="comic-reader-title">
           <strong>{seriesTitle}</strong>
-          <span>{label}{nav.position > 0 && total > 0 ? ` · ${nav.position}/${total}` : ''}{chapter ? ` · ${chapter.pictureCount} 张` : ''}</span>
+          <span>{label}{nav.position > 0 && episodeTotal > 0 ? ` · ${nav.position}/${episodeTotal}` : ''}{chapter ? ` · ${chapter.pictureCount} 张` : ''}</span>
         </div>
         <button type="button" className="comic-reader-nav" disabled={!nav.next} onClick={() => nav.next && onSelect(nav.next.itemId)} aria-label="下一话">下一话<ChevronRight size={16} /></button>
         <button type="button" className="icon-btn comic-reader-close" onClick={onClose} aria-label="关闭阅读器" title="关闭 (Esc)"><X size={18} /></button>
@@ -195,7 +259,8 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
             </div>
           )}
           {chapter && chapter.pictures.map((picture) => (
-            <ComicPage key={`${itemId}:${picture.index}`} picture={picture} itemId={itemId} root={scroller} position={picture.index + 1} total={chapter.pictureCount} />
+            <ComicPage key={`${itemId}:${picture.index}`} picture={picture} itemId={itemId} root={scroller} position={picture.index + 1} total={chapter.pictureCount}
+              load={!observed || inWindow(picture.index, span)} onNear={noteNear} health={health.current} />
           ))}
           {chapter && (
             <footer className="comic-reader-end">

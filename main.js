@@ -1298,6 +1298,19 @@ ipcMain.handle('browse-list', (_event, options) =>
       else callback();
     }));
 
+// The pages the discover view opens with are requested while the window is still starting, so they are
+// already on their way (or answered) when the view asks for them. Failures are ignored; the view retries.
+function prewarmBrowseLists() {
+  const catalog = require('./src/native/catalog');
+  const login = (authInfo, callback) => {
+    if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
+    else callback();
+  };
+  for (const options of [{ category: 'hot-drama', page: 1 }, { category: 'real-drama', page: 1 }, { category: 'real-drama', page: 2 }]) {
+    catalog.browseList(options, login).catch(() => {});
+  }
+}
+
 const comicReply = (work) => async (_event, payload) => {
   try { return { success: true, ...(await work(payload && typeof payload === 'object' ? payload : {})) }; }
   catch (error) {
@@ -2193,9 +2206,14 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
   const recoverable = error => error?.mediaRetryable || error?.code === 'SOURCE_UNAVAILABLE'
     || ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'ERR_BAD_RESPONSE', 'ERR_STREAM_PREMATURE_CLOSE', 'EAI_AGAIN'].includes(error?.code);
   const rounds = options.recover !== false && /^\d{1,30}$/.test(String(vid)) ? 3 : 1;
-  let lastError, transfers = 0;
+  if (/^\d{1,30}$/.test(String(vid))) require('./src/native/app-source').warmPlayback();
+  // An empty answer from every source again and again is the network or the service refusing, not a hiccup.
+  const refused = error => error?.code === 'SOURCE_UNAVAILABLE' && error.sources?.length > 0
+    && error.sources.every(item => item?.code === 'EMPTY_RESPONSE' || item?.code === 'DEVICE_REGISTRATION_FAILED');
+  let lastError, transfers = 0, refusedRounds = 0;
   try {
     for (let round = 0; round < rounds; round++) {
+      if (refusedRounds >= 2) break;
       cancelled();
       if (round) {
         let timer;
@@ -2211,12 +2229,14 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
         cancelled();
         if (!recoverable(error)) throw error;
         lastError = error;
+        if (refused(error)) refusedRounds++;
         continue;
       }
       cancelled();
       if (!info?.url) {
         lastError = Object.assign(new Error(info?.error || '未获取到有效播放地址'), { code: info?.code, sources: info?.sources });
         if (!recoverable(lastError) || info?.locked) throw lastError;
+        if (refused(lastError)) refusedRounds++;
         continue;
       }
       const seen = new Set();
@@ -4297,6 +4317,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     }
     startupStage = '创建主窗口';
     createWindow();
+    prewarmBrowseLists();
     setTimeout(() => { void refreshWatchHistory(); }, 10000).unref();
     setInterval(() => { void refreshWatchHistory(); }, 15 * 60 * 1000).unref();
   } catch (_) {

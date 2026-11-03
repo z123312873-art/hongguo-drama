@@ -221,7 +221,7 @@ const checks = [
     assert.equal(calls.length, 2);
     await assert.rejects(fixture({ media: 'https://127.0.0.1/video' }).fetch('11'));
   }],
-  ['empty signed response registers once more and then plays, a second empty response stops', async () => {
+  ['an empty answer from an unregistered device takes a fresh device and then plays, a second empty answer stops', async () => {
     const device = require(path.join(nativeDir, 'playback-device'));
     const media = 'https://v3-reading.qznovelvod.com/video.mp4';
     const model = { code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
@@ -241,11 +241,9 @@ const checks = [
         }
         if (config.method === 'POST') {
           const count = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length;
-          if (count === 1) {
-            assert.ok(config.headers['x-gorgon'], 'the unregistered attempt keeps the old signature');
-            return { status: 200, headers: {}, data: '' };
-          }
-          assert.equal(config.headers['x-gorgon'], undefined, 'the fresh device uses the unsigned playback request');
+          assert.ok(config.headers['x-gorgon'], 'a registered device is signed first');
+          if (count === 1) return { status: 200, headers: {}, data: '' };
+          assert.equal(new URL(config.url).searchParams.get('device_id'), '1234567890123456');
           return { status: 200, headers: {}, data: JSON.stringify(model) };
         }
         throw new Error('unexpected request');
@@ -302,7 +300,7 @@ const checks = [
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
     }
   }],
-  ['empty unsigned playback signs the same device once and does not register again', async () => {
+  ['an empty signed answer falls back to the unsigned style on the same device and does not register again', async () => {
     const device = require(path.join(nativeDir, 'playback-device'));
     device.resetPlaybackDevice();
     const media = 'https://v3-reading.qznovelvod.com/video.mp4';
@@ -318,10 +316,10 @@ const checks = [
         }
         const videos = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register'));
         if (videos.length === 1) {
-          assert.equal(config.headers['x-gorgon'], undefined);
+          assert.ok(config.headers['x-gorgon'], 'the signed style goes first');
           return { status: 200, headers: {}, data: '' };
         }
-        assert.ok(config.headers['x-gorgon']);
+        assert.equal(config.headers['x-gorgon'], undefined);
         assert.equal(new URL(config.url).searchParams.get('device_id'), '1234567890123456');
         assert.equal(new URL(config.url).searchParams.get('iid'), '6543210987654321');
         return { status: 200, headers: {}, data: JSON.stringify(model) };
@@ -331,6 +329,47 @@ const checks = [
       assert.equal(result.quality, '1080p');
       assert.equal(calls.filter(call => String(call.url).includes('device_register')).length, 1);
       assert.equal(calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length, 2);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
+  ['every lookup takes a device of its own and the host that answered is asked first next time', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    device.resetPlaybackDevice();
+    const media = 'https://v3-reading.qznovelvod.com/video.mp4';
+    const model = { code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: media, codec_type: 'h264', quality_desc: '720P', vwidth: 720, vheight: 1280 },
+    ] }) } } };
+    const calls = [];
+    const used = new Map();
+    let registered = 0;
+    try {
+      const fetch = loadFetch(async config => {
+        calls.push(config);
+        if (String(config.url).includes('device_register')) {
+          registered += 1;
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: String(1000000000000000 + registered), install_id_str: String(2000000000000000 + registered), code: 0 }) };
+        }
+        const url = new URL(config.url);
+        const id = url.searchParams.get('device_id');
+        used.set(id, (used.get(id) || 0) + 1);
+        // The service answers a device once, and the first edge host answers nobody.
+        if (used.get(id) > 1 || url.hostname.startsWith('api5-normal-sinfonlineb')) return { status: 200, headers: {}, data: '' };
+        return { status: 200, headers: {}, data: JSON.stringify(model) };
+      });
+      const first = await fetch('11', { quality: '1080p' });
+      assert.equal(first.url, media);
+      const hostOf = call => new URL(call.url).hostname;
+      const videoCalls = () => calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register'));
+      assert.equal(hostOf(videoCalls()[0]), 'api5-normal-sinfonlineb.fqnovel.com');
+      assert.notEqual(hostOf(videoCalls().at(-1)), 'api5-normal-sinfonlineb.fqnovel.com', 'a refused device moves on to another edge host');
+      const before = videoCalls().length;
+      const second = await fetch('11', { quality: '1080p' });
+      assert.equal(second.url, media);
+      assert.equal(hostOf(videoCalls()[before]), hostOf(videoCalls()[before - 1]), 'the answering host is tried first');
+      assert.equal(videoCalls().length - before, 1, 'a fresh device answers at once');
+      assert.ok([...used.values()].every(count => count <= 2), 'no device is asked again after it was refused');
     } finally {
       device.resetPlaybackDevice();
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
