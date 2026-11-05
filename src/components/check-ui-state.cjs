@@ -360,6 +360,27 @@ async function mount(file, api, props = {}) {
       assert.equal(badge.children.join(''), '新剧');
     } finally { ui.unmount(); }
   });
+  await test('browse card shows 红果首发 in the same poster slot as 新剧, only for a real boolean', async () => {
+    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: async () => ({ success: true, results: [
+      { series_id: '2000001', series_title: '双标甲', rank: 1, rating: 9.2, is_new: true, is_premiere: true },
+      { series_id: '2000002', series_title: '只首发乙', is_premiere: true, rating: 8.4 },
+      { series_id: '2000003', series_title: '假首发丙', rank: 3, rating: 8.1, is_premiere: 'true' },
+      { series_id: '2000004', series_title: '只新剧丁', rank: 4, is_new: true },
+    ] }) });
+    try {
+      await ui.flush();
+      const cards = ui.nodes().filter(n => n.props.className === 'browse-card');
+      const row = n => n?.props?.className === 'browse-cover-top' ? n : (n?.children || []).map(row).find(Boolean);
+      const parts = card => (row(card)?.children || []).filter(child => child && typeof child === 'object').map(child => child.props.className);
+      const labels = card => (row(card)?.children || []).filter(child => child?.props?.className === 'browse-new-badge').map(child => child.children.join(''));
+      assert.deepEqual(parts(cards[0]), ['browse-rank-badge', 'browse-new-badge', 'browse-new-badge', 'browse-score'], 'both chips sit between rank and score');
+      assert.deepEqual(labels(cards[0]), ['新剧', '红果首发']);
+      assert.deepEqual(parts(cards[1]), ['browse-new-badge', 'browse-score'], 'premiere alone still opens the poster row');
+      assert.deepEqual(labels(cards[1]), ['红果首发']);
+      assert.deepEqual(parts(cards[2]), ['browse-rank-badge', 'browse-score'], 'a string flag is not a premiere');
+      assert.deepEqual(labels(cards[3]), ['新剧']);
+    } finally { ui.unmount(); }
+  });
   await test('browse keeps posters when switching categories and does not refetch a fresh list', async () => {
     const calls = [];
     const ui = await mount('Browse', {

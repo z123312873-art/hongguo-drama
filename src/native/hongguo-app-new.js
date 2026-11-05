@@ -11,6 +11,7 @@ const PAGE_LIMIT = 50;
 // 默认翻两页（真人 + AI 各最多 100 条），降低繁忙日当天新剧落在首屏之外的概率。
 const DEFAULT_PAGES = 2;
 const MAX_RESULTS = 20;
+const PREMIERE_LABEL = /^(?:红果首发|紅果首發)$/;
 // 真人剧与 AI 剧使用同一分类接口、不同筛选值；两者都能出现在搜索结果里。
 const GENRES = [
   { reqScene: 'default', genre: 'short_play' },
@@ -19,6 +20,8 @@ const GENRES = [
 
 let cache = null; // { expires, pages, items }
 let inflight = null; // { pages, task }
+let premiereMemo = { expires: 0, ids: new Set() };
+let premiereCooldownUntil = 0;
 
 function appError(message, code) {
   return Object.assign(new Error(message), { code });
@@ -46,14 +49,16 @@ function newReleaseFromRow(row) {
   addLabel(row.tag_info?.text);
   for (const item of Array.isArray(row.sub_title_list) ? row.sub_title_list : []) addLabel(item?.content);
   const releasedToday = labels.includes('今日上新');
+  const premiere = labels.some(label => PREMIERE_LABEL.test(label));
   return {
     series_id: id,
     series_title: title,
     cover: catalogCover(row.cover),
     episode_count: parseSearchInteger(row.episode_cnt) || 0,
     description: cleanTitle(row.video_desc || row.series_intro),
-    tags: labels.filter(label => label !== '新剧' && label !== '今日上新').slice(0, 4),
+    tags: labels.filter(label => label !== '新剧' && label !== '今日上新' && !PREMIERE_LABEL.test(label)).slice(0, 4),
     new_release: true,
+    is_premiere: premiere,
     ...(releasedToday ? { released_today: true } : {}),
     source: 'hongguo',
     url: `https://hongguoduanju.com/detail?series_id=${id}`,
@@ -69,6 +74,7 @@ function collectRows(rows) {
     if (!existing) { seen.set(item.series_id, item); continue; }
     // 同一部剧可能同时出现在真人/AI 列表；保留「今日上新」标记和更完整的字段。
     existing.released_today = existing.released_today || item.released_today;
+    existing.is_premiere = existing.is_premiere === true || item.is_premiere === true;
     existing.tags = [...new Set([...existing.tags, ...item.tags])].slice(0, 4);
     if (!existing.cover) existing.cover = item.cover;
     if (!existing.description) existing.description = item.description;
@@ -150,7 +156,10 @@ async function listNewReleases(options = {}) {
   const { pages = DEFAULT_PAGES, deadline = 0, request = defaultRequest, useCache = true } = options || {};
   const count = Math.max(1, Math.min(8, Number(pages) || DEFAULT_PAGES));
   const cached = useCache ? cachedItems(count) : null;
-  if (cached) return { items: cached, cached: true, partial: false };
+  if (cached) {
+    if (!premiereReady()) rememberPremieres(cached, Math.max(1, cache.expires - Date.now()));
+    return { items: cached, cached: true, partial: false };
+  }
   if (inflight && inflight.pages >= count) return inflight.task;
   const budget = Number(deadline) > 0 ? deadline : Date.now() + REQUEST_TIMEOUT_MS;
   if (budget <= Date.now()) throw appError('App 上新请求超时', 'APP_TIMEOUT');
@@ -162,10 +171,16 @@ async function listNewReleases(options = {}) {
       else failures.push(entry.reason);
     }
     const items = collectRows(rows);
-    if (!items.length && failures.length) throw failures[0];
+    if (!items.length && failures.length) {
+      premiereCooldownUntil = Date.now() + 15 * 1000;
+      throw failures[0];
+    }
     const result = { items, cached: false, partial: failures.length > 0 };
     // 只缓存完整结果；部分失败或空列表下次搜索重新请求，避免把上游一次空响应锁住一分钟。
     if (result.partial === false && items.length) cache = { expires: Date.now() + CACHE_TTL_MS, pages: count, items };
+    // 海報首發標記可以先用已讀到的名單。部分失敗只記很短，下次搜索仍會重抓。
+    if (result.partial === false) rememberPremieres(items, CACHE_TTL_MS);
+    else if (items.length) rememberPremieres(items, 15 * 1000);
     return result;
   })();
   inflight = { pages: count, task };
@@ -209,8 +224,33 @@ async function searchNewReleases(keyword, options = {}) {
   return (await searchNewReleasesDetailed(keyword, options)).results;
 }
 
+function rememberPremieres(items, ttl) {
+  const ids = new Set();
+  for (const item of items || []) {
+    if (item?.is_premiere === true) ids.add(String(item.series_id));
+  }
+  premiereMemo = { expires: Date.now() + ttl, ids };
+}
+
+function premiereReady() {
+  return premiereMemo.expires > Date.now();
+}
+
+function premiereIds() {
+  return premiereReady() ? premiereMemo.ids : new Set();
+}
+
+// 啟動時預讀首發名單。失敗後短暫停手，避免每一頁都再等一次網路。
+function warmNewReleases() {
+  if (premiereReady() || Date.now() < premiereCooldownUntil) return Promise.resolve();
+  return listNewReleases().then(() => undefined, () => undefined);
+}
+
 function clearNewReleaseCache() {
-  cache = null; inflight = null;
+  cache = null;
+  inflight = null;
+  premiereMemo = { expires: 0, ids: new Set() };
+  premiereCooldownUntil = 0;
 }
 
 module.exports = {
@@ -222,6 +262,9 @@ module.exports = {
   collectRows,
   normalizeTitle,
   clearNewReleaseCache,
+  premiereIds,
+  premiereReady,
+  warmNewReleases,
   CACHE_TTL_MS,
   DEFAULT_PAGES,
   MAX_RESULTS,

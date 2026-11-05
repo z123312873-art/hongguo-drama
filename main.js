@@ -1291,12 +1291,33 @@ ipcMain.handle('test-custom-source', async (_event,draft) => {
 });
 
 
-ipcMain.handle('browse-list', (_event, options) =>
-  require(String(options?.source).startsWith('custom:') ? './src/native/custom-source' : options?.source === 'hema' ? './src/native/hema'
-    : options?.source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options, (authInfo, callback) => {
+ipcMain.handle('browse-list', async (_event, options) => {
+  const source = String(options?.source || '');
+  const listed = await require(source.startsWith('custom:') ? './src/native/custom-source' : source === 'hema' ? './src/native/hema'
+    : source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options, (authInfo, callback) => {
       if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
       else callback();
-    }));
+    });
+  // 官網榜單不一定帶「红果首发」。已預讀的 App 名單只補這個布林值，不改標題、評分或片單順序。
+  if (source.startsWith('custom:') || source === 'hema' || source === 'xifan' || !listed?.success || !Array.isArray(listed.results)) return listed;
+  try {
+    const releases = require('./src/native/hongguo-app-new');
+    if (typeof releases.premiereIds !== 'function' || typeof releases.warmNewReleases !== 'function') return listed;
+    if (!releases.premiereReady()) {
+      await Promise.race([
+        Promise.resolve(releases.warmNewReleases()).catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 900)),
+      ]);
+    }
+    const ids = releases.premiereIds();
+    if (ids && typeof ids.has === 'function') {
+      for (const item of listed.results) {
+        if (item && ids.has(String(item.series_id))) item.is_premiere = true;
+      }
+    }
+  } catch { /* 首發名單補不上時，榜單照常顯示。 */ }
+  return listed;
+});
 
 // The pages the discover view opens with are requested while the window is still starting, so they are
 // already on their way (or answered) when the view asks for them. Failures are ignored; the view retries.
@@ -1309,6 +1330,7 @@ function prewarmBrowseLists() {
   for (const options of [{ category: 'hot-drama', page: 1 }, { category: 'real-drama', page: 1 }, { category: 'real-drama', page: 2 }]) {
     catalog.browseList(options, login).catch(() => {});
   }
+  try { require('./src/native/hongguo-app-new').warmNewReleases()?.catch?.(() => {}); } catch { /* 首發名單稍後由片單請求再補。 */ }
 }
 
 const comicReply = (work) => async (_event, payload) => {

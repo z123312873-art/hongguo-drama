@@ -33,7 +33,9 @@
 .browse-cover:has(.browse-score, .browse-new-badge) .browse-dl-badge { top: 36px; }
 .browse-ep-badge { position: absolute; bottom: 9px; left: 9px; font-size: 11px; color: white; background: #1e1d1bbf; padding: 3px 7px; border-radius: 5px; z-index: 2; }
 .browse-rank-badge { flex: none; padding: 4px 7px; border-radius: 5px; background: var(--bg-card); color: var(--text-primary); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.browse-new-badge { flex: none; margin: 0 auto; padding: 3px 6px; border-radius: 5px; background: #2d664f; color: #fff; font-size: 11px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.browse-new-badge { flex: none; margin: 0; padding: 3px 6px; border-radius: 5px; background: #2d664f; color: #fff; font-size: 11px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.browse-cover-top > .browse-new-badge:first-of-type { margin-left: auto; }
+.browse-new-badge:last-of-type { margin-right: auto; }
 .browse-new-badge + .browse-score { margin-left: 0; }
 @container browse-cover (max-width: 170px) {
   .browse-cover-top { gap: 3px; }

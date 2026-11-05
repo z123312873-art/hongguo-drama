@@ -30,6 +30,7 @@ async function main() {
     if (heat) assert.equal(data.results[0].heat, heat);
     assert.equal(typeof data.results[0].is_new, 'boolean', `${category} always reports the new-drama flag`);
     assert.equal(data.results[0].is_new, category === 'hot-real-drama', `${category} copies the source's own 新剧 tag only`);
+    assert.equal(data.results[0].is_premiere, false, `${category} does not invent a 红果首发 chip`);
     if (category === 'hot-real-drama') {
       assert(data.results[0].episode_count > 24, 'streamed JSON must supply full episode metadata');
       assert.match(data.results[0].introduction, /顾娇/, 'streamed ranking JSON keeps the public description');
@@ -70,6 +71,14 @@ async function main() {
   response = read('hot-real-drama').replace(/pc-[A-Za-z][\w-]*/g, 'changed-style').replace(/data-fn-name=(["'])mergeLoaderData\1/g, 'data-fn-name="ignored"');
   const restyled = await browseList({ category: 'hot-real-drama', forceRefresh: true });
   assert.equal(restyled.results[0].is_new, true, 'the 新剧 chip survives CSS hash changes');
+  response = read('hot-real-drama').replaceAll('新剧', '红果首发');
+  const premiere = await browseList({ category: 'hot-real-drama', forceRefresh: true });
+  assert.equal(premiere.results[0].is_premiere, true, '红果首发 uses the same status chip as 新剧');
+  assert.equal(premiere.results[0].is_new, false, '红果首发 does not also count as 新剧');
+  response = read('hot-real-drama').replaceAll('新剧', '紅果首發');
+  const traditional = await browseList({ category: 'hot-real-drama', forceRefresh: true });
+  assert.equal(traditional.results[0].is_premiere, true, 'the traditional chip 紅果首發 is the same flag');
+  assert.equal(traditional.results[0].is_new, false);
   const invalid = await browseList({ category: 'hot-drama', genre: '../../outside' });
   assert.equal(invalid.success, false);
   console.log('PASS rankings: four live-source fixtures, streamed JSON and semantic HTML, rank/heat, page 2, cache, retry and malformed data');
