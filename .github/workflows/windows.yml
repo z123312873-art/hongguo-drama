@@ -240,8 +240,9 @@ jobs:
               gh release delete-asset "$tag" "$name" --yes
             fi
           done
-          gh release view "$tag" --json isPrerelease,isDraft,isLatest --jq '{isPrerelease,isDraft,isLatest}'
-          test "$(gh release view "$tag" --json isPrerelease,isDraft,isLatest --jq '(.isPrerelease == true) and (.isDraft == false) and (.isLatest == false)')" = "true"
+          gh release view "$tag" --json isPrerelease,isDraft --jq '{isPrerelease,isDraft}'
+          test "$(gh release view "$tag" --json isPrerelease,isDraft --jq '(.isPrerelease == true) and (.isDraft == false)')" = "true"
+          test "$(gh release view --json tagName --jq .tagName)" != "$tag"
   publish-release:
     needs: windows
     if: startsWith(github.ref, 'refs/heads/windows/4.1-release-')
