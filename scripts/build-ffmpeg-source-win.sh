@@ -14,7 +14,11 @@ X264_TAR_SHA256=df62afece4eecef8ddf196f115dfec6e936a21b04ec2117a0f4e412de29b20e5
 mkdir -p "$ROOT"/{archives,sources,build-x264,build-ffmpeg,prefix,logs,artifacts/bin,corresponding-source}
 FFMPEG_ARCHIVE="$ROOT/archives/ffmpeg-$FFMPEG_VERSION.tar.xz"
 X264_ARCHIVE="$ROOT/archives/x264-$X264_COMMIT.tar.gz"
-[[ -f "$FFMPEG_ARCHIVE" ]] || curl -fL --retry 2 --silent --show-error "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" -o "$FFMPEG_ARCHIVE"
+# Debian's orig tarball is the same upstream release. ffmpeg.org is often unreachable from CI.
+if [[ ! -f "$FFMPEG_ARCHIVE" ]]; then
+  curl -fL --connect-timeout 20 --retry 1 --silent --show-error "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" -o "$FFMPEG_ARCHIVE" \
+    || { rm -f "$FFMPEG_ARCHIVE"; curl -fL --connect-timeout 20 --retry 2 --silent --show-error "https://deb.debian.org/debian/pool/main/f/ffmpeg/ffmpeg_${FFMPEG_VERSION}.orig.tar.xz" -o "$FFMPEG_ARCHIVE"; }
+fi
 if [[ ! -f "$X264_ARCHIVE" ]]; then
   FETCH_DIR=$(mktemp -d "$ROOT/x264-fetch.XXXXXX")
   git -C "$FETCH_DIR" init --quiet
