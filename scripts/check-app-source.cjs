@@ -59,6 +59,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
       if (name === './direct-connect') return require(path.join(nativeDir, 'direct-connect'));
+      if (name === './codec-rank') return require(path.join(nativeDir, 'codec-rank'));
       if (name === 'node:crypto') return { ...crypto, createHash(name, ...args) {
         assert.notEqual(name.toLowerCase(), 'sm3', 'must not depend on OpenSSL SM3');
         return crypto.createHash(name, ...args);
@@ -83,6 +84,7 @@ function loadFetch(axios) {
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
       if (name === './direct-connect') return require(path.join(nativeDir, 'direct-connect'));
+      if (name === './codec-rank') return require(path.join(nativeDir, 'codec-rank'));
       if (name === 'node:crypto') return crypto;
       throw new Error(`Unexpected dependency: ${name}`);
     },
@@ -147,6 +149,11 @@ const checks = [
     const choose = rows => parseModelVideo(JSON.stringify({ video_list: rows }));
     assert.equal(choose([{ main_url: mediaUrl('hevc'), video_meta: { codec_type: 'h265', definition: '1080p' } },
       { main_url: mediaUrl('avc'), video_meta: { codec_type: 'H264', definition: '720p' } }])[0], mediaUrl('avc'));
+    assert.equal(choose([{ main_url: mediaUrl('hevc'), video_meta: { codec_type: 'hevc', definition: '1080p' } },
+      { main_url: mediaUrl('avc1'), video_meta: { codec_type: 'avc1.64001f', definition: '720p' } }])[0], mediaUrl('avc1'));
+    assert.equal(choose([{ main_url: mediaUrl('family'), video_meta: { codec_type: 'h265_hvc1', definition: '720p' } },
+      { main_url: mediaUrl('vvc'), video_meta: { codec_type: 'bytevc2', definition: '1080p' } }])[0], mediaUrl('family'));
+    assert.equal(choose([{ main_url: mediaUrl('plain'), video_meta: { definition: '720p' } }])[0], mediaUrl('plain'));
     assert.equal(choose([{ main_url: 'not a URL', backup_url: mediaUrl('backup'), video_meta: { codec_type: 'h264' } }])[0], mediaUrl('backup'));
     assert.equal(choose([{ main_url: 'file:///private', backup_url: 'https://user:pass@example.com/video' }])[0], null);
   }],
@@ -370,6 +377,86 @@ const checks = [
       assert.equal(hostOf(videoCalls()[before]), hostOf(videoCalls()[before - 1]), 'the answering host is tried first');
       assert.equal(videoCalls().length - before, 1, 'a fresh device answers at once');
       assert.ok([...used.values()].every(count => count <= 2), 'no device is asked again after it was refused');
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
+  ['codec families accept parameter suffixes and keep unrelated families out', async () => {
+    const { codecRank, playbackCodec } = require(path.join(nativeDir, 'codec-rank'));
+    for (const name of ['h264', 'avc', 'avc1', 'AVC1.64001F', 'avc1.4d401f']) assert.equal(codecRank(name), 0, name);
+    for (const name of ['hevc', 'h265', 'h265_hvc1', 'hvc1', 'hev1', 'bytevc1', 'hvc1.1.6.L93.B0', 'hev1.1.6.L120.90']) assert.equal(codecRank(name), 1, name);
+    for (const name of ['', 'bytevc2', 'h266', 'vvc', 'av1', 'av01.0.05M.08', 'avc2']) assert.equal(codecRank(name), 2, name);
+    assert.equal(playbackCodec('avc1.64001f'), 'h264');
+    assert.equal(playbackCodec('h265_hvc1'), 'hevc');
+    assert.equal(playbackCodec('bytevc1'), 'hevc');
+    assert.equal(playbackCodec('bytevc2'), 'bytevc2');
+  }],
+  ['a model without a compatible codec tries one fresh device on the next host, then stops', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    device.resetPlaybackDevice();
+    const playable = mediaUrl('play');
+    const model = (codec, name, size) => ({ code: 0, data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: mediaUrl(name), codec_type: codec, quality_desc: size === 1080 ? '1080P' : '720P', vwidth: size || 0, vheight: size ? size * 16 / 9 : 0 },
+    ] }) } } });
+    const hostsOf = calls => calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).map(call => new URL(call.url).hostname);
+    const run = async (answers) => {
+      const calls = [];
+      let registered = 0;
+      const fetch = loadFetch(async config => {
+        calls.push(config);
+        if (String(config.url).includes('device_register')) {
+          registered += 1;
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: String(5000000000000000 + registered), install_id_str: String(6000000000000000 + registered), code: 0 }) };
+        }
+        const host = new URL(config.url).hostname;
+        const answer = answers[host] || answers.default;
+        return { status: 200, headers: {}, data: typeof answer === 'string' ? answer : JSON.stringify(answer) };
+      });
+      return { fetch, calls, hostsOf: () => hostsOf(calls), registered: () => registered };
+    };
+    try {
+      const moved = await run({
+        'api5-normal-sinfonlineb.fqnovel.com': model('bytevc2', 'vvc', 1080),
+        default: model('h265_hvc1', 'play', 720),
+      });
+      const movedResult = await moved.fetch('11');
+      assert.equal(movedResult.url, playable);
+      assert.equal(movedResult.codec, 'hevc');
+      assert.equal(moved.registered(), 2);
+      assert.deepEqual(moved.hostsOf(), ['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-lf.fqnovel.com']);
+      const family = await run({ default: model('avc1.64001f', 'avc', 720) });
+      const familyResult = await family.fetch('11');
+      assert.equal(familyResult.url, mediaUrl('avc'));
+      assert.equal(familyResult.codec, 'h264');
+      assert.equal(family.registered(), 1, 'a compatible family does not spend a second device');
+      assert.equal(family.hostsOf().length, 1);
+      const stopped = await run({ default: model('bytevc2', 'vvc', 1080) });
+      await assert.rejects(stopped.fetch('11'), error => error.code === 'NO_COMPATIBLE_CODEC' && /H\.264\/HEVC/.test(error.message));
+      assert.equal(stopped.registered(), 2);
+      assert.deepEqual(stopped.hostsOf(), ['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-lf.fqnovel.com']);
+      const missing = await run({ default: { code: 0, data: {} } });
+      await assert.rejects(missing.fetch('11'), error => error.code === 'MISSING_MODEL');
+      assert.equal(missing.registered(), 1, 'a missing episode does not take another device');
+      assert.equal(missing.hostsOf().length, 1);
+      const sized = await run({ default: model('h264', 'sd', 720) });
+      const sizedResult = await sized.fetch('11', { quality: '1080p' });
+      assert.equal(sizedResult.url, mediaUrl('sd'));
+      assert.equal(sizedResult.qualityLimited, true);
+      assert.match(sizedResult.notice, /720P/);
+      assert.equal(sized.registered(), 1, 'a measured lower stream stays on the first device');
+      const upgraded = await run({
+        'api5-normal-sinfonlineb.fqnovel.com': model('h264', 'unsized', 0),
+        default: model('h264', 'hd', 1080),
+      });
+      const upgradedResult = await upgraded.fetch('11', { quality: '1080p' });
+      assert.equal(upgradedResult.url, mediaUrl('hd'));
+      assert.equal(upgradedResult.quality, '1080p');
+      assert.equal(upgraded.registered(), 2);
+      const undowngraded = await run({ default: model('h264', 'unsized', 0) });
+      await assert.rejects(undowngraded.fetch('11', { quality: '1080p' }), error => error.code === 'NO_COMPATIBLE_CODEC' && /未降级/.test(error.message));
+      assert.equal(undowngraded.registered(), 2);
+      assert.equal(undowngraded.hostsOf().length, 2, 'a second host without a measured size stops the lookup');
     } finally {
       device.resetPlaybackDevice();
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});

@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('node:url');
 const { normalizeDownloadQuality } = require('./download-quality');
+const { codecRank } = require('./codec-rank');
 const { isPublicMediaUrl, webMediaRequestOptions } = require('./web-media-guard');
 const { readPublicScore } = require('./public-score');
 const { takeWebEpisodes } = require('./episode-prelude');
@@ -653,11 +654,6 @@ function parseModelVideo(vm) {
     return [null, null, null];
   }
   const vl = vmj.video_list || [];
-  const rank = (codec) => {
-    if (['h264', 'avc', 'avc1'].includes(codec)) return 0;
-    if (['h265', 'h265_hvc1', 'hevc', 'hvc1', 'hev1', 'bytevc1'].includes(codec)) return 1;
-    return 2;
-  };
   // 比较两条流：返回 >0 表示 a 更适合播放
   const cmp = (a, b) => {
     if (a.codecRank !== b.codecRank) return b.codecRank - a.codecRank; // rank 越小越好
@@ -681,7 +677,7 @@ function parseModelVideo(vm) {
     if (!url) continue;
     const codec = String(v.video_meta?.codec_type || '').toLowerCase();
     const ei = v.encrypt_info || {};
-    const s = { ...streamScore(v), codecRank: rank(codec) };
+    const s = { ...streamScore(v), codecRank: codecRank(codec) };
     if (!bestScore || cmp(s, bestScore) > 0) {
       bestScore = s;
       best = [url, ei.spade_a || null, codec];
