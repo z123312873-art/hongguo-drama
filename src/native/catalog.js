@@ -21,10 +21,17 @@ function ratingNumber(value) {
 }
 
 const NEW_STATUS = /^新[剧劇]$/;
+const PREMIERE_STATUS = /^(?:红果首发|紅果首發)$/;
 
 // The ranking pages expose the site's own status chips (statusTags / status-tag items).
+function statusMatch(labels, pattern) {
+  return Array.isArray(labels) && labels.some(label => typeof label === 'string' && pattern.test(label.replace(/\s+/g, '')));
+}
 function isNewStatus(labels) {
-  return Array.isArray(labels) && labels.some(label => typeof label === 'string' && NEW_STATUS.test(label.replace(/\s+/g, '')));
+  return statusMatch(labels, NEW_STATUS);
+}
+function isPremiereStatus(labels) {
+  return statusMatch(labels, PREMIERE_STATUS);
 }
 
 function publicMetadata(item) {
@@ -137,6 +144,7 @@ function parseRanking(html, category, page, sourceUrl) {
       rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
       is_new: isNewStatus(item.statusTags),
+      is_premiere: isPremiereStatus(item.statusTags),
       introduction: cleanIntroduction(item.description || item.intro || item.series_intro || item.abstract),
       ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${id}` };

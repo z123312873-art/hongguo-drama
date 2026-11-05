@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   listNewReleases, searchNewReleases, searchNewReleasesDetailed, matchNewReleases, newReleaseFromRow, collectRows,
-  clearNewReleaseCache, DEFAULT_PAGES, MAX_RESULTS,
+  clearNewReleaseCache, premiereIds, premiereReady, DEFAULT_PAGES, MAX_RESULTS,
 } = require('./hongguo-app-new');
 
 const row = (id, title, extra = {}) => ({
@@ -16,6 +16,34 @@ const row = (id, title, extra = {}) => ({
 const page = (rows, more = false, next = rows.length, session = 'session-1') => ({
   code: 0,
   data: { video_data: rows, has_more: more, next_offset: next, session_id: session },
+});
+
+test('红果首发 is a poster flag and is not kept as a genre tag', () => {
+  const item = newReleaseFromRow(row('9', '首发剧', { tag_info: { text: '红果首发' }, sub_title_list: [{ content: '都市' }] }));
+  assert.equal(item.is_premiere, true);
+  assert.equal(item.released_today, undefined);
+  assert.deepEqual(item.tags, ['都市']);
+  const traditional = newReleaseFromRow(row('8', '繁体首发', { tag_info: { text: '紅果首發' }, sub_title_list: [] }));
+  assert.equal(traditional.is_premiere, true);
+  assert.deepEqual(traditional.tags, []);
+  assert.equal(newReleaseFromRow(row('7', '普通新剧')).is_premiere, false);
+});
+
+test('premiere ids are remembered from a finished app list', async () => {
+  clearNewReleaseCache();
+  assert.equal(premiereReady(), false);
+  const request = async (signed) => {
+    const body = JSON.parse(signed.body.toString());
+    return body.select_items.genre[0] === 'short_play'
+      ? page([row('9', '首发剧', { tag_info: { text: '红果首发' } })], false)
+      : page([row('3', 'AI 新剧')], false);
+  };
+  await listNewReleases({ pages: 1, request });
+  assert.equal(premiereReady(), true);
+  assert.deepEqual([...premiereIds()], ['9']);
+  clearNewReleaseCache();
+  assert.equal(premiereReady(), false);
+  assert.deepEqual([...premiereIds()], []);
 });
 
 test('new-release rows keep today flag, tags and a compatible cover', () => {
