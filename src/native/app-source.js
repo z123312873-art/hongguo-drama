@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const { takePlaybackDevice, armPlaybackPool } = require('./playback-device');
 const sm3 = require('./sm3');
 const { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality } = require('./download-quality');
+const { codecRank, playbackCodec } = require('./codec-rank');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
 const PROCESS_STARTED = Date.now();
@@ -371,25 +372,7 @@ async function fetchAppPlayUrl(vid, options = {}) {
         }
         throw lastError;
     };
-    let identity = null, registrationReason = '';
-    try { identity = await takePlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
-    const firstHost = preferredHost;
-    let response, answeredBy = firstHost;
-    try {
-        response = await readModel(identity, VIDEO_HOSTS[firstHost]);
-    } catch (error) {
-        // One more device, on the next edge host, then both request styles. A second empty answer stops.
-        if (error?.code !== 'EMPTY_RESPONSE') throw error;
-        let fresh = null;
-        try { fresh = await takePlaybackDevice(requestJson, { again: true }); } catch (failure) { fresh = null; registrationReason = failure?.reason || registrationReason; }
-        if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) {
-            if (!fresh && registrationReason) error.registrationReason = registrationReason;
-            throw error;
-        }
-        answeredBy = (firstHost + 1) % VIDEO_HOSTS.length;
-        response = await readModel(fresh, VIDEO_HOSTS[answeredBy]);
-    }
-    preferredHost = answeredBy;
+    const variantsFrom = async (response) => {
     if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
     const entry = response.data?.[vid];
     const model = typeof entry?.video_model === 'string' ? jsonBody(entry.video_model) : entry?.video_model;
@@ -408,14 +391,14 @@ async function fetchAppPlayUrl(vid, options = {}) {
     if (!info) throw Object.assign(new Error('App 接口未返回本集片源模型'), { code: 'MISSING_MODEL' });
     const rows = Object.values(info?.video_list || {}).filter(item => item && (item.main_url || item.backup_url || Array.isArray(item.backup_url_list))).map(item => {
         const codec = str(item.codec_type || item.video_meta?.codec_type).toLowerCase();
-        const codecRank = ['h264', 'avc', 'avc1'].includes(codec) ? 0 : ['hevc', 'h265', 'hvc1', 'hev1', 'bytevc1'].includes(codec) ? 1 : 2;
+        const rank = codecRank(codec);
         const quality = str(item.quality_desc || item.definition || item.height || item.vheight || item.video_meta?.definition);
         const meta = item.video_meta || {};
         const [width, height] = [[item.vwidth, item.vheight], [item.width, item.height], [meta.vwidth, meta.vheight], [meta.width, meta.height]]
             .map(pair => pair.map(Number)).find(pair => pair.every(value => Number.isFinite(value) && value > 0)) || [0, 0];
         const pixels = width && height ? Math.min(width, height) : Number(quality.match(/\d+/)?.[0] || 0);
         const bitrate = Number(item.real_bitrate || item.bitrate || meta.real_bitrate || meta.bitrate) || 0;
-        return { item, codec, codecRank, quality, pixels, width, height, bitrate };
+        return { item, codec, codecRank: rank, quality, pixels, width, height, bitrate };
     }).filter(row => row.codecRank < 2);
     const matched = rows.filter(row => meetsDownloadQuality(row, requestedQuality));
     // Playback keeps a measured picture when the label overstates the encode.
@@ -433,9 +416,9 @@ async function fetchAppPlayUrl(vid, options = {}) {
         if (requestedQuality === 'auto') return a.codecRank - b.codecRank || b.pixels - a.pixels || b.bitrate - a.bitrate;
         return Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank || b.bitrate - a.bitrate;
     });
-    if (!selectedRows.length) throw new Error(requestedQuality === 'auto' || allowLowerQuality
+    if (!selectedRows.length) throw Object.assign(new Error(requestedQuality === 'auto' || allowLowerQuality
         ? '本集暂未提供兼容的 H.264/HEVC 片源'
-        : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`);
+        : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`), { code: 'NO_COMPATIBLE_CODEC' });
     let lastError;
     const variants = [];
     const seen = new Set();
@@ -451,16 +434,16 @@ async function fetchAppPlayUrl(vid, options = {}) {
                         : cleanUrl(candidate);
                     const url = checkedUrl(media, ['qznovelvod.com', 'fqnovelvod.com', 'douyinvod.com']);
                     const contentKey = key ? key.toString('hex') : null;
-                    const identity = `${url}:${contentKey || ''}`;
-                    if (seen.has(identity)) continue;
-                    seen.add(identity);
+                    const variantId = `${url}:${contentKey || ''}`;
+                    if (seen.has(variantId)) continue;
+                    seen.add(variantId);
                     const shortSide = Math.min(selected.width, selected.height);
                     const measured = selected.width && selected.height ? `${shortSide}p` : '';
                     const deliveredQuality = requestedQuality === 'auto' ? selected.quality
                         : allowLowerQuality ? (measured || measuredDownloadQuality(selected.width, selected.height))
                         : limited ? measuredDownloadQuality(selected.width, selected.height) : requestedQuality;
                     const downgraded = (limited || allowLowerQuality) && requestedQuality !== 'auto' && shortSide > 0 && shortSide < Number.parseInt(requestedQuality, 10);
-                    variants.push({ url, contentKey, codec: selected.codec === 'bytevc1' ? 'hevc' : selected.codec, source: 'app', vid,
+                    variants.push({ url, contentKey, codec: playbackCodec(selected.codec), source: 'app', vid,
                         userAgent: VIDEO_UA, quality: deliveredQuality,
                         ...(downgraded ? { qualityLimited: true, notice: `本集没有可确认的 ${requestedQuality.toUpperCase()} 片源，实际为 ${shortSide}P（${selected.width}×${selected.height}），已改用该清晰度` } : {}),
                         ...(requestedQuality === 'auto' ? {} : { width: selected.width, height: selected.height }) });
@@ -471,6 +454,29 @@ async function fetchAppPlayUrl(vid, options = {}) {
     if (variants.length) return { ...variants[0], variants };
     throw lastError?.code === 'SECURITY_BLOCKED' ? lastError
         : Object.assign(new Error('本集片源地址或密钥无法解析'), { code: 'INVALID_RESPONSE' });
+    };
+    let identity = null, registrationReason = '';
+    try { identity = await takePlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
+    const firstHost = preferredHost;
+    let result, answeredBy = firstHost;
+    try {
+        result = await variantsFrom(await readModel(identity, VIDEO_HOSTS[firstHost]));
+    } catch (error) {
+        // An empty body, or a model whose streams are all outside H.264/HEVC, gets one fresh device
+        // on the next edge host. A wrong episode, a rejected request, or a key that will not parse stays put.
+        const retryable = error?.code === 'EMPTY_RESPONSE' || error?.code === 'NO_COMPATIBLE_CODEC';
+        if (!retryable) throw error;
+        let fresh = null;
+        try { fresh = await takePlaybackDevice(requestJson, { again: true }); } catch (failure) { fresh = null; registrationReason = failure?.reason || registrationReason; }
+        if (!fresh || (identity && fresh.device_id === identity.device_id && fresh.iid === identity.iid)) {
+            if (!fresh && registrationReason) error.registrationReason = registrationReason;
+            throw error;
+        }
+        answeredBy = (firstHost + 1) % VIDEO_HOSTS.length;
+        result = await variantsFrom(await readModel(fresh, VIDEO_HOSTS[answeredBy]));
+    }
+    preferredHost = answeredBy;
+    return result;
 }
 
 // Keeps unused playback devices ready so the next lookup does not wait for a registration.

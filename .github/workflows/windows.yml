@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.4-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -183,6 +183,66 @@ jobs:
             fi
           done
           gh release list --limit 20
+  publish-release-4-4-pre:
+    needs: windows
+    if: startsWith(github.ref, 'refs/heads/windows/4.4-pre-')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Publish the 4.4 pre-release without replacing the formal latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=installer-4.4-traditional-pre
+          setup="release/hongguo-downloader-4.4-win-x64-setup.exe"
+          blockmap="$setup.blockmap"
+          latest="release/latest.yml"
+          portable="release/hongguo-downloader-4.4-win-x64.zip"
+          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
+          grep -Fq "hongguo-downloader-4.4-win-x64-setup.exe" "$latest"
+          grep -Eq '^version: 4\.4\.0$' "$latest"
+          setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
+          setup_size=$(stat -c %s "$setup")
+          portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
+          notes=$(cat <<EOF
+          摘要：
+          - 在線播放遇到不相容編碼時，會再換一台裝置與下一個節點。
+          - H.264／HEVC 的常見寫法都能播放，較新的編碼仍會略過。
+          - 指定清晰度時，另一個節點有符合的尺寸就用它，不會悄悄降級。
+          - 這是預發佈。已安裝的正式版不會自動升級。
+
+          4.4 預發佈，未簽章。4.3 仍是正式版。下載與安裝都要自己確認。
+
+          檔名：hongguo-downloader-4.4-win-x64-setup.exe
+          SHA256：$setup_sha
+          大小：$setup_size
+          便攜 ZIP：hongguo-downloader-4.4-win-x64.zip
+          便攜 ZIP SHA256：$portable_sha
+          對應提交：$GITHUB_SHA
+          EOF
+          )
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease=true --latest=false --title "4.4 預發佈" --notes "$notes"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --title "4.4 預發佈" --notes "$notes"
+          fi
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
+          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
+          gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
+            if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
+              gh release delete-asset "$tag" "$name" --yes
+            fi
+          done
+          gh release view "$tag" --json isPrerelease,isDraft --jq '{isPrerelease,isDraft}'
+          test "$(gh release view "$tag" --json isPrerelease,isDraft --jq '(.isPrerelease == true) and (.isDraft == false)')" = "true"
+          test "$(gh release view --json tagName --jq .tagName)" != "$tag"
   publish-release:
     needs: windows
     if: startsWith(github.ref, 'refs/heads/windows/4.1-release-')

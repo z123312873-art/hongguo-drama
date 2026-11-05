@@ -30,6 +30,8 @@
 
 也可使用 [4.3 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.3/hongguo-downloader-4.3-win-x64.zip)。
 
+[4.4 預發佈（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.4-traditional-pre) 修正在線播放連線不穩，不會取代 4.3 正式版，已安裝的程式也不會自動升級到預發佈。說明見 [4.4 更新說明](docs/release-4.4.md)。
+
 - 依精靈安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
 - 安裝檔未簽章。請從 [4.3 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.3) 下載，並對照該頁的 SHA256。舊版仍可在 [4.1 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.1)、[4.0 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.0) 取得。
 - 已安裝 AdGuard 或防毒軟體時，重裝後若在線播放連不上，請把紅果短劇加入它們的例外，或暫時關閉 HTTPS 過濾再重新播放，不需要重開 App。
@@ -40,6 +42,8 @@
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 
 ## 這個版本
+
+4.4 預發佈修正在線播放：某一節點只給不相容編碼或空回應時，會再換一台已註冊的裝置與下一個節點；H.264／HEVC 的常見寫法都能播。4.3 仍是正式版。詳見 [4.4 更新說明](docs/release-4.4.md)。
 
 4.3 正式版重點：新增「漫畫」分類，可挑漫畫、選集數閱讀，最多 300 部，圖片會提前載入、往下滑幾乎不用等；按「刷新片單」不會換掉畫面上的漫畫；各分類首頁顯示更多海報且數量一致，西飯、河馬首頁至少 40 部，剛開啟時海報出現得更快；在線播放更快更穩，切換集數幾乎不用等。詳見 [4.3 更新說明](docs/release-4.3.md)。
 
