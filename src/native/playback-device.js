@@ -8,7 +8,7 @@ const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 
 const REGISTER_QUERY = 'tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
-const REGISTER_HOSTS = ['log5-applog-lf.fqnovel.com', 'log5-applog-hl.fqnovel.com', 'log0-applog-lf.fqnovel.com'];
+const REGISTER_HOSTS = ['log5-applog-lf.fqnovel.com', 'log5-applog-hl.fqnovel.com', 'log0-applog-lf.fqnovel.com', 'log3-applog.fqnovel.com', 'log.snssdk.com'];
 const registerUrls = hosts => hosts.map(host => `https://${host}/service/2/device_register/?${REGISTER_QUERY}`);
 const REGISTER_URLS = registerUrls(REGISTER_HOSTS);
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');

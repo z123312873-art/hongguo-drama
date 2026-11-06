@@ -293,12 +293,12 @@ const checks = [
     assert.deepEqual(Array.from(result.variants, v => v.url), ['main', 'backup', 'extra', 'hevc', 'list'].map(media));
     for (const candidate of result.variants) {
       assert.equal(candidate.source, 'app'); assert.equal(candidate.vid, '11');
-      assert.equal(candidate.userAgent, f.calls[0].headers['User-Agent']);
+      assert.equal(candidate.userAgent, f.calls.find(call => call.method === 'POST').headers['User-Agent']);
       assert.equal(candidate.referer, undefined, 'App media must not start with the rejected website Referer');
       assert.equal(candidate.variants, undefined);
     }
     assert.equal(result.variants[2].contentKey, key1); assert.equal(result.variants[3].contentKey, key2);
-    assert.equal(result.variants[4].contentKey, null); assert.equal(f.calls.length, 2, 'no media preflight');
+    assert.equal(result.variants[4].contentKey, null); assert.equal(f.calls.length, 5, 'catalog probes, one model request and its media; no media preflight');
   }],
   ['Strict quality alternatives never include smaller or unknown-size streams', async () => {
     const f = appFixture({ low: { main_url: media('low'), codec_type: 'h264', width: 720, height: 1280 },

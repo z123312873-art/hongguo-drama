@@ -106,7 +106,7 @@ test('both genres page through the App list, cache the full result and stay quer
     }
     return page([row('3', 'AI 新剧')], false, 0, 's2');
   };
-  const first = await listNewReleases({ pages: 2, request });
+  const first = await listNewReleases({ pages: DEFAULT_PAGES, request });
   assert.equal(first.cached, false);
   assert.equal(first.partial, false);
   assert.deepEqual(first.items.map(item => item.series_id).sort(), ['1', '2', '3']);
@@ -114,7 +114,7 @@ test('both genres page through the App list, cache the full result and stay quer
   assert.ok(calls.every(call => call.sort[0] === 'online_time' && call.days[0] === 'days_7'));
   assert.ok(calls.some(call => call.genre === 'short_play' && call.offset === 50 && call.session === 's1'));
 
-  const cached = await listNewReleases({ pages: 2, request: async () => { throw new Error('must not refetch'); } });
+  const cached = await listNewReleases({ pages: DEFAULT_PAGES, request: async () => { throw new Error('must not refetch'); } });
   assert.equal(cached.cached, true);
   assert.equal(cached.items.length, 3);
 
@@ -179,7 +179,7 @@ test('default search walks two pages per genre and finds a second-page today rel
       : page([row('7200000000000000002', 'AI 第二页')], false, 0, 'ai-session');
   };
   const matched = await searchNewReleases('目标今日新剧', { request });
-  assert.equal(DEFAULT_PAGES, 2);
+  assert.equal(DEFAULT_PAGES, 4);
   assert.equal(MAX_RESULTS, 20);
   assert.deepEqual(matched.map(item => item.series_id), ['7100000000000000002']);
   for (const genre of ['short_play', 'ai_series']) {

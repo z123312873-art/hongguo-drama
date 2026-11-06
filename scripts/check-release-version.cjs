@@ -3,7 +3,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { availableRelease } = require('../src/native/app-update');
 
-const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4'];
+const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5'];
 let checks = 0;
 for (let current = 0; current < ordered.length; current++) {
   for (let next = 0; next < ordered.length; next++) {
@@ -56,6 +56,10 @@ assert.equal(availableRelease({ tag_name: 'v4.4' }, '4.3.0').version, '4.4');
 assert.equal(availableRelease({ tag_name: 'v4.4' }, '4.4.0'), null);
 assert.equal(availableRelease({ tag_name: 'v4.3' }, '4.4.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.4-traditional-pre', prerelease: true }, '4.3.0'), null);
+assert.equal(availableRelease({ tag_name: 'v4.5' }, '4.4.0').version, '4.5');
+assert.equal(availableRelease({ tag_name: 'v4.5' }, '4.5.0'), null);
+assert.equal(availableRelease({ tag_name: 'v4.4' }, '4.5.0'), null);
+assert.equal(availableRelease({ tag_name: 'installer-4.5-traditional-pre', prerelease: true }, '4.4.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.1-traditional-pre', prerelease: true }, '4.0.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-4.0-traditional-pre', prerelease: true }, '3.4.0'), null);
 assert.equal(availableRelease({ tag_name: 'installer-3.4-traditional-pre', prerelease: true }, '3.3.0'), null);

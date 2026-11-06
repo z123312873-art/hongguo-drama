@@ -373,12 +373,21 @@ async function mount(file, api, props = {}) {
       const row = n => n?.props?.className === 'browse-cover-top' ? n : (n?.children || []).map(row).find(Boolean);
       const parts = card => (row(card)?.children || []).filter(child => child && typeof child === 'object').map(child => child.props.className);
       const labels = card => (row(card)?.children || []).filter(child => child?.props?.className === 'browse-new-badge').map(child => child.children.join(''));
-      assert.deepEqual(parts(cards[0]), ['browse-rank-badge', 'browse-new-badge', 'browse-new-badge', 'browse-score'], 'both chips sit between rank and score');
-      assert.deepEqual(labels(cards[0]), ['新剧', '红果首发']);
+      assert.deepEqual(parts(cards[0]), ['browse-rank-badge', 'browse-new-badge', 'browse-score'], 'a card with both flags keeps only 红果首发');
+      assert.deepEqual(labels(cards[0]), ['红果首发']);
       assert.deepEqual(parts(cards[1]), ['browse-new-badge', 'browse-score'], 'premiere alone still opens the poster row');
       assert.deepEqual(labels(cards[1]), ['红果首发']);
       assert.deepEqual(parts(cards[2]), ['browse-rank-badge', 'browse-score'], 'a string flag is not a premiere');
       assert.deepEqual(labels(cards[3]), ['新剧']);
+      const groups = ui.nodes().filter(n => n.props.role === 'group' && (n.props['aria-label'] === '热播榜单' || n.props['aria-label'] === '短剧分类'));
+      assert.deepEqual(groups.map(n => n.props['aria-label']), ['热播榜单', '短剧分类']);
+      assert.equal(ui.button('打开来源页面'), undefined);
+      assert.ok(ui.button('抢先上线日'));
+      ui.button('抢先上线日').props.onClick(); ui.render(); await ui.flush();
+      assert.equal(ui.button('真人剧'), undefined, 'the upcoming wall does not mix with the category rows');
+      assert.ok(ui.text().includes('即将上线') || ui.text().includes('上线日'));
+      ui.button('抢先上线日').props.onClick(); ui.render(); await ui.flush();
+      assert.ok(ui.button('真人剧'));
     } finally { ui.unmount(); }
   });
   await test('browse keeps posters when switching categories and does not refetch a fresh list', async () => {
@@ -728,8 +737,8 @@ async function mount(file, api, props = {}) {
   await test('xifan browse source switch rejects late lists and opens the current source URL', async () => {
     const old = deferred(), opened = [], pages = []; let calls = 0;
     const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: p => p.source === 'xifan' ? (pages.push(p.page), Promise.resolve({ success: true, results: [{ series_id: 'X', series_title: '西饭片单' }], genres: [{ slug: '68', label: '都市' }], total: 0, totalPages: 0, hasMore: p.page === 1 })) : ++calls === 1 ? Promise.resolve({ success: true, results: [{ series_id: 'H', series_title: '红果片单' }], sourceUrl: 'https://www.hongguoduanju.com/category/real-drama' }) : old.promise, searchWindowShow: async (...args) => opened.push(args) });
-    await ui.flush(); await ui.button('打开来源页面').props.onClick();
-    assert.equal(opened[0][1], 'https://www.hongguoduanju.com/category/real-drama', 'the opened page is the list that finished loading');
+    await ui.flush();
+    assert.equal(ui.button('打开来源页面'), undefined, 'the discover page no longer opens the source site');
     ui.button('刷新片单').props.onClick(); ui.render();
     const source = ui.find(n => n.props['aria-label'] === '短剧来源'); assert.ok(source, 'source selector missing');
     source.props.onChange({ target: { value: 'xifan' } }); await ui.flush();

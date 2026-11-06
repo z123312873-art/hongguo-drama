@@ -8,8 +8,9 @@ const CATEGORY_API = '/reading/distribution/category/landpage/v/';
 const REQUEST_TIMEOUT_MS = 8000;
 const CACHE_TTL_MS = 60 * 1000;
 const PAGE_LIMIT = 50;
-// 默认翻两页（真人 + AI 各最多 100 条），降低繁忙日当天新剧落在首屏之外的概率。
-const DEFAULT_PAGES = 2;
+// 默认翻四页，让首发海报也能看到第三页之后才出现的条目。
+const DEFAULT_PAGES = 4;
+const CATEGORY_HOSTS = Object.freeze(['api5-normal-hl.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-sinfonlineb.fqnovel.com']);
 const MAX_RESULTS = 20;
 const PREMIERE_LABEL = /^(?:红果首发|紅果首發)$/;
 // 真人剧与 AI 剧使用同一分类接口、不同筛选值；两者都能出现在搜索结果里。
@@ -125,8 +126,17 @@ async function fetchGenre(config, { pages, deadline, request }) {
   let offset = 0, sessionId = '';
   for (let page = 1; page <= pages; page++) {
     if (Date.now() >= deadline) break;
-    const signed = signedMetadataRequest(CATEGORY_API, {}, pageBody(config, offset, sessionId));
-    const payload = await request(signed, deadline);
+    let payload;
+    let lastError;
+    for (const host of CATEGORY_HOSTS) {
+      try {
+        const signed = signedMetadataRequest(CATEGORY_API, {}, pageBody(config, offset, sessionId), { host });
+        payload = await request(signed, deadline);
+        lastError = null;
+        break;
+      } catch (error) { lastError = error; }
+    }
+    if (lastError) throw lastError;
     if (!payload || typeof payload !== 'object') throw appError('App 上新返回空响应', 'APP_EMPTY');
     if (Number(payload.code ?? 0) !== 0) throw appError('App 上新服务暂不可用', 'APP_BUSINESS');
     const data = payload.data;

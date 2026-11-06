@@ -135,6 +135,8 @@ function parseSearchResponse(payload) {
 }
 
 function classifyRequestError(error) {
+  const hint = require('./cert-hint').certificateMessage(error);
+  if (hint) return new HongguoSearchError(hint, 'upstream', { cause: error });
   const status = Number(error?.response?.status);
   if (error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT' || /timeout/i.test(String(error?.message || ''))) {
     return new HongguoSearchError('搜索超时，请稍后重试', 'timeout', { cause: error });

@@ -1,14 +1,14 @@
 const STORAGE_KEY = 'hongguo-experience-preview:script';
 const SCRIPTS = ['hans', 'hant'];
-let current = 'hans';
+let current = 'hant';
 const listeners = new Set();
 
 function readStored() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return SCRIPTS.includes(stored) ? stored : 'hans';
+    return SCRIPTS.includes(stored) ? stored : 'hant';
   } catch {
-    return 'hans';
+    return 'hant';
   }
 }
 

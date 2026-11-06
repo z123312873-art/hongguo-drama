@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { Readable } = require('node:stream');
-const { readPublicScore } = require('../src/native/public-score');
+const { readPublicScore, readPublicHeat } = require('../src/native/public-score');
 const { rememberWebEpisodes, takeWebEpisodes, clearWebEpisodes } = require('../src/native/episode-prelude');
 
 const nativeDir = path.join(__dirname, '../src/native');
@@ -38,6 +38,8 @@ function metering(text, size = 4096) {
   await check('public score reads the hero number and ignores heat', () => {
     assert.equal(readPublicScore('评分<!-- -->9.1</span>'), 9.1);
     assert.equal(readPublicScore('"hot_score_data":{"score":60634645,"text":"6063万热度"}'), null);
+    assert.equal(readPublicHeat('"hot_score_data":{"score":60634645,"text":"6063万热度"}'), '6063万热度');
+    assert.equal(readPublicHeat('8339萬熱度'), '8339萬熱度');
     assert.equal(readPublicScore('热度6063万评分<!-- -->8.6</span>"hot_score_data":{"score":1}'), 8.6);
     assert.equal(readPublicScore('评分2024年"seriesSocialInfo":{"rating":7.4,"series_like_count":"1"}'), 7.4);
     assert.equal(readPublicScore('"seriesSocialInfo":{"rating":0}'), null);

@@ -3,7 +3,7 @@ import useDialogKeyboard from './useDialogKeyboard';
 import './Browse.css';
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
-import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search, Heart } from './icons';
+import { Film, RefreshCw, Download, Play, Check, X, Search, Heart } from './icons';
 import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseTags } from '../catalogTags.mjs';
 import { applyPublicRatings } from '../publicRatings.mjs';
@@ -40,11 +40,14 @@ function readSnapshot(source, category, genre, page) {
 
 const SCORE_MEMORY_MS = 6 * 60 * 60 * 1000;
 
-function needsPublicScore(results, ratings, checkedAt, id, now = Date.now()) {
+function needsPublicScore(results, ratings, heats, checkedAt, id, now = Date.now()) {
   const item = results.find(entry => String(entry?.series_id) === id);
-  if (item?.rating != null) return false;
+  const hasScore = item?.rating != null;
+  const hasHeat = Boolean(item?.heat || heats?.[id]);
+  if (hasScore && hasHeat) return false;
   const seen = checkedAt?.get(id) || 0;
-  return !seen || now - seen >= SCORE_MEMORY_MS;
+  if (seen && now - seen < SCORE_MEMORY_MS) return false;
+  return true;
 }
 
 function writeSnapshot(source, category, genre, page, entry) {
@@ -98,7 +101,14 @@ function Browse({ onNavigate, active = true }) {
   const [genreCatalog, setGenreCatalog] = useState({});
   const [library, setLibrary] = useState(readLocalLibrary);
   const [ratings, setRatings] = useState({});
+  const [heats, setHeats] = useState({});
+  const [upcoming, setUpcoming] = useState(false);
+  const [upcomingItems, setUpcomingItems] = useState([]);
+  const [upcomingError, setUpcomingError] = useState('');
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
   const ratingRequest = useRef(0);
+  const heatsRef = useRef({});
+  const upcomingRequest = useRef(0);
   const ratingsRef = useRef({});
   const scoreCheckedAt = useRef(new Map());
   const [page, setPage] = useState(1);
@@ -371,10 +381,10 @@ function Browse({ onNavigate, active = true }) {
 
   ratingsRef.current = ratings;
   useEffect(() => {
-    if (source !== 'hongguo' || !window.electronAPI?.getPublicRatings) return undefined;
+    if (source !== 'hongguo' || upcoming || !window.electronAPI?.getPublicRatings) return undefined;
     const pendingIds = () => results
       .map(item => String(item?.series_id || ''))
-      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, scoreCheckedAt.current, id));
+      .filter(id => /^\d{6,30}$/.test(id) && needsPublicScore(results, ratingsRef.current, heatsRef.current, scoreCheckedAt.current, id));
     if (!pendingIds().length) return undefined;
     const request = ++ratingRequest.current;
     let cancelled = false;
@@ -390,6 +400,10 @@ function Browse({ onNavigate, active = true }) {
           const numeric = applyPublicRatings(scoreCheckedAt.current, response, ids.slice(index, index + 8));
           ratingsRef.current = { ...ratingsRef.current, ...numeric };
           setRatings(ratingsRef.current);
+          if (response.heats && typeof response.heats === 'object' && !Array.isArray(response.heats)) {
+            heatsRef.current = { ...heatsRef.current, ...response.heats };
+            setHeats(heatsRef.current);
+          }
         } catch { /* The next group still runs. A miss is retried below. */ }
       }
       if (cancelled || request !== ratingRequest.current || attempt >= 2 || !pendingIds().length) return;
@@ -397,7 +411,7 @@ function Browse({ onNavigate, active = true }) {
     };
     pull(0);
     return () => { cancelled = true; clearTimeout(retryTimer); };
-  }, [source, results]);
+  }, [source, results, upcoming]);
 
   const comicView = source === 'hongguo' && category === 'comic';
 
@@ -635,14 +649,26 @@ function Browse({ onNavigate, active = true }) {
     }
   };
 
-  const showBrowser = async () => {
-    if (source !== 'hongguo' || !sourceUrl) return;
-    try {
-      const res = await window.electronAPI.searchWindowShow(true, sourceUrl);
-      if (res?.success === false) throw new Error(res.error || '来源页面打开失败');
-      showToast('已打开当前来源页面');
-    } catch (e) { showToast(e.message || '来源页面打开失败', 'error'); }
-  };
+  useEffect(() => {
+    if (!upcoming || source !== 'hongguo') return undefined;
+    const request = ++upcomingRequest.current;
+    if (typeof window.electronAPI?.browseUpcoming !== 'function') {
+      setUpcomingItems([]);
+      setUpcomingError('目前没有写明上线日的短剧');
+      setUpcomingLoading(false);
+      return undefined;
+    }
+    setUpcomingItems([]);
+    setUpcomingLoading(true);
+    setUpcomingError('');
+    const stop = window.electronAPI.browseUpcoming((payload) => {
+      if (request !== upcomingRequest.current) return;
+      if (Array.isArray(payload?.items)) setUpcomingItems(payload.items);
+      if (payload?.error) setUpcomingError(String(payload.error));
+      if (payload?.done) setUpcomingLoading(false);
+    });
+    return () => { upcomingRequest.current += 1; if (typeof stop === 'function') stop(); };
+  }, [upcoming, source]);
 
   useDialogKeyboard(active && (!!detail || detailLoading), closeDetail, '.browse-drawer');
 
@@ -653,6 +679,7 @@ function Browse({ onNavigate, active = true }) {
   const clientTagFilter = source === 'hongguo' && (tagLabels.length > 1 || (tagLabels.length === 1 && !serverSlug));
   const completionResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
   const visibleResults = clientTagFilter ? completionResults.filter(item => posterMatchesTags(item.tags, tagLabels)) : completionResults;
+  const wall = upcoming && source === 'hongguo' ? upcomingItems : visibleResults;
   const favoriteIds = new Set((library.items || []).filter(item => item.favorite).map(item => item.id));
   const toggleFavorite = (event, item) => {
     event.preventDefault();
@@ -687,21 +714,18 @@ function Browse({ onNavigate, active = true }) {
       <div className="browse-header">
         <div className="browse-title">
           <div><h2>发现短剧</h2><p className="page-description">挑一部喜欢的，让故事继续。</p></div>
+          {source === 'hongguo' && <button type="button" className={`btn browse-upcoming ${upcoming ? 'btn-outline' : 'btn-primary'}`} aria-pressed={upcoming} onClick={() => setUpcoming(value => !value)}>抢先上线日</button>}
         </div>
         <div className="browse-header-right">
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
           <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />搜索短剧</button>
-          <button className="btn btn-outline" disabled={loading || sourcesLoading} onClick={() => (comicView ? setComicReload(value => value + 1) : loadList(category, genre, page, true))}><RefreshCw size={15} />刷新片单</button>
-          {meta.total > 0 && <span className="browse-stat">共 {meta.total} 部</span>}
-          {source === 'hongguo' && sourceUrl && <button className="btn btn-outline" onClick={showBrowser}>
-            <ExternalLink size={15} />
-            打开来源页面
-          </button>}
+          <button className="btn btn-outline" disabled={loading || sourcesLoading || upcoming} onClick={() => (comicView ? setComicReload(value => value + 1) : loadList(category, genre, page, true))}><RefreshCw size={15} />刷新片单</button>
+          {!upcoming && meta.total > 0 && <span className="browse-stat">共 {meta.total} 部</span>}
         </div>
       </div>
 
       {/* 分类 tab */}
-      {source === 'hongguo' && [false, true].map(ranking => {
+      {source === 'hongguo' && !upcoming && [true, false].map(ranking => {
         const group = (categories.length ? categories : [{ slug: 'real-drama', label: '真人剧' }])
           .filter(c => c.slug.startsWith('hot-') === ranking);
         return group.length > 0 && <div className="browse-cats" role="group" aria-label={ranking ? '热播榜单' : '短剧分类'} key={String(ranking)}>
@@ -725,11 +749,11 @@ function Browse({ onNavigate, active = true }) {
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
       {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
-      {comicView && <ComicBrowse active={active} reservedRows={reserveRows} reloadToken={comicReload} />}
+      {comicView && !upcoming && <ComicBrowse active={active} reservedRows={reserveRows} reloadToken={comicReload} />}
 
-      {!comicView && <>
+      {(!comicView || upcoming) && <>
       {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
-      {source === 'hongguo' && (
+      {source === 'hongguo' && !upcoming && (
         <div className="browse-genres" role="group" aria-label="标签筛选，可左右滑动，最多同时选择两个">
           <button type="button" className={`genre-chip ${tagLabels.length === 0 ? 'active' : ''}`} aria-pressed={tagLabels.length === 0} onClick={() => chooseTags('全部')}>全部</button>
           {SHARED_BROWSE_TAGS.map((label) => (
@@ -757,7 +781,7 @@ function Browse({ onNavigate, active = true }) {
         </div>
       )}
 
-      <div className="browse-completion-filter">
+      {!upcoming && <div className="browse-completion-filter">
         <label htmlFor="browse-completion">剧集状态</label>
         <select id="browse-completion" className="input-field" value={completion} onChange={(event) => setCompletion(event.target.value)} aria-describedby="browse-completion-hint">
           <option value="all">全部</option>
@@ -766,21 +790,27 @@ function Browse({ onNavigate, active = true }) {
         </select>
         <span id="browse-completion-hint">仅筛选当前页；状态未注明的剧集只在“全部”显示。</span>
         {completion !== 'all' && <span role="status">本页 {visibleResults.length} / {results.length} 部</span>}
-      </div>
-      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status">{clientTagFilter ? <><p>本页没有同时带有所选标签的剧集。</p><button className="btn btn-outline" onClick={() => chooseTags('全部')}>显示本页全部</button></> : <><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></>}</div>}
+      </div>}
+      {!upcoming && !loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status">{clientTagFilter ? <><p>本页没有同时带有所选标签的剧集。</p><button className="btn btn-outline" onClick={() => chooseTags('全部')}>显示本页全部</button></> : <><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></>}</div>}
 
-      {error && results.length > 0 && <div className="alert alert-error browse-update-error" role="alert">
+      {!upcoming && error && results.length > 0 && <div className="alert alert-error browse-update-error" role="alert">
         <span>{error}</span><button className="btn btn-outline btn-sm" disabled={loading || sourcesLoading} onClick={() => loadList(category, genre, page, true)}>重试</button>
       </div>}
-      {error && results.length === 0 && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{unsupported ? '这里是图文漫画' : '暂时没能加载剧集'}</h3><p>{error}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>查看漫剧</button> : <button className="btn btn-primary" onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />重新加载</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>按剧名搜索</button></div></div>}
+      {!upcoming && error && results.length === 0 && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{unsupported ? '这里是图文漫画' : '暂时没能加载剧集'}</h3><p>{error}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>查看漫剧</button> : <button className="btn btn-primary" onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />重新加载</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>按剧名搜索</button></div></div>}
 
-      {loading && results.length > 0 && <div className="browse-loading" role="status"><RefreshCw size={18} className="spin" /><span>正在更新片单，仍可浏览上次结果…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div>}
+      {!upcoming && loading && results.length > 0 && <div className="browse-loading" role="status"><RefreshCw size={18} className="spin" /><span>正在更新片单，仍可浏览上次结果…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div>}
 
-      {loading && results.length === 0 ? (
+      {upcoming && upcomingError && upcomingItems.length > 0 && <div className="alert alert-error browse-update-error" role="alert">{upcomingError}</div>}
+
+      {upcoming && upcomingLoading && upcomingItems.length === 0 ? (
+        <div className="browse-loading" role="status"><RefreshCw size={18} className="spin" /><span>正在整理即将上线的短剧…</span></div>
+      ) : upcoming && !upcomingLoading && upcomingItems.length === 0 ? (
+        <div className="browse-filter-empty" role="status"><p>{upcomingError || '目前没有写明上线日的短剧'}</p></div>
+      ) : !upcoming && loading && results.length === 0 ? (
         <div className="browse-loading-state" role="status"><div className="browse-loading"><RefreshCw size={18} className="spin" /><span>正在加载{categories.find((item) => item.slug === category)?.label || '短剧'}…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div><div className="poster-skeletons" aria-hidden="true">{Array.from({ length: 5 }, (_, i) => <div className="poster-skeleton" key={i}><div /><span /><span /></div>)}</div></div>
       ) : (
         <div className="browse-grid">
-          {visibleResults.map((item, position) => {
+          {wall.map((item, position) => {
             const dl = downloadedMap[String(item.series_id)];
             return (
               <button
@@ -791,10 +821,9 @@ function Browse({ onNavigate, active = true }) {
                 title={item.series_title}
               >
                 <div className="browse-cover">
-                  {(item.rank > 0 || item.is_new === true || item.is_premiere === true || formatPublicScore(item.rating ?? ratings[String(item.series_id)])) && <div className="browse-cover-top">
+                  {(item.rank > 0 || (item.is_new === true && item.is_premiere !== true) || item.is_premiere === true || formatPublicScore(item.rating ?? ratings[String(item.series_id)])) && <div className="browse-cover-top">
                     {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
-                    {item.is_new === true && <span className="browse-new-badge">新剧</span>}
-                    {item.is_premiere === true && <span className="browse-new-badge">红果首发</span>}
+                    {item.is_premiere === true ? <span className="browse-new-badge">红果首发</span> : item.is_new === true && <span className="browse-new-badge">新剧</span>}
                     {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
                   </div>}
                   {item.cover ? (
@@ -831,7 +860,7 @@ function Browse({ onNavigate, active = true }) {
                 <div className="browse-card-title">{item.series_title}</div>
                 {item.completion_status === 'completed' && <div className="browse-completion-label">已完结</div>}
                 {item.completion_status === 'ongoing' && <div className="browse-completion-label">更新中</div>}
-                {item.heat && <div className="browse-card-heat">{item.heat}</div>}
+                {(item.online_label || item.heat || heats[String(item.series_id)]) && <div className="browse-card-heat">{item.online_label || item.heat || heats[String(item.series_id)]}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">
                     {[...item.tags].sort((a, b) => Number(tagLabels.includes(b)) - Number(tagLabels.includes(a))).slice(0, 3).map((t) => (
@@ -846,7 +875,7 @@ function Browse({ onNavigate, active = true }) {
       )}
 
       {/* 分页 */}
-      {totalPages > 1 && (
+      {!upcoming && totalPages > 1 && (
         <div className="browse-pager">
           <button className="pager-item" aria-label="上一页" disabled={page <= 1} onClick={() => gotoPage(page - 1)}>‹</button>
           {pageNumbers.map((n, i) => (
