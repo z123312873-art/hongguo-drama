@@ -386,8 +386,36 @@ async function mount(file, api, props = {}) {
       ui.button('抢先上线日').props.onClick(); ui.render(); await ui.flush();
       assert.equal(ui.button('真人剧'), undefined, 'the upcoming wall does not mix with the category rows');
       assert.ok(ui.text().includes('即将上线') || ui.text().includes('上线日'));
-      ui.button('抢先上线日').props.onClick(); ui.render(); await ui.flush();
+      ui.button('返回观看').props.onClick(); ui.render(); await ui.flush();
       assert.ok(ui.button('真人剧'));
+    } finally { ui.unmount(); }
+  });
+  await test('an upcoming poster shows the date and reservation and does not open episodes', async () => {
+    let resolved = 0;
+    const ui = await mount('Browse', {
+      getSeriesList: async () => [],
+      browseCategories: async () => [],
+      browseList: async () => ({ success: true, results: [] }),
+      browseUpcoming: listener => {
+        listener({ items: [{ series_id: '9001', series_title: '甲', online_label: '预计11月7日上线', reservation_label: '预约人数1万人预约', online_time: Date.now() + 86400000, is_new: false, is_premiere: false }], done: true });
+        return () => {};
+      },
+      searchResolve: async () => { resolved += 1; return ok(detail('9001')); },
+      getSeriesEpisodes: async () => { resolved += 1; return ok(detail('9001')); },
+    });
+    try {
+      ui.button('抢先上线日').props.onClick(); ui.render(); await ui.flush();
+      const card = ui.nodes().find(n => n.props.className === 'browse-card');
+      assert.ok(card);
+      card.props.onClick(); ui.render(); await ui.flush();
+      assert.equal(resolved, 0);
+      assert.equal(ui.text().includes('正在拉取全集'), false);
+      assert.ok(ui.text().includes('预计11月7日上线'));
+      assert.ok(ui.text().includes('预约人数1万人预约'));
+      assert.equal(ui.nodes().some(n => n.props.className === 'browse-hover'), false);
+      assert.equal(ui.text().includes('新剧'), false);
+      assert.equal(ui.text().includes('红果首发'), false);
+      assert.ok(ui.button('返回观看'));
     } finally { ui.unmount(); }
   });
   await test('browse keeps posters when switching categories and does not refetch a fresh list', async () => {

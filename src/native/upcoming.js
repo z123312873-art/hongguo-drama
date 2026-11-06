@@ -23,15 +23,6 @@ function reservationCount(text) {
   return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-function dayParts(text) {
-  const match = String(text ?? '').match(/(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]/);
-  if (!match) return null;
-  const month = Number(match[1]);
-  const day = Number(match[2]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return { month, day };
-}
-
 function taipeiParts(seconds) {
   const instant = Number(seconds);
   if (!Number.isFinite(instant) || instant <= 0) return null;
@@ -39,45 +30,47 @@ function taipeiParts(seconds) {
   return { month: shifted.getUTCMonth() + 1, day: shifted.getUTCDate(), time: instant * 1000 };
 }
 
-function futureTimestamp(seconds, now) {
-  const parts = taipeiParts(seconds);
-  if (!parts) return null;
-  return parts.time > now ? parts : null;
+function reservationPhrase(count) {
+  const value = Number(count);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const unit = value >= 100000000 ? [100000000, '亿'] : value >= 10000 ? [10000, '万'] : null;
+  if (!unit) return `预约人数${Math.round(value)}人预约`;
+  const text = (value / unit[0]).toFixed(1).replace(/\.0$/, '');
+  return `预约人数${text}${unit[1]}人预约`;
 }
 
-function onlineLabel(sentence, timestamp) {
-  const written = dayParts(sentence);
-  const source = written || timestamp;
-  if (!source) return '';
-  return `${source.month}月${source.day}日`;
+function onlineLabel(timestamp) {
+  if (!timestamp) return '';
+  return `预计${timestamp.month}月${timestamp.day}日上线`;
 }
 
 function selectUpcoming(items, now = Date.now()) {
-  const moment = Number(now);
   const rows = [];
   for (const item of items || []) {
-    if (!item || item.is_online === true) continue;
+    if (!item) continue;
     const title = String(item.name || item.title || '').trim();
     const id = String(item.item_id || item.series_id || item.id || '').trim();
     if (!title || !id) continue;
     const sentence = String(item.sub_info || item.schedule_text || '');
-    const timestamp = futureTimestamp(item.expected_publish_time, moment);
+    const timestamp = taipeiParts(item.expected_publish_time);
     if (!timestamp) continue;
+    const reservations = reservationCount(item.expected_rec_text) || unitReservation(sentence);
     const cover = comicCover(item.cover || item.cover_url || '', 320);
     rows.push({
       series_id: id,
       series_title: title,
       cover: cover,
-      online_label: onlineLabel(sentence, timestamp),
+      online_label: onlineLabel(timestamp),
       online_time: timestamp.time,
-      reservations: reservationCount(item.expected_rec_text) || unitReservation(sentence),
+      reservations,
+      reservation_label: reservationPhrase(reservations),
       is_new: false,
       is_premiere: false,
       rating: null,
       heat: '',
     });
   }
-  rows.sort((a, b) => b.reservations - a.reservations || a.online_time - b.online_time || a.series_title.localeCompare(b.series_title, 'zh'));
+  rows.sort((a, b) => a.online_time - b.online_time || b.reservations - a.reservations || a.series_title.localeCompare(b.series_title, 'zh'));
   return rows;
 }
 
@@ -117,6 +110,7 @@ module.exports = {
   PAGE_LIMIT,
   MAX_PAGES,
   reservationCount,
+  reservationPhrase,
   selectUpcoming,
   absorbUpcoming,
   fetchUpcomingPage,

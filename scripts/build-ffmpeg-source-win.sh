@@ -53,6 +53,63 @@ cd "$ROOT/build-ffmpeg"
   > "$ROOT/logs/ffmpeg-configure.log" 2>&1
 make -j "$JOBS" ffmpeg.exe ffprobe.exe > "$ROOT/logs/ffmpeg-build.log" 2>&1
 cp ffmpeg.exe ffprobe.exe "$ROOT/artifacts/bin/"
+# librempeg decodes the newer bvc2 tag. Its CLI is GPL-3; the configure entry also
+# names the AGPL flag only so avfilter_thread_frame turns on. That flag is removed
+# before configure. Never pass --enable-agpl.
+LIBREMPEG_COMMIT=a0fafc5c42dbd7fce25b141c071277fb016a65c5
+LIBREMPEG_DIR=librempeg-a0fafc5c42db
+LIBREMPEG_TAR_SHA256=dfdabbc0b0f6dbfea60d4e3469d84dbcacdefc01a5d89a0b95716f97c508a41c
+LIBREMPEG_ARCHIVE="$ROOT/archives/librempeg-$LIBREMPEG_COMMIT.tar.gz"
+if [[ ! -f "$LIBREMPEG_ARCHIVE" ]]; then
+  FETCH_DIR=$(mktemp -d "$ROOT/librempeg-fetch.XXXXXX")
+  git -C "$FETCH_DIR" init --quiet
+  git -C "$FETCH_DIR" fetch --quiet --depth 1 https://github.com/librempeg/librempeg.git "$LIBREMPEG_COMMIT"
+  [[ $(git -C "$FETCH_DIR" rev-parse FETCH_HEAD) == "$LIBREMPEG_COMMIT" ]]
+  git -C "$FETCH_DIR" archive --format=tar --prefix="$LIBREMPEG_DIR/" FETCH_HEAD | gzip -n > "$LIBREMPEG_ARCHIVE"
+  rm -rf "$FETCH_DIR"
+fi
+[[ $(gzip -dc "$LIBREMPEG_ARCHIVE" | sha256sum | cut -d' ' -f1) == "$LIBREMPEG_TAR_SHA256" ]] || { echo 'librempeg source tar checksum mismatch' >&2; exit 1; }
+echo 'librempeg source tar SHA256: OK'
+[[ -d "$ROOT/sources/$LIBREMPEG_DIR" ]] || tar -xf "$LIBREMPEG_ARCHIVE" -C "$ROOT/sources"
+python3 - "$ROOT/sources/$LIBREMPEG_DIR/configure" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+old = 'ffmpeg_deps="avcodec avfilter avformat threads agpl"'
+new = 'ffmpeg_deps="avcodec avfilter avformat threads"'
+if old in text:
+    path.write_text(text.replace(old, new, 1))
+elif new not in text:
+    raise SystemExit('librempeg configure no longer gates the CLI on the AGPL flag')
+PY
+mkdir -p "$ROOT/build-librempeg"
+cd "$ROOT/build-librempeg"
+"../sources/$LIBREMPEG_DIR/configure" --prefix=../prefix \
+  --arch=x86_64 --target-os=mingw32 --enable-cross-compile --cross-prefix=x86_64-w64-mingw32- \
+  --disable-autodetect --disable-shared --enable-static --disable-doc --disable-debug \
+  --disable-ffplay --disable-network --disable-indevs --disable-outdevs --enable-indev=lavfi \
+  --disable-x86asm --enable-gpl --enable-version3 --enable-libx264 \
+  --pkg-config=pkg-config --pkg-config-flags=--static \
+  --extra-cflags=-I../prefix/include --extra-ldflags='-static -L../prefix/lib' \
+  > "$ROOT/logs/librempeg-configure.log" 2>&1
+python3 - "$ROOT/build-librempeg" <<'PY'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+decoder = ''
+for name in ('config_components.h', 'config.h'):
+    file = root / name
+    if file.exists():
+        for line in file.read_text(errors='replace').splitlines():
+            if 'CONFIG_BVC2_DECODER' in line:
+                decoder = line
+            if 'CONFIG_AGPL ' in line and line.rstrip().endswith('1'):
+                raise SystemExit('librempeg configured the AGPL flag')
+if '1' not in decoder:
+    raise SystemExit('bvc2 decoder was not enabled: ' + decoder)
+PY
+make -j "$JOBS" ffmpeg.exe > "$ROOT/logs/librempeg-build.log" 2>&1
+cp ffmpeg.exe "$ROOT/artifacts/bin/librempeg.exe"
+cd "$ROOT"
 for tool in "$ROOT/artifacts/bin/"*.exe; do
   x86_64-w64-mingw32-objdump -p "$tool" > "$ROOT/logs/$(basename "$tool").imports.txt"
   # Reject accidental MinGW, pthread, codec or package-manager DLL dependencies.
@@ -68,11 +125,19 @@ PY
 done
 cp "$ROOT/sources/ffmpeg-$FFMPEG_VERSION/"COPYING* "$ROOT/artifacts/bin/"
 cp "$ROOT/sources/ffmpeg-$FFMPEG_VERSION/LICENSE.md" "$ROOT/artifacts/bin/"
+cp "$ROOT/sources/$LIBREMPEG_DIR/COPYING.GPLv3" "$ROOT/artifacts/bin/WINDOWS-LIBREMPEG-LICENSE.txt"
+cp "$ROOT/sources/$LIBREMPEG_DIR/COPYING.LGPLv2.1" "$ROOT/artifacts/bin/WINDOWS-LIBREMPEG-LGPL.txt"
+cat > "$ROOT/artifacts/bin/WINDOWS-LIBREMPEG-NOTICE.txt" <<EOF
+librempeg $LIBREMPEG_COMMIT
+GPL-3.0-or-later, with LGPL-2.1-or-later portions. Built with --enable-gpl --enable-version3 --enable-libx264.
+--enable-agpl was not used.
+EOF
 cp "$ROOT/sources/x264-$X264_COMMIT/COPYING" "$ROOT/artifacts/bin/WINDOWS-X264-LICENSE.txt"
 cp /usr/share/doc/mingw-w64-common/copyright "$ROOT/artifacts/bin/WINDOWS-MINGW-LICENSE.txt"
 cp /usr/share/doc/gcc-mingw-w64-x86-64/copyright "$ROOT/artifacts/bin/WINDOWS-GCC-LICENSE.txt"
-(cd "$ROOT/artifacts/bin" && sha256sum ffmpeg.exe ffprobe.exe) > "$ROOT/artifacts/bin/WINDOWS-SHA256SUMS.txt"
-cp "$FFMPEG_ARCHIVE" "$X264_ARCHIVE" "$SCRIPT" "$ROOT/corresponding-source/"
+(cd "$ROOT/artifacts/bin" && sha256sum ffmpeg.exe ffprobe.exe librempeg.exe) > "$ROOT/artifacts/bin/WINDOWS-SHA256SUMS.txt"
+cp "$FFMPEG_ARCHIVE" "$X264_ARCHIVE" "$LIBREMPEG_ARCHIVE" "$SCRIPT" "$ROOT/corresponding-source/"
+cp "$ROOT/build-librempeg/ffbuild/config.log" "$ROOT/corresponding-source/librempeg-config.log"
 cp "$ROOT/build-ffmpeg/ffbuild/config.log" "$ROOT/corresponding-source/ffmpeg-config.log"
 cp "$ROOT/build-x264/config.log" "$ROOT/corresponding-source/x264-config.log"
 { x86_64-w64-mingw32-gcc --version; dpkg-query -W gcc-mingw-w64-x86-64 mingw-w64-common mingw-w64-x86-64-dev; } > "$ROOT/corresponding-source/TOOLCHAIN.txt"

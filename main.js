@@ -898,7 +898,7 @@ async function executeHongguoDownload(task) {
       if (playInfo.contentKey) {
         const decodedPath = tmpPath + '.decoded';
         try {
-          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
+          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token, codec: playInfo.codec, transcode: playInfo.transcode });
           task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           if (allowLowerQuality) notifyQuality(Number.parseInt(task.actualQuality, 10));
           source.token.throwIfRequested();
@@ -1310,17 +1310,52 @@ ipcMain.handle('browse-list', async (_event, options) => {
   return listed;
 });
 
+let releaseProbe;
+function getReleaseProbe() {
+  if (!releaseProbe) {
+    const { createReleaseProbe } = require('./src/native/release-availability');
+    releaseProbe = createReleaseProbe({
+      lookup: async (id) => {
+        const detail = await require('./src/native/hongguo').fetchEpisodeList(id);
+        return Array.isArray(detail?.episodes) && detail.episodes.length > 0;
+      },
+    });
+  }
+  return releaseProbe;
+}
+
+let upcomingGeneration = 0;
 ipcMain.handle('browse-upcoming', async (event) => {
   const sender = event.sender;
-  const send = (payload) => { if (!sender.isDestroyed()) sender.send('upcoming-page', payload); };
+  const generation = ++upcomingGeneration;
+  const send = (payload) => { if (generation === upcomingGeneration && !sender.isDestroyed()) sender.send('upcoming-page', payload); };
   try {
     const { fetchUpcomingPage, absorbUpcoming, MAX_PAGES } = require('./src/native/upcoming');
+    const { dueReleaseIds, scheduleReleaseDrops } = require('./src/native/release-availability');
     const { requestMetadata } = require('./src/native/app-source');
+    const probe = getReleaseProbe();
+    const gone = new Set();
     let state = { raw: [], items: [], offset: 0, sessionId: '', done: false };
+    const visible = () => state.items.filter(item => !gone.has(String(item.series_id)));
+    const publish = () => send({ items: visible(), done: state.done });
+    const drops = scheduleReleaseDrops({
+      ask: id => probe.ask(id),
+      shouldStop: () => generation !== upcomingGeneration,
+      onPlayable: id => { gone.add(String(id)); publish(); },
+    });
+    const enqueue = () => {
+      for (const item of state.items) {
+        if (probe.known(item.series_id) === true) gone.add(String(item.series_id));
+      }
+      drops.push(dueReleaseIds(state.items).filter(id => probe.known(id) === undefined));
+    };
     for (let page = 0; page < MAX_PAGES && !state.done; page += 1) {
+      if (generation !== upcomingGeneration) return { success: true };
       const batch = await fetchUpcomingPage({ offset: state.offset, sessionId: state.sessionId }, (apiPath, values) => requestMetadata(apiPath, values));
       state = absorbUpcoming(state, batch, Date.now());
-      send({ items: state.items, done: state.done || page + 1 >= MAX_PAGES });
+      if (page + 1 >= MAX_PAGES) state = { ...state, done: true };
+      enqueue();
+      publish();
     }
     return { success: true };
   } catch (error) {
@@ -1328,6 +1363,26 @@ ipcMain.handle('browse-upcoming', async (event) => {
     send({ done: true, error: hint || error?.message || '即将上线的短剧暂时载入失败' });
     return { success: false, error: hint || error?.message || '即将上线的短剧暂时载入失败' };
   }
+});
+
+ipcMain.handle('inspect-release', async (_event, entries) => {
+  const list = Array.isArray(entries) ? entries : [];
+  const now = Date.now();
+  const probe = getReleaseProbe();
+  const results = [];
+  const seen = new Set();
+  for (const entry of list) {
+    const id = String(entry?.id || '').trim();
+    const online = Number(entry?.online_time);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    if (!Number.isFinite(online) || online <= 0 || online > now) {
+      results.push({ id, playable: false, skipped: true });
+      continue;
+    }
+    results.push({ id, playable: await probe.ask(id) });
+  }
+  return { success: true, results };
 });
 
 // The pages the discover view opens with are requested while the window is still starting, so they are
@@ -2235,6 +2290,7 @@ function awaitMediaOperation(promise, signal, timeout = 0) {
 
 /** Retry the complete operation so a broken body never counts as a successful download. */
 async function withMediaRecovery(vid, seriesId, options, consume) {
+  try { resolveLibrempeg(); } catch { /* 沒有轉碼程式時，相容片源仍走複製。 */ }
   const controller = new AbortController();
   const abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });
@@ -2547,7 +2603,7 @@ function startContentKeyStream(playInfo, signal, capture = null) {
   const plan = require('./src/native/transcode-args').streamPlan(playInfo);
   const executable = plan.tool === 'librempeg' ? resolveLibrempeg() : resolveFfmpeg('ffmpeg');
   if (!executable) throw new Error(plan.tool === 'librempeg'
-    ? '本集暂未提供兼容的 H.264/HEVC 片源'
+    ? require('./src/native/app-source').NEWER_CODEC_UNREADY
     : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const { spawn } = require('child_process');
   const child = spawn(executable, plan.args,
@@ -2581,7 +2637,7 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
   const transcoding = codec === 'bytevc2' || transcode === 'bytevc2';
   const executable = transcoding ? resolveLibrempeg() : resolveFfmpeg('ffmpeg');
   if (!executable) throw new Error(transcoding
-    ? '本集暂未提供兼容的 H.264/HEVC 片源'
+    ? require('./src/native/app-source').NEWER_CODEC_UNREADY
     : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const args = transcoding
     ? require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output)

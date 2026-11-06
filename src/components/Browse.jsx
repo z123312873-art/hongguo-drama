@@ -687,7 +687,7 @@ function Browse({ onNavigate, active = true }) {
     const id = String(item.series_id || '');
     const saved = saveLocalSeries({
       id, title: item.series_title, cover: typeof item.cover === 'string' ? item.cover : '',
-      published_at: item.published_at, favorite: !favoriteIds.has(id),
+      published_at: item.published_at, online_time: item.online_time, favorite: !favoriteIds.has(id),
     });
     if (saved.error) showToast(saved.error, 'error');
     else setLibrary(saved);
@@ -713,8 +713,11 @@ function Browse({ onNavigate, active = true }) {
         : !heroReady && <div className="discover-hero discover-hero-pending" aria-hidden="true" />)}
       <div className="browse-header">
         <div className="browse-title">
-          <div><h2>发现短剧</h2><p className="page-description">挑一部喜欢的，让故事继续。</p></div>
-          {source === 'hongguo' && <button type="button" className={`btn browse-upcoming ${upcoming ? 'btn-outline' : 'btn-primary'}`} aria-pressed={upcoming} onClick={() => setUpcoming(value => !value)}>抢先上线日</button>}
+          <div className="browse-title-row">
+            <h2>发现短剧</h2>
+            {source === 'hongguo' && <button type="button" className={`btn browse-upcoming ${upcoming ? 'btn-outline' : 'btn-primary'}`} aria-pressed={upcoming} onClick={() => setUpcoming(value => !value)}>{upcoming ? '返回观看' : '抢先上线日'}</button>}
+          </div>
+          <p className="page-description">挑一部喜欢的，让故事继续。</p>
         </div>
         <div className="browse-header-right">
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
@@ -817,7 +820,7 @@ function Browse({ onNavigate, active = true }) {
                 type="button"
                 key={item.series_id}
                 className="browse-card"
-                onClick={() => openSeries(item)}
+                onClick={() => { if (upcoming && source === 'hongguo') return; openSeries(item); }}
                 title={item.series_title}
               >
                 <div className="browse-cover">
@@ -831,6 +834,7 @@ function Browse({ onNavigate, active = true }) {
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>
                   )}
+                  {upcoming && item.reservation_label && <span className="browse-reserve-badge">{item.reservation_label}</span>}
                   <span
                     role="button"
                     tabIndex={0}
@@ -851,16 +855,16 @@ function Browse({ onNavigate, active = true }) {
                       <Check size={11} /> {dl.completed}/{dl.total}
                     </span>
                   )}
-                  <div className="browse-hover">
+                  {!(upcoming && source === 'hongguo') && <div className="browse-hover">
                     <span className="browse-hover-play">
                       <Play size={16} /> {dl && dl.completed > 0 ? '播放' : '查看'}
                     </span>
-                  </div>
+                  </div>}
                 </div>
                 <div className="browse-card-title">{item.series_title}</div>
                 {item.completion_status === 'completed' && <div className="browse-completion-label">已完结</div>}
                 {item.completion_status === 'ongoing' && <div className="browse-completion-label">更新中</div>}
-                {(item.online_label || item.heat || heats[String(item.series_id)]) && <div className="browse-card-heat">{item.online_label || item.heat || heats[String(item.series_id)]}</div>}
+                {(item.online_label || item.heat || heats[String(item.series_id)]) && <div className={item.online_label ? 'browse-card-date' : 'browse-card-heat'}>{item.online_label || item.heat || heats[String(item.series_id)]}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">
                     {[...item.tags].sort((a, b) => Number(tagLabels.includes(b)) - Number(tagLabels.includes(a))).slice(0, 3).map((t) => (

@@ -2,10 +2,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { publicDateKey, readLocalLibrary, removeLocalSeries, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import './ReleaseCalendar.css';
 
-export default function ReleaseCalendar({ onPlay, opening = '', active = true }) {
+const WAITING_TEXT = '您目前的预约收藏短剧，尚未上线，请耐心等候';
+
+function onlineDateText(timestamp) {
+  const shifted = new Date(Number(timestamp) + 8 * 60 * 60 * 1000);
+  if (Number.isNaN(shifted.getTime())) return '';
+  return `预计上线日期${shifted.getUTCMonth() + 1}月${shifted.getUTCDate()}日`;
+}
+
+export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', active = true }) {
   const [library, setLibrary] = useState(readLocalLibrary);
   const [chosenMonth, setChosenMonth] = useState('');
   const [catalogCovers, setCatalogCovers] = useState(() => new Map());
+  const [released, setReleased] = useState({});
   useEffect(() => subscribeLocalLibrary(setLibrary), []);
   useEffect(() => {
     if (!library.items.some(item => item.favorite && !item.cover) || !window.electronAPI?.getSeriesList) return;
@@ -20,20 +29,43 @@ export default function ReleaseCalendar({ onPlay, opening = '', active = true })
     cover: item.cover || catalogCovers.get(item.id) || '',
     date: publicDateKey(item.favorited_at),
   })), [library.items, catalogCovers]);
+  useEffect(() => {
+    if (!active || typeof window.electronAPI?.inspectRelease !== 'function') return undefined;
+    const due = favorites.filter(item => Number(item.online_time) > 0 && Number(item.online_time) <= Date.now());
+    if (!due.length) return undefined;
+    let cancel = false;
+    window.electronAPI.inspectRelease(due.map(item => ({ id: item.id, online_time: item.online_time }))).then(result => {
+      if (cancel || !result?.success || !Array.isArray(result.results)) return;
+      setReleased(current => {
+        const next = { ...current };
+        for (const row of result.results) {
+          if (!row || row.skipped === true) continue;
+          next[String(row.id)] = row.playable === true;
+        }
+        return next;
+      });
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, [active, favorites]);
   const months = [...new Set(favorites.filter(item => item.date).map(item => item.date.slice(0, 7)))].sort().reverse();
   const month = months.includes(chosenMonth) ? chosenMonth : months[0] || '';
   const monthItems = favorites.filter(item => item.date.startsWith(`${month}-`)).sort((a, b) => b.favorited_at - a.favorited_at || a.title.localeCompare(b.title, 'zh-CN'));
   const days = [...new Set(monthItems.map(item => item.date))];
   const undated = favorites.filter(item => !item.date).sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
-  const row = item => <li key={item.id} className="release-row">
-    <div className="release-poster" aria-hidden="true"><span>暂无海报</span>{item.cover && <img key={item.cover} src={item.cover} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }} />}</div>
-    <div className="release-title"><strong>{item.title}</strong><span>{item.date ? `收藏于 ${item.date}` : '收藏日期未记录'}</span></div>
-    <div className="release-row-actions">
-      <button type="button" className="btn btn-sm btn-outline" aria-label={`取消收藏《${item.title}》`} aria-pressed={true} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: false }))}>取消收藏</button>
-      <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title="仅移除本机收藏记录，不删除视频文件" onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
-      <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => onPlay?.({ seriesId: item.id, title: item.title })}>{opening === item.id ? '打开中…' : '播放'}</button>
-    </div>
-  </li>;
+  const row = item => {
+    const onlineAt = Number(item.online_time);
+    const scheduled = Number.isFinite(onlineAt) && onlineAt > 0;
+    const waiting = scheduled && (onlineAt > Date.now() || released[item.id] !== true);
+    return <li key={item.id} className="release-row">
+      <div className="release-poster" aria-hidden="true"><span>暂无海报</span>{item.cover && <img key={item.cover} src={item.cover} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }} />}</div>
+      <div className="release-title"><strong>{item.title}</strong><span>{item.date ? `收藏于 ${item.date}` : '收藏日期未记录'}</span>{waiting && <em className="release-online">{onlineDateText(onlineAt)}</em>}</div>
+      <div className="release-row-actions">
+        <button type="button" className="btn btn-sm btn-outline" aria-label={`取消收藏《${item.title}》`} aria-pressed={true} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: false }))}>取消收藏</button>
+        <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title="仅移除本机收藏记录，不删除视频文件" onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
+        <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => { if (waiting) { onUnavailable?.(WAITING_TEXT); return; } onPlay?.({ seriesId: item.id, title: item.title }); }}>{opening === item.id ? '打开中…' : '播放'}</button>
+      </div>
+    </li>;
+  };
 
   return <section className="release-calendar">
     <header><h2>收藏清单</h2><p className="page-description">只列出在海报上点过爱心的剧。日期是按下爱心的当天。</p></header>

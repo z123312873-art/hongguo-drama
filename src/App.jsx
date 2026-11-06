@@ -91,7 +91,7 @@ export default function App() {
       case 'player':
         return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onNavigate={navigate} /> : null;
       case 'calendar':
-        return <ReleaseCalendar opening={calendarOpening} active={page === id} onPlay={async ({ seriesId }) => {
+        return <ReleaseCalendar opening={calendarOpening} active={page === id} onUnavailable={message => setStorageError(message)} onPlay={async ({ seriesId }) => {
           if (pageRef.current !== 'calendar' || calendarOpeningRef.current) return;
           const version = ++calendarRequest.current;
           calendarOpeningRef.current = true;

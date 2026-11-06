@@ -78,7 +78,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
   `, context);
   return { fetch: context.module.exports.fetchAppPlayUrl, calls, signedDeviceIds };
 }
-function loadFetch(axios) {
+function loadApp(axios) {
   const context = { Buffer, URL, AbortSignal, module: { exports: {} },
     require: name => {
       if (name === 'axios') return axios;
@@ -94,7 +94,13 @@ function loadFetch(axios) {
     },
   };
   vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'app-source.js'), 'utf8'), context);
-  return context.module.exports.fetchAppPlayUrl;
+  return context.module.exports;
+}
+function loadFetch(axios) {
+  const app = loadApp(axios);
+  const fetch = app.fetchAppPlayUrl;
+  fetch.ready = app.setBytevc2Ready;
+  return fetch;
 }
 
 function nativeFixture() {
@@ -420,7 +426,7 @@ const checks = [
         const answer = answers[host] || answers.default;
         return { status: 200, headers: {}, data: typeof answer === 'string' ? answer : JSON.stringify(answer) };
       });
-      return { fetch, calls, hostsOf: () => hostsOf(calls), registered: () => registered };
+      return { fetch, calls, hostsOf: () => hostsOf(calls), registered: () => registered, ready: fetch.ready };
     };
     try {
       const moved = await run({
@@ -439,9 +445,12 @@ const checks = [
       assert.equal(family.registered(), 1, 'a compatible family does not spend a second device');
       assert.equal(family.hostsOf().length, 1);
       const stopped = await run({ default: model('bytevc2', 'vvc', 1080) });
-      await assert.rejects(stopped.fetch('11'), error => error.code === 'NO_COMPATIBLE_CODEC' && /H\.264\/HEVC/.test(error.message));
+      await assert.rejects(stopped.fetch('11'), error => error.code === 'NO_COMPATIBLE_CODEC' && /转码组件未就绪/.test(error.message) && !/尺寸/.test(error.message));
       assert.equal(stopped.registered(), 2);
       assert.deepEqual(stopped.hostsOf(), ['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-lf.fqnovel.com']);
+      const explicit = await run({ default: model('bytevc2', 'vvc', 1080) });
+      await assert.rejects(explicit.fetch('11', { quality: '1080p' }), error => error.code === 'NO_COMPATIBLE_CODEC' && /转码组件未就绪/.test(error.message) && !/尺寸/.test(error.message));
+      assert.equal(explicit.registered(), 2);
       const missing = await run({ default: { code: 0, data: {} } });
       await assert.rejects(missing.fetch('11'), error => error.code === 'MISSING_MODEL');
       assert.equal(missing.registered(), 1, 'a missing episode does not take another device');
@@ -464,6 +473,64 @@ const checks = [
       await assert.rejects(undowngraded.fetch('11', { quality: '1080p' }), error => error.code === 'NO_COMPATIBLE_CODEC' && /未降级/.test(error.message));
       assert.equal(undowngraded.registered(), 2);
       assert.equal(undowngraded.hostsOf().length, 2, 'a second host without a measured size stops the lookup');
+      device.resetPlaybackDevice();
+      const ladder = (rows) => ({ code: 0, data: { '11': { video_model: JSON.stringify({ video_list: rows }) } } });
+      const stream = (name, codec, width, height) => ({ main_url: mediaUrl(name), codec_type: codec, vwidth: width, vheight: height });
+      const newerLadder = await run({ default: ladder([
+        stream('360', 'bytevc2', 360, 640),
+        stream('720', 'bytevc2', 1280, 720),
+        stream('1080', 'bytevc2', 1920, 1080),
+        stream('1440', 'bytevc2', 2560, 1440),
+      ]) });
+      newerLadder.ready(true);
+      const chosen = await newerLadder.fetch('11', { quality: '1080p' });
+      assert.equal(chosen.url, mediaUrl('1080'));
+      assert.equal(chosen.codec, 'bytevc2');
+      assert.equal(chosen.transcode, 'bytevc2');
+      assert.equal(chosen.quality, '1080p');
+      assert.equal(chosen.qualityLimited, undefined);
+      assert.equal(newerLadder.registered(), 1, 'a transcodable 1080 stream does not take a second device');
+      const narrower = await newerLadder.fetch('11', { quality: '720p' });
+      assert.equal(narrower.url, mediaUrl('720'));
+      assert.equal(narrower.transcode, 'bytevc2');
+      assert.equal(narrower.quality, '720p');
+      const automatic = await run({ default: ladder([
+        stream('720', 'bytevc2', 1280, 720),
+        stream('1080', 'bytevc2', 1920, 1080),
+      ]) });
+      automatic.ready(true);
+      const highest = await automatic.fetch('11');
+      assert.equal(highest.url, mediaUrl('1080'));
+      assert.equal(highest.transcode, 'bytevc2');
+      assert.equal(automatic.registered(), 1);
+      const mixed = await run({ default: ladder([
+        stream('hevc720', 'hvc1', 1280, 720),
+        stream('vvc1080', 'bytevc2', 1920, 1080),
+      ]) });
+      mixed.ready(true);
+      const requested = await mixed.fetch('11', { quality: '1080p' });
+      assert.equal(requested.url, mediaUrl('vvc1080'));
+      assert.equal(requested.transcode, 'bytevc2');
+      assert.equal(requested.quality, '1080p');
+      const copied = await run({ default: ladder([
+        stream('hevc720', 'hvc1', 1280, 720),
+        stream('vvc1080', 'bytevc2', 1920, 1080),
+      ]) });
+      copied.ready(true);
+      const autoCopy = await copied.fetch('11');
+      assert.equal(autoCopy.url, mediaUrl('hevc720'));
+      assert.equal(autoCopy.codec, 'hevc');
+      assert.equal(autoCopy.transcode, undefined);
+      const both = await run({ default: ladder([
+        stream('hevc1080', 'hvc1', 1920, 1080),
+        stream('vvc1080', 'bytevc2', 1920, 1080),
+      ]) });
+      both.ready(true);
+      const kept = await both.fetch('11', { quality: '1080p' });
+      assert.equal(kept.url, mediaUrl('hevc1080'));
+      assert.equal(kept.codec, 'hevc');
+      assert.equal(kept.transcode, undefined);
+      assert.equal(both.registered(), 1);
     } finally {
       device.resetPlaybackDevice();
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});

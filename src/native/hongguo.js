@@ -748,7 +748,7 @@ function sourceFailure(source, error) {
   if (code === 'DEVICE_REGISTRATION_FAILED') return { source, code, message: `播放设备注册失败，请重试在线播放${registrationHint(error?.reason)}` };
   if (code === 'EMPTY_RESPONSE') return { source, code: 'EMPTY_RESPONSE', message: `片源服务没有返回数据，请重试在线播放${registrationHint(error?.registrationReason)}` };
   if (code === 'INVALID_RESPONSE' || /空响应|有效数据|目录数据不完整|JSON/.test(message)) return { source, code: 'INVALID_RESPONSE', message: '片源数据无法解析' };
-  if (/未降级|尺寸可确认|H\.264\/HEVC/.test(message)) return { source, code: 'NO_PLAYABLE_SOURCE', message };
+  if (/未降级|尺寸可确认|H\.264\/HEVC|转码组件未就绪/.test(message)) return { source, code: 'NO_PLAYABLE_SOURCE', message };
   return { source, code: 'NO_PLAYABLE_SOURCE', message: '暂未取得有效片源' };
 }
 
