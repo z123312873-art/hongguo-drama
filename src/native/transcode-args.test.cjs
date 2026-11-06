@@ -12,7 +12,8 @@ test('compatible streams stay on copy and bytevc2 uses a separate transcoder', (
   assert.deepEqual(hevc.args, copyStreamArgs('ab'));
   const transcode = streamPlan({ contentKey: 'cd', codec: 'bytevc2' });
   assert.equal(transcode.tool, 'librempeg');
-  for (const token of ['libx264', 'veryfast', '23', '2', '1']) assert.equal(transcode.args.includes(token), true, token);
+  for (const token of ['libx264', 'veryfast', '23', '2', 'lookahead-threads=1', '-x264-params']) assert.equal(transcode.args.includes(token), true, token);
+  assert.equal(transcode.args.includes('lookahead_threads'), false);
   assert.equal(transcode.args.includes('+faststart'), false);
   const file = bytevc2FileArgs('cd', 'in.mp4', 'out.mp4');
   assert.equal(file.includes('+faststart'), true);
