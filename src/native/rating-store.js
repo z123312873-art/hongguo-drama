@@ -18,9 +18,14 @@ function createRatingStore(options = {}) {
   let file = options.file || '';
   let dirty = false;
 
-  function remember(id, rating, expires) {
+  function heatLabel(value) {
+    const text = String(value || '').trim();
+    return /^[\d.]+[万萬亿億]?(?:热度|熱度)$/.test(text) ? text.slice(0, 24) : '';
+  }
+
+  function remember(id, rating, expires, heat = '', heatChecked = false) {
     memory.delete(id);
-    memory.set(id, { rating, expires });
+    memory.set(id, { rating, expires, heat: heatLabel(heat), heatChecked: heatChecked === true });
     while (memory.size > maxEntries) memory.delete(memory.keys().next().value);
   }
 
@@ -44,7 +49,7 @@ function createRatingStore(options = {}) {
       if (!Number.isFinite(expires) || expires <= time) continue;
       const rating = ratingValue(entry.rating);
       if (rating === undefined) continue;
-      remember(id, rating, expires);
+      remember(id, rating, expires, entry.heat, entry.heatChecked === true);
     }
   }
 
@@ -54,7 +59,7 @@ function createRatingStore(options = {}) {
     const entries = {};
     for (const [id, entry] of memory) {
       if (entry.expires <= time) continue;
-      entries[id] = { rating: entry.rating, expires: entry.expires };
+      entries[id] = { rating: entry.rating, expires: entry.expires, ...(entry.heat ? { heat: entry.heat } : {}), ...(entry.heatChecked ? { heatChecked: true } : {}) };
     }
     const body = JSON.stringify({ version: 1, entries });
     const tmp = `${file}.${process.pid}.tmp`;
@@ -81,12 +86,21 @@ function createRatingStore(options = {}) {
       }
       return entry.rating;
     },
-    set(id, rating) {
+    getHeat(id) {
+      const entry = memory.get(String(id || ''));
+      if (!entry || entry.expires <= now()) return '';
+      return entry.heat || '';
+    },
+    heatChecked(id) {
+      const entry = memory.get(String(id || ''));
+      return Boolean(entry && entry.expires > now() && entry.heatChecked);
+    },
+    set(id, rating, heat = '') {
       const key = String(id || '');
       if (!/^\d{6,30}$/.test(key)) return false;
       const value = ratingValue(rating);
       if (value === undefined) return false;
-      remember(key, value, now() + ttl);
+      remember(key, value, now() + ttl, heat, true);
       dirty = true;
       return true;
     },

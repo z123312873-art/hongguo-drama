@@ -83,6 +83,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMediaSources: () => ipcRenderer.invoke('get-media-sources'),
   browseCategories: () => ipcRenderer.invoke('browse-categories'),
   browseList: (options) => ipcRenderer.invoke('browse-list', options),
+  browseUpcoming: (listener) => {
+    const wrapped = (_event, payload) => listener?.(payload);
+    ipcRenderer.on('upcoming-page', wrapped);
+    const finished = ipcRenderer.invoke('browse-upcoming').catch((error) => {
+      listener?.({ done: true, error: error?.message || '即将上线的短剧暂时载入失败' });
+    });
+    return () => { ipcRenderer.removeListener('upcoming-page', wrapped); return finished; };
+  },
   comicSnapshot: () => ipcRenderer.invoke('comic-snapshot'),
   comicExtras: (payload) => ipcRenderer.invoke('comic-extras', payload),
   comicEpisodes: (seriesId) => ipcRenderer.invoke('comic-episodes', { seriesId }),

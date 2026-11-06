@@ -1,13 +1,4 @@
-/**
- * main.js - 红果短剧 3.3 下载器（独立版）主进程
- *
- * 功能：
- *   1. 红果短剧解析（分享链接 / series_id -> 全剧集列表）
- *   2. 批量提交下载任务到下载队列
- *   3. 并发下载：流式下载播放直链 -> spade_a 派生 AES Key -> CENC-AES-CTR 解密 -> 输出 mp4
- *   4. 下载管理：进度推送、暂停/取消、重试、删除、打开所在文件夹
- *   5. 设置：下载目录、命名规则、并发数（JSON 文件持久化）
- */
+// main.js
 const { app, BrowserWindow, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen } = require('electron');
 const path = require('path');
 const IS_PREVIEW = require('./package.json').name === 'hongguo-experience-preview';
@@ -1291,12 +1282,53 @@ ipcMain.handle('test-custom-source', async (_event,draft) => {
 });
 
 
-ipcMain.handle('browse-list', (_event, options) =>
-  require(String(options?.source).startsWith('custom:') ? './src/native/custom-source' : options?.source === 'hema' ? './src/native/hema'
-    : options?.source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options, (authInfo, callback) => {
+ipcMain.handle('browse-list', async (_event, options) => {
+  const source = String(options?.source || '');
+  const listed = await require(source.startsWith('custom:') ? './src/native/custom-source' : source === 'hema' ? './src/native/hema'
+    : source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options, (authInfo, callback) => {
       if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
       else callback();
-    }));
+    });
+  // 官網榜單不一定帶「红果首发」。已預讀的 App 名單只補這個布林值，不改標題、評分或片單順序。
+  if (source.startsWith('custom:') || source === 'hema' || source === 'xifan' || !listed?.success || !Array.isArray(listed.results)) return listed;
+  try {
+    const releases = require('./src/native/hongguo-app-new');
+    if (typeof releases.premiereIds !== 'function' || typeof releases.warmNewReleases !== 'function') return listed;
+    if (!releases.premiereReady()) {
+      await Promise.race([
+        Promise.resolve(releases.warmNewReleases()).catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 900)),
+      ]);
+    }
+    const ids = releases.premiereIds();
+    if (ids && typeof ids.has === 'function') {
+      for (const item of listed.results) {
+        if (item && ids.has(String(item.series_id))) item.is_premiere = true;
+      }
+    }
+  } catch { /* 首發名單補不上時，榜單照常顯示。 */ }
+  return listed;
+});
+
+ipcMain.handle('browse-upcoming', async (event) => {
+  const sender = event.sender;
+  const send = (payload) => { if (!sender.isDestroyed()) sender.send('upcoming-page', payload); };
+  try {
+    const { fetchUpcomingPage, absorbUpcoming, MAX_PAGES } = require('./src/native/upcoming');
+    const { requestMetadata } = require('./src/native/app-source');
+    let state = { raw: [], items: [], offset: 0, sessionId: '', done: false };
+    for (let page = 0; page < MAX_PAGES && !state.done; page += 1) {
+      const batch = await fetchUpcomingPage({ offset: state.offset, sessionId: state.sessionId }, (apiPath, values) => requestMetadata(apiPath, values));
+      state = absorbUpcoming(state, batch, Date.now());
+      send({ items: state.items, done: state.done || page + 1 >= MAX_PAGES });
+    }
+    return { success: true };
+  } catch (error) {
+    const hint = require('./src/native/cert-hint').certificateMessage(error);
+    send({ done: true, error: hint || error?.message || '即将上线的短剧暂时载入失败' });
+    return { success: false, error: hint || error?.message || '即将上线的短剧暂时载入失败' };
+  }
+});
 
 // The pages the discover view opens with are requested while the window is still starting, so they are
 // already on their way (or answered) when the view asks for them. Failures are ignored; the view retries.
@@ -1309,6 +1341,8 @@ function prewarmBrowseLists() {
   for (const options of [{ category: 'hot-drama', page: 1 }, { category: 'real-drama', page: 1 }, { category: 'real-drama', page: 2 }]) {
     catalog.browseList(options, login).catch(() => {});
   }
+  try { require('./src/native/hongguo-app-new').warmNewReleases()?.catch?.(() => {}); } catch { /* 首發名單稍後由片單請求再補。 */ }
+  try { resolveLibrempeg(); } catch { /* 沒有轉碼程式時，相容片源仍走複製。 */ }
 }
 
 const comicReply = (work) => async (_event, payload) => {
@@ -1564,6 +1598,12 @@ function resolveFfmpeg(name) {
     }
   } catch (_) {}
   return null;
+}
+
+function resolveLibrempeg() {
+  const found = resolveFfmpeg('librempeg');
+  try { require('./src/native/app-source').setBytevc2Ready(Boolean(found)); } catch { /* 複製播放不依賴這個結果。 */ }
+  return found;
 }
 
 function findFileRecursive(dir, fileName, depth) {
@@ -2227,6 +2267,7 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
           { quality: options.quality, allowLowerQuality: options.allowLowerQuality, force: options.force || round > 0 }), controller.signal, 30000);
       } catch (error) {
         cancelled();
+        if (require('./src/native/playback-policy').codecExhausted(error)) throw error;
         if (!recoverable(error)) throw error;
         lastError = error;
         if (refused(error)) refusedRounds++;
@@ -2235,7 +2276,7 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
       cancelled();
       if (!info?.url) {
         lastError = Object.assign(new Error(info?.error || '未获取到有效播放地址'), { code: info?.code, sources: info?.sources });
-        if (!recoverable(lastError) || info?.locked) throw lastError;
+        if (require('./src/native/playback-policy').codecExhausted(lastError) || !recoverable(lastError) || info?.locked) throw lastError;
         if (refused(lastError)) refusedRounds++;
         continue;
       }
@@ -2473,7 +2514,7 @@ function startOnlineCapture(session, entry, playInfo, identity) {
   try {
     directory = fs.mkdtempSync(path.join(app.getPath('temp'), 'hongguo-online-'));
     const capture = createContentKeyCapture({ playInfo, request: requestMedia, maxBytes: ONLINE_MAX_BYTES, directory,
-      decrypt: (input, output, options) => decryptContentKeyFile(input, output, playInfo.contentKey, options) });
+      decrypt: (input, output, options) => decryptContentKeyFile(input, output, playInfo.contentKey, { ...options, codec: playInfo.codec, transcode: playInfo.transcode }) });
     capture.identity = identity;
     onlineCaptures.set(key, capture);
     const base = { ...entry };
@@ -2503,13 +2544,13 @@ function startOnlineCapture(session, entry, playInfo, identity) {
 
 function startContentKeyStream(playInfo, signal, capture = null) {
   if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey || '')) throw new Error('片源解密密钥格式无效');
-  const executable = resolveFfmpeg('ffmpeg');
-  if (!executable) throw new Error('未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
+  const plan = require('./src/native/transcode-args').streamPlan(playInfo);
+  const executable = plan.tool === 'librempeg' ? resolveLibrempeg() : resolveFfmpeg('ffmpeg');
+  if (!executable) throw new Error(plan.tool === 'librempeg'
+    ? '本集暂未提供兼容的 H.264/HEVC 片源'
+    : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const { spawn } = require('child_process');
-  const child = spawn(executable, ['-y', '-hide_banner', '-loglevel', 'error',
-    '-decryption_key', playInfo.contentKey, '-i', 'pipe:0',
-    '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1'],
+  const child = spawn(executable, plan.args,
   { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   const stop = () => { if (!child.killed) child.kill('SIGTERM'); };
   signal?.addEventListener('abort', stop, { once: true });
@@ -2533,18 +2574,22 @@ function startContentKeyStream(playInfo, signal, capture = null) {
 }
 
 /** App CENC uses native FFmpeg for both senc and saiz/saio layouts. Never log key/args. */
-async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken } = {}) {
+async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode } = {}) {
   if (typeof contentKey !== 'string' || !/^[a-f\d]{32}$/i.test(contentKey)) throw new Error('片源解密密钥格式无效');
   if (signal?.aborted) throw new Error('已取消媒体解密');
   cancelToken?.throwIfRequested();
-  const executable = resolveFfmpeg('ffmpeg');
-  if (!executable) throw new Error('未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
+  const transcoding = codec === 'bytevc2' || transcode === 'bytevc2';
+  const executable = transcoding ? resolveLibrempeg() : resolveFfmpeg('ffmpeg');
+  if (!executable) throw new Error(transcoding
+    ? '本集暂未提供兼容的 H.264/HEVC 片源'
+    : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
+  const args = transcoding
+    ? require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output)
+    : ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output];
   try {
     await new Promise((resolve, reject) => {
       const { spawn } = require('child_process');
-      const child = spawn(executable, ['-y', '-hide_banner', '-loglevel', 'error',
-        '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?',
-        '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output],
+      const child = spawn(executable, args,
       { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
       let cancelled = false, killTimer;
       const abort = () => {
@@ -2612,7 +2657,7 @@ async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, si
       await pipeline(response.data, fs.createWriteStream(input, { mode: 0o600 }), { signal });
       if (!received || (total && received !== total)) throw mediaTransferError('视频下载不完整，请重试');
       if (onProgress) onProgress(received, received, 'decrypting');
-      await decryptContentKeyFile(input, output, playInfo.contentKey, { signal });
+      await decryptContentKeyFile(input, output, playInfo.contentKey, { signal, codec: playInfo.codec, transcode: playInfo.transcode });
       if ((await fsp.stat(output)).size > maxBytes) throw tooLarge();
       return await fsp.readFile(output);
     } finally {

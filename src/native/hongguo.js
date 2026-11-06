@@ -4,8 +4,9 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('node:url');
 const { normalizeDownloadQuality } = require('./download-quality');
+const { codecRank } = require('./codec-rank');
 const { isPublicMediaUrl, webMediaRequestOptions } = require('./web-media-guard');
-const { readPublicScore } = require('./public-score');
+const { readPublicScore, readPublicHeat, readPublicCard, SERIES_HEADER_LIMIT } = require('./public-score');
 const { takeWebEpisodes } = require('./episode-prelude');
 
 const API = "https://api5-normal-sinfonlineb.fqnovel.com";
@@ -324,22 +325,31 @@ function readScoreStream(stream) {
     };
     stream.on('data', chunk => {
       buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-      const score = readPublicScore(buf, { partial: true });
-      if (score != null || buf.length >= SCORE_HTML_LIMIT) finish(null, score ?? readPublicScore(buf));
+      const card = readPublicCard(buf, { partial: true });
+      if ((card.rating != null && (card.heat || buf.length >= SERIES_HEADER_LIMIT)) || buf.length >= SCORE_HTML_LIMIT) {
+        finish(null, { rating: card.rating ?? readPublicScore(buf), heat: card.heat || readPublicHeat(buf) });
+      }
     });
-    stream.on('end', () => finish(null, readPublicScore(buf)));
+    stream.on('end', () => finish(null, { rating: readPublicScore(buf), heat: readPublicHeat(buf) }));
     stream.on('error', error => finish(error));
   });
 }
 
-/** Public 0–10 score. Stops once the hero score is in hand instead of reading the whole detail page. */
-async function fetchPublicScore(seriesId, timeout = 8000) {
+function asPublicCard(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return { rating: value.rating ?? null, heat: typeof value.heat === 'string' ? value.heat : '' };
+  }
+  return { rating: value ?? null, heat: '' };
+}
+
+/** Public 0–10 score and the heat sentence beside it. Stops once the hero is in hand. */
+async function fetchPublicCard(seriesId, timeout = 8000) {
   const id = String(seriesId || '');
-  if (!/^\d{6,30}$/.test(id)) return null;
+  if (!/^\d{6,30}$/.test(id)) return { rating: null, heat: '' };
   const url = `${SITE_ORIGIN}/detail?series_id=${encodeURIComponent(id)}`;
   const cached = sitePages.get(url);
-  if (cached && cached.expires > Date.now()) return readPublicScore(cached.html);
-  if (sitePending.has(url)) return readPublicScore(await sitePending.get(url));
+  if (cached && cached.expires > Date.now()) return { rating: readPublicScore(cached.html), heat: readPublicHeat(cached.html) };
+  if (sitePending.has(url)) return asPublicCard(await sitePending.get(url));
   let last;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -352,8 +362,9 @@ async function fetchPublicScore(seriesId, timeout = 8000) {
         maxRedirects: 5,
       });
       const body = res?.data;
-      if (body && typeof body.on === 'function') return await readScoreStream(body);
-      return readPublicScore(typeof body === 'string' ? body : '');
+      if (body && typeof body.on === 'function') return asPublicCard(await readScoreStream(body));
+      const html = typeof body === 'string' ? body : '';
+      return { rating: readPublicScore(html), heat: readPublicHeat(html) };
     } catch (error) {
       last = error;
       const status = Number(error?.response?.status);
@@ -362,6 +373,10 @@ async function fetchPublicScore(seriesId, timeout = 8000) {
     }
   }
   throw last;
+}
+
+async function fetchPublicScore(seriesId, timeout = 8000) {
+  return (await fetchPublicCard(seriesId, timeout)).rating;
 }
 
 function describeWebLoadError(error) {
@@ -653,11 +668,6 @@ function parseModelVideo(vm) {
     return [null, null, null];
   }
   const vl = vmj.video_list || [];
-  const rank = (codec) => {
-    if (['h264', 'avc', 'avc1'].includes(codec)) return 0;
-    if (['h265', 'h265_hvc1', 'hevc', 'hvc1', 'hev1', 'bytevc1'].includes(codec)) return 1;
-    return 2;
-  };
   // 比较两条流：返回 >0 表示 a 更适合播放
   const cmp = (a, b) => {
     if (a.codecRank !== b.codecRank) return b.codecRank - a.codecRank; // rank 越小越好
@@ -681,7 +691,7 @@ function parseModelVideo(vm) {
     if (!url) continue;
     const codec = String(v.video_meta?.codec_type || '').toLowerCase();
     const ei = v.encrypt_info || {};
-    const s = { ...streamScore(v), codecRank: rank(codec) };
+    const s = { ...streamScore(v), codecRank: codecRank(codec) };
     if (!bestScore || cmp(s, bestScore) > 0) {
       bestScore = s;
       best = [url, ei.spade_a || null, codec];
@@ -718,7 +728,7 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
 
 // Local filters (AdGuard, antivirus, VPN) can block the anonymous device registration or re-sign HTTPS.
 const FILTER_HINT = '若电脑装有 AdGuard 等拦截软件，请把红果短剧加入例外或暂时关闭后再试';
-const CERT_HINT = 'HTTPS 证书未被信任，请在 AdGuard/杀毒软件中把红果短剧加入例外，或暂时关闭 HTTPS 过滤后再试';
+const { CERT_HINT } = require('./cert-hint');
 function registrationHint(reason) {
   return reason === 'TLS' ? `（${CERT_HINT}）` : reason === 'NETWORK' ? `（设备注册连接被拦截或中断。${FILTER_HINT}）` : '';
 }
@@ -764,7 +774,7 @@ async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
   const body = {
     biz_param: MODEL_BIZ_PARAM,
     dr_scene: "preload",
-    mixed_video_id_map: { "1004": [vid] },
+    mixed_video_id_map: { "1004": require('./playback-policy').boundedEpisodeIds([vid]) },
   };
   try {
     const j = await apiCall("/novel/player/multi_video_model/preload/v1", body, 1, 6000);
@@ -1203,6 +1213,7 @@ module.exports = {
   fetchEpisodeListFromWeb,
   fetchSiteHtml,
   fetchPublicScore,
+  fetchPublicCard,
   fetchPlayUrlSingle,
   fetchPlayUrlFromWeb,
   deriveKey,

@@ -143,7 +143,7 @@ async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo,
       return {
         success: true, results: rescued.results, page: 1, total: rescued.results.length, totalPages: 0,
         hasMore: false, keyword: query, channel: 'app-new', partial: true,
-        error: `官网搜索未完成：${webError.message}${issue}；已显示 App 上新补搜结果`,
+        error: require('./cert-hint').certificateMessage(webError) || `官网搜索未完成：${webError.message}${issue}；已显示 App 上新补搜结果`,
       };
     }
     if (rescued.checked && rescued.error) rescueError = `；App 上新补搜未完成：${rescued.error}`;
@@ -152,7 +152,8 @@ async function searchHongguoCatalog(keyword, { sniff, searchWeb = searchHongguo,
     try { return await sniff(query); }
     catch (error) { return { success: false, results: [], error: error?.message || webError.message }; }
   }
-  return { success: false, results: [], error: webError ? `官网搜索未完成：${webError.message}${rescueError}` : (app?.error?.message || '搜索暂不可用') };
+  const hint = webError ? require('./cert-hint').certificateMessage(webError) : '';
+  return { success: false, results: [], error: hint || (webError ? `官网搜索未完成：${webError.message}${rescueError}` : (app?.error?.message || '搜索暂不可用')) };
 }
 
 module.exports = { searchHongguoCatalog, mergeResults, resetNewReleaseCooldown, WEB_BUDGET_MS, APP_BUDGET_MS };

@@ -99,4 +99,16 @@ function readPublicScore(html, options = {}) {
   return found.value ?? null;
 }
 
-module.exports = { readPublicScore, normalizeScore };
+const HEAT_TEXT = /(\d+(?:\.\d+)?)([万萬亿億])?(热度|熱度)/;
+
+function readPublicHeat(html) {
+  const match = HEAT_TEXT.exec(String(html || ''));
+  if (!match) return '';
+  return `${match[1]}${match[2] || ''}${match[3]}`;
+}
+
+function readPublicCard(html, options = {}) {
+  return { rating: readPublicScore(html, options), heat: readPublicHeat(html) };
+}
+
+module.exports = { readPublicScore, readPublicHeat, readPublicCard, normalizeScore, SERIES_HEADER_LIMIT };

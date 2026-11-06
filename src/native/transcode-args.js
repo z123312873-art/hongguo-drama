@@ -1,0 +1,22 @@
+const FRAGMENTED = 'frag_keyframe+empty_moov+default_base_moof';
+
+function copyStreamArgs(contentKey) {
+  return ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', 'pipe:0', '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', FRAGMENTED, '-f', 'mp4', 'pipe:1'];
+}
+
+function bytevc2StreamArgs(contentKey) {
+  return ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', 'pipe:0', '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-threads', '2', '-lookahead_threads', '1', '-c:a', 'copy', '-movflags', FRAGMENTED, '-f', 'mp4', 'pipe:1'];
+}
+
+function bytevc2FileArgs(contentKey, input, output) {
+  return ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-threads', '2', '-lookahead_threads', '1', '-c:a', 'copy', '-movflags', '+faststart', '-f', 'mp4', output];
+}
+
+function streamPlan(playInfo) {
+  if (playInfo?.codec === 'bytevc2' || playInfo?.transcode === 'bytevc2') {
+    return { tool: 'librempeg', args: bytevc2StreamArgs(playInfo.contentKey) };
+  }
+  return { tool: 'ffmpeg', args: copyStreamArgs(playInfo.contentKey) };
+}
+
+module.exports = { copyStreamArgs, bytevc2StreamArgs, bytevc2FileArgs, streamPlan };

@@ -21,10 +21,17 @@ function ratingNumber(value) {
 }
 
 const NEW_STATUS = /^新[剧劇]$/;
+const PREMIERE_STATUS = /^(?:红果首发|紅果首發)$/;
 
 // The ranking pages expose the site's own status chips (statusTags / status-tag items).
+function statusMatch(labels, pattern) {
+  return Array.isArray(labels) && labels.some(label => typeof label === 'string' && pattern.test(label.replace(/\s+/g, '')));
+}
 function isNewStatus(labels) {
-  return Array.isArray(labels) && labels.some(label => typeof label === 'string' && NEW_STATUS.test(label.replace(/\s+/g, '')));
+  return statusMatch(labels, NEW_STATUS);
+}
+function isPremiereStatus(labels) {
+  return statusMatch(labels, PREMIERE_STATUS);
 }
 
 function publicMetadata(item) {
@@ -78,7 +85,7 @@ function parseCatalog(html, category, page, sourceUrl) {
       cover: (comic && comicCover(item.series_cover)) || item.series_cover || '',
       episode_count: Number(item.episode_cnt) || 0,
       tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
-      rating: comic ? null : ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
+      rating: comic ? null : ratingNumber(item.scoreText ?? item.rating),
       ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${item.series_id}`,
     };
@@ -134,9 +141,10 @@ function parseRanking(html, category, page, sourceUrl) {
       cover: typeof item.cover === 'string' && /^https?:\/\//.test(item.cover) ? item.cover : '',
       episode_count: Array.isArray(item.episodeVids) ? item.episodeVids.length : 0,
       tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 8) : [],
-      rating: ratingNumber(item.scoreText ?? item.rating ?? item.score ?? item.series_score),
+      rating: ratingNumber(item.scoreText ?? item.rating),
       rank, heat: typeof item.heatText === 'string' ? item.heatText.trim() : '',
       is_new: isNewStatus(item.statusTags),
+      is_premiere: isPremiereStatus(item.statusTags),
       introduction: cleanIntroduction(item.description || item.intro || item.series_intro || item.abstract),
       ...publicMetadata(item),
       url: `${SITE}/detail?series_id=${id}` };
@@ -253,9 +261,10 @@ async function browseList(options = {}, proxyLogin) {
       if (cache.size > 32) cache.delete(cache.keys().next().value);
       return data;
     } catch (error) {
-      const message = controller.signal.aborted || error.code === 'ECONNABORTED' ? '目录加载超时，请重试'
+      const hint = require('./cert-hint').certificateMessage(error);
+      const message = hint || (controller.signal.aborted || error.code === 'ECONNABORTED' ? '目录加载超时，请重试'
         : /ECONNRESET|ERR_CONNECTION_RESET/.test(`${error.code} ${error.message}`)
-          ? '红果连接被中断，请重试或切换来源（ECONNRESET）' : error.message;
+          ? '红果连接被中断，请重试或切换来源（ECONNRESET）' : error.message);
       return { success: false, error: message, sourceUrl: url };
     } finally {
       clearTimeout(timer);

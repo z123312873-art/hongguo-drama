@@ -25,6 +25,8 @@ async function defaultRequest(signed, deadline) {
   try {
     return await requestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline, AbortSignal.timeout(remaining));
   } catch (error) {
+    const hint = require('./cert-hint').certificateMessage(error);
+    if (hint) throw appError(hint, 'ERR_TLS_CERT');
     const code = error.code === 'ETIMEDOUT' || error.name === 'AbortError' || error.name === 'TimeoutError' ? 'APP_TIMEOUT'
       : /未返回有效数据|空响应/i.test(error.message) ? 'APP_EMPTY'
       : error.code || 'APP_NETWORK';

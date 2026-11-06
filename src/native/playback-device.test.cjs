@@ -131,7 +131,7 @@ test('synchronous and asynchronous failures remain cached and expose only a safe
             return Promise.reject(unsafe);
         });
         const results = await Promise.allSettled(Array.from({ length: 10 }, () => get(() => assert.fail('no retry'))));
-        assert.equal(calls, 3, 'a transport failure tries the backup registration hosts once');
+        assert.equal(calls, 5, 'a transport failure tries the backup registration hosts once');
         assert.ok(results.every(result => result.status === 'rejected' && result.reason === results[0].reason));
         const error = results[0].reason;
         assert.equal(error.code, 'DEVICE_REGISTRATION_FAILED');
@@ -220,7 +220,7 @@ test('a failed registration is retried after the cooldown, never while within it
     const failing = () => { calls++; return Promise.reject(Object.assign(new Error('offline'), { code: 'ERR_NETWORK' })); };
     const first = get(failing);
     await assert.rejects(first, { code: 'DEVICE_REGISTRATION_FAILED' });
-    assert.equal(calls, 3);
+    assert.equal(calls, 5);
     clock.now += 4999;
     assert.equal(get(() => assert.fail('inside the cooldown')), first);
     clock.now += 1;
