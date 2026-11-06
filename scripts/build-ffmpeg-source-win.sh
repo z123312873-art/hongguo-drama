@@ -56,6 +56,9 @@ cp ffmpeg.exe ffprobe.exe "$ROOT/artifacts/bin/"
 # librempeg decodes the newer bvc2 tag. Its CLI is GPL-3; the configure entry also
 # names the AGPL flag only so avfilter_thread_frame turns on. That flag is removed
 # before configure. Never pass --enable-agpl.
+# Keep the assembler here. Turning it off leaves out the x86 init objects while the
+# C callers still reference them, and the Windows link fails. The ffmpeg 9.0.2
+# build above still turns its assembler off.
 LIBREMPEG_COMMIT=a0fafc5c42dbd7fce25b141c071277fb016a65c5
 LIBREMPEG_DIR=librempeg-a0fafc5c42db
 LIBREMPEG_TAR_SHA256=dfdabbc0b0f6dbfea60d4e3469d84dbcacdefc01a5d89a0b95716f97c508a41c
@@ -88,10 +91,10 @@ cd "$ROOT/build-librempeg"
   --arch=x86_64 --target-os=mingw32 --enable-cross-compile --cross-prefix=x86_64-w64-mingw32- \
   --disable-autodetect --disable-shared --enable-static --disable-doc --disable-debug \
   --disable-ffplay --disable-network --disable-indevs --disable-outdevs --enable-indev=lavfi \
-  --disable-x86asm --enable-gpl --enable-version3 --enable-libx264 \
+  --enable-gpl --enable-version3 --enable-libx264 \
   --pkg-config=pkg-config --pkg-config-flags=--static \
   --extra-cflags=-I../prefix/include --extra-ldflags='-static -L../prefix/lib' \
-  > "$ROOT/logs/librempeg-configure.log" 2>&1
+  > "$ROOT/logs/librempeg-configure.log" 2>&1 || { tail -n 60 "$ROOT/logs/librempeg-configure.log" >&2; exit 1; }
 python3 - "$ROOT/build-librempeg" <<'PY'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -107,7 +110,7 @@ for name in ('config_components.h', 'config.h'):
 if '1' not in decoder:
     raise SystemExit('bvc2 decoder was not enabled: ' + decoder)
 PY
-make -j "$JOBS" ffmpeg.exe > "$ROOT/logs/librempeg-build.log" 2>&1
+make -j "$JOBS" ffmpeg.exe > "$ROOT/logs/librempeg-build.log" 2>&1 || { tail -n 60 "$ROOT/logs/librempeg-build.log" >&2; exit 1; }
 cp ffmpeg.exe "$ROOT/artifacts/bin/librempeg.exe"
 cd "$ROOT"
 for tool in "$ROOT/artifacts/bin/"*.exe; do
