@@ -1,6 +1,6 @@
 # 紅果短劇 4.3
 
-4.3 為 **正式版**（`v4.3` / GitHub Latest）。`windows/4.3-release-*` 分支的 Windows CI 建置後，由 `publish-release-4-3` 工作建立發行：安裝版（NSIS）、`.blockmap`、`latest.yml`（應用內更新必需）與便攜 ZIP。安裝檔未簽章，SHA256 寫在發行說明。發行完成後，4.2 與 4.3 的預發佈（`installer-4.2-traditional-pre`、`installer-4.3-traditional-pre`）會一併移除，4.2 的內容已全部併入 4.3。
+4.3 曾為正式版（`v4.3`）。目前的正式版是 4.5。`windows/4.3-release-*` 分支的 Windows CI 建置後，由 `publish-release-4-3` 工作建立發行：安裝版（NSIS）、`.blockmap`、`latest.yml`（應用內更新必需）與便攜 ZIP。安裝檔未簽章，SHA256 寫在發行說明。發行完成後，4.2 與 4.3 的預發佈（`installer-4.2-traditional-pre`、`installer-4.3-traditional-pre`）會一併移除，4.2 的內容已全部併入 4.3。
 
 ## 更新摘要
 

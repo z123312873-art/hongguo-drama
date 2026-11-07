@@ -1,6 +1,6 @@
-# 紅果短劇 4.5 預發佈
+# 紅果短劇 4.5
 
-4.5 是預發佈。已安裝的正式版不會自動升級到這一版。4.3 仍是目前的正式版。
+4.5 為 **正式版**（`v4.5` / GitHub Latest）。`windows/4.5-release-*` 分支的 Windows CI 建置後，由 `publish-release-4-5` 工作建立發行：安裝版（NSIS）、`.blockmap`、`latest.yml`（應用內更新必需）與便攜 ZIP。安裝檔未簽章，SHA256 寫在發行說明。發行完成後才刪除 4.5 預發佈（`installer-4.5-traditional-pre`）。已安裝的 4.3 會看到這次更新。
 
 ## 更新摘要
 

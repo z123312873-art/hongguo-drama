@@ -7,7 +7,7 @@
 <p align="center">在電腦上找劇、接著看、下載與合併。介面預設繁體，Windows 安裝檔由這個倉庫自己發行。</p>
 
 <p align="center">
-  <img alt="目前正式版 4.3" src="https://img.shields.io/badge/正式版-4.3-8b3a3a?style=flat-square">
+  <img alt="目前正式版 4.5" src="https://img.shields.io/badge/正式版-4.5-8b3a3a?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -25,14 +25,12 @@
 
 只發行 **Windows x64** 安裝檔。
 
-**[下載 4.3 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.3/hongguo-downloader-4.3-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.3)
+**[下載 4.5 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.5/hongguo-downloader-4.5-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.5)
 
-也可使用 [4.3 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.3/hongguo-downloader-4.3-win-x64.zip)。
-
-[4.5 預發佈（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.5-traditional-pre) 不會取代 4.3 正式版，已安裝的程式也不會自動升級到預發佈。說明見 [4.5 更新說明](docs/release-4.5.md)。
+也可使用 [4.5 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.5/hongguo-downloader-4.5-win-x64.zip)。說明見 [4.5 更新說明](docs/release-4.5.md)。
 
 - 依畫面安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
-- 安裝檔未簽章。請從 [4.3 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.3) 下載，並對照該頁列出的校驗值。
+- 安裝檔未簽章。請從 [4.5 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.5) 下載，並對照該頁列出的校驗值。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
 - 桌面與開始功能表的捷徑名稱是「紅果短劇」。
 
