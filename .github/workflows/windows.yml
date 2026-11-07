@@ -153,7 +153,7 @@ jobs:
           - 在線播放更快更穩，切換集數幾乎不用等。
           - 漫畫閱讀頁底部按鈕在深色背景下清楚可見。
 
-          4.3 正式版，未簽章。已安裝的 4.1 會看到上面的摘要。下載與安裝都要自己確認。
+          4.3，未簽章。目前的正式版是 4.5。下載與安裝都要自己確認。
 
           檔名：hongguo-downloader-4.3-win-x64-setup.exe
           SHA256：$setup_sha
@@ -164,9 +164,9 @@ jobs:
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
-            gh release edit "$tag" --prerelease=false --draft=false --latest --title "4.3 正式版" --notes "$notes"
+            gh release edit "$tag" --prerelease=false --draft=false --latest=false --title "4.3" --notes "$notes"
           else
-            gh release create "$tag" --target "$GITHUB_SHA" --latest --title "4.3 正式版" --notes "$notes"
+            gh release create "$tag" --target "$GITHUB_SHA" --title "4.3" --notes "$notes"
           fi
           gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
           keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
