@@ -352,6 +352,7 @@ async function requestJson(url, options, deadline, signal) {
     throw Object.assign(new Error('App 片源跳转次数过多'), { code: 'SECURITY_BLOCKED' });
 }
 
+const NEWER_CODEC_UNREADY = '本集目前只有较新的编码，转码组件未就绪，暂时无法在线播放';
 function setBytevc2Ready(ready = true) { bytevc2Ready = ready === true; }
 
 async function requestMetadata(apiPath, values = {}, payload = null) {
@@ -441,14 +442,22 @@ async function fetchAppPlayUrl(vid, options = {}) {
         return { item, codec, codecRank: rank, quality, pixels, width, height, bitrate };
     });
     const compatible = rows.filter(row => row.codecRank < 2);
-    const transcode = bytevc2Ready ? rows.filter(row => playbackCodec(row.codec) === 'bytevc2') : [];
-    rows.length = 0;
-    rows.push(...(compatible.length ? compatible : transcode));
-    const matched = rows.filter(row => meetsDownloadQuality(row, requestedQuality));
-    // Playback keeps a measured picture when the label overstates the encode.
-    // Download fallback may walk every lower tier instead of failing the task.
-    const limited = requestedQuality !== 'auto' && !allowLowerQuality && !matched.length;
-    const pool = allowLowerQuality ? rows : limited ? rows.filter(row => row.width > 0 && row.height > 0) : matched;
+    const newer = rows.filter(row => playbackCodec(row.codec) === 'bytevc2');
+    const meets = row => requestedQuality === 'auto' || meetsDownloadQuality(row, requestedQuality);
+    const compatibleMatch = compatible.filter(meets);
+    const newerMatch = bytevc2Ready ? newer.filter(meets) : [];
+    // A copyable stream wins when it meets the request. Auto keeps every H.264/HEVC tier
+    // ahead of a newer encode, so a larger bytevc2 is not transcoded while those can play.
+    const preferred = requestedQuality === 'auto'
+        ? (compatible.length ? compatible : newerMatch)
+        : (compatibleMatch.length ? compatibleMatch : newerMatch);
+    const sizedCompatible = compatible.filter(row => row.width > 0 && row.height > 0);
+    const limited = requestedQuality !== 'auto' && !allowLowerQuality && !preferred.length && sizedCompatible.length > 0;
+    // Download may keep every lower copyable tier after the one that meets the request.
+    // Strict playback stays on the streams that meet it, and does not walk those lower tiers.
+    const pool = allowLowerQuality
+        ? (compatible.length ? compatible : (bytevc2Ready ? newer : []))
+        : preferred.length ? preferred : limited ? sizedCompatible : [];
     const selectedRows = pool.sort((a, b) => {
         if (allowLowerQuality && requestedQuality !== 'auto') {
             const aMeets = meetsDownloadQuality(a, requestedQuality), bMeets = meetsDownloadQuality(b, requestedQuality);
@@ -460,9 +469,17 @@ async function fetchAppPlayUrl(vid, options = {}) {
         if (requestedQuality === 'auto') return a.codecRank - b.codecRank || b.pixels - a.pixels || b.bitrate - a.bitrate;
         return Math.min(a.width, a.height) - Math.min(b.width, b.height) || a.codecRank - b.codecRank || b.bitrate - a.bitrate;
     });
-    if (!selectedRows.length) throw Object.assign(new Error(requestedQuality === 'auto' || allowLowerQuality
-        ? '本集暂未提供兼容的 H.264/HEVC 片源'
-        : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`), { code: 'NO_COMPATIBLE_CODEC' });
+    if (!selectedRows.length) {
+        if (!bytevc2Ready && newer.some(meets) && !compatible.some(meets)) {
+            const detail = requestedQuality === 'auto'
+                ? NEWER_CODEC_UNREADY
+                : `本集满足 ${requestedQuality} 的片源目前只有较新的编码，转码组件未就绪，暂时无法在线播放`;
+            throw Object.assign(new Error(detail), { code: 'NO_COMPATIBLE_CODEC' });
+        }
+        throw Object.assign(new Error(requestedQuality === 'auto' || allowLowerQuality
+            ? '本集暂未提供兼容的 H.264/HEVC 片源'
+            : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`), { code: 'NO_COMPATIBLE_CODEC' });
+    }
     let lastError;
     const variants = [];
     const seen = new Set();
@@ -510,8 +527,9 @@ async function fetchAppPlayUrl(vid, options = {}) {
     try {
         result = await variantsFrom(await readModel(identity, VIDEO_HOSTS[firstHost]));
     } catch (error) {
-        // An empty body, or a model whose streams are all outside H.264/HEVC, gets one fresh device
-        // on the next edge host. A wrong episode, a rejected request, or a key that will not parse stays put.
+        // An empty body, or a model that still cannot be played, gets one fresh device on the next
+        // edge host. A newer encode that can be transcoded stays on the device that returned it.
+        // A wrong episode, a rejected request, or a key that will not parse stays put.
         const retryable = error?.code === 'EMPTY_RESPONSE' || error?.code === 'NO_COMPATIBLE_CODEC';
         if (!retryable) throw error;
         let fresh = null;
@@ -530,4 +548,4 @@ async function fetchAppPlayUrl(vid, options = {}) {
 // Keeps unused playback devices ready so the next lookup does not wait for a registration.
 function warmPlayback() { armPlaybackPool(requestJson); }
 
-module.exports = { fetchAppPlayUrl, warmPlayback, setBytevc2Ready, VIDEO_HOSTS, METADATA_HOSTS, signedSearchRequest, signedMetadataRequest, requestMetadata, parseSearchInteger, requestJson };
+module.exports = { fetchAppPlayUrl, warmPlayback, setBytevc2Ready, NEWER_CODEC_UNREADY, VIDEO_HOSTS, METADATA_HOSTS, signedSearchRequest, signedMetadataRequest, requestMetadata, parseSearchInteger, requestJson };

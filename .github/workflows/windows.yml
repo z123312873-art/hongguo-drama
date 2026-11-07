@@ -14,7 +14,7 @@ permissions:
 jobs:
   media:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -23,7 +23,7 @@ jobs:
           path: ${{ runner.temp }}/media/artifacts
           key: windows-media-${{ hashFiles('scripts/build-ffmpeg-source-win.sh') }}
       - if: steps.media-cache.outputs.cache-hit != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-mingw-w64-x86-64 make pkg-config
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-mingw-w64-x86-64 make pkg-config nasm
       - if: steps.media-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-ffmpeg-source-win.sh "$RUNNER_TEMP/media" 4
       - uses: actions/upload-artifact@v7
@@ -227,6 +227,7 @@ jobs:
           - 修正來源格式不同時，優化在線播放等待
           - 優化線路不穩時，自動接入備用線路
           - 首次安裝程式時，預設改為繁體中文
+          - 優化線上播放異常問題
 
           4.5 預發佈，未簽章。4.3 仍是正式版。下載與安裝都要自己確認。
 

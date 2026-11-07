@@ -28,6 +28,54 @@ export function heroSlides(items) {
 }
 
 // translateX percentages are relative to the track, which is N slides wide.
+export const DISCOVER_SHELF_KEY = 'hongguo:discover-shelf';
+
+function shelfCard(item) {
+  if (!item || typeof item !== 'object') return null;
+  const seriesId = String(item.series_id || '');
+  const title = typeof item.series_title === 'string' ? item.series_title.trim() : '';
+  if (!seriesId || !title) return null;
+  return {
+    series_id: seriesId,
+    series_title: title,
+    cover: typeof item.cover === 'string' ? item.cover : '',
+    rank: Number(item.rank) || 0,
+    rating: item.rating ?? null,
+    heat: typeof item.heat === 'string' ? item.heat : '',
+    tags: Array.isArray(item.tags) ? item.tags.filter(tag => typeof tag === 'string').slice(0, 4) : [],
+    is_new: item.is_new === true,
+    is_premiere: item.is_premiere === true,
+    episode_label: typeof item.episode_label === 'string' ? item.episode_label : '',
+    episode_count: Number(item.episode_count) || 0,
+    completion_status: typeof item.completion_status === 'string' ? item.completion_status : '',
+  };
+}
+
+export function readDiscoverShelf(storage) {
+  try {
+    const parsed = JSON.parse(storage?.getItem?.(DISCOVER_SHELF_KEY) || 'null');
+    const hero = heroLineup(Array.isArray(parsed?.hero) ? parsed.hero : []).map(shelfCard).filter(Boolean);
+    const posters = (Array.isArray(parsed?.posters) ? parsed.posters : []).map(shelfCard).filter(Boolean).slice(0, 40);
+    return { hero, posters };
+  } catch {
+    return { hero: [], posters: [] };
+  }
+}
+
+export function writeDiscoverShelf(storage, patch = {}) {
+  if (typeof storage?.getItem !== 'function' || typeof storage?.setItem !== 'function') return;
+  const current = readDiscoverShelf(storage);
+  const next = {
+    hero: Object.prototype.hasOwnProperty.call(patch, 'hero')
+      ? heroLineup(patch.hero).map(shelfCard).filter(Boolean)
+      : current.hero,
+    posters: Object.prototype.hasOwnProperty.call(patch, 'posters')
+      ? (Array.isArray(patch.posters) ? patch.posters : []).map(shelfCard).filter(Boolean).slice(0, 40)
+      : current.posters,
+  };
+  try { storage.setItem(DISCOVER_SHELF_KEY, JSON.stringify(next)); } catch { /* the next open uses the network */ }
+}
+
 export function heroOffsetPercent(index, slideCount) {
   const count = Math.floor(Number(slideCount));
   const position = Math.floor(Number(index));

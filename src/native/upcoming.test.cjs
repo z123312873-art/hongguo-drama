@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { reservationCount, selectUpcoming, absorbUpcoming, fetchUpcomingPage, UPCOMING_PATH } = require('./upcoming');
+const { reservationCount, reservationPhrase, selectUpcoming, absorbUpcoming, fetchUpcomingPage, UPCOMING_PATH } = require('./upcoming');
 
 const now = Date.parse('2026-11-06T12:00:00+08:00');
 const stamp = (iso) => Math.floor(Date.parse(iso) / 1000);
@@ -29,7 +29,16 @@ test('reservation counts accept both scripts and ignore unrelated words', () => 
   assert.equal(reservationCount('1,059.2万人预约'), 10592000);
 });
 
-test('upcoming keeps a future timestamp and drops vague or expired rows', () => {
+test('reservation phrases keep one decimal and do not read the month as a count', () => {
+  assert.equal(reservationPhrase(8443000), '预约人数844.3万人预约');
+  assert.equal(reservationPhrase(10592000), '预约人数1059.2万人预约');
+  assert.equal(reservationPhrase(10000), '预约人数1万人预约');
+  assert.equal(reservationPhrase(150000000), '预约人数1.5亿人预约');
+  assert.equal(reservationPhrase(0), '');
+  assert.equal(reservationPhrase(reservationCount('预计11月7日上线，844.3万人预约')), '预约人数844.3万人预约');
+});
+
+test('upcoming keeps a dated timestamp, including one that has passed, and drops vague rows', () => {
   const selected = selectUpcoming([
     row({ name: '有日子', expected_rec_text: '2万' }),
     row({ name: '只有月份但有日子戳', item_id: '7100000000000000002', sub_info: '预计12月上线', expected_publish_time: stamp('2026-12-06T00:00:00+08:00'), expected_rec_text: '3万' }),
@@ -42,10 +51,15 @@ test('upcoming keeps a future timestamp and drops vague or expired rows', () => 
     row({ name: '备用时刻不算', item_id: '7100000000000000009', sub_info: '预计2月上线', expected_publish_time: 0, schedule_publish_time: stamp('2026-12-01T00:00:00+08:00'), expected_rec_text: '900万' }),
     row({ name: '句子里的日子不是人数', item_id: '7100000000000000010', sub_info: '预计11月22日上线，38.5万人预约', expected_rec_text: '', expected_publish_time: stamp('2026-11-22T00:00:00+08:00') }),
   ], now);
-  assert.deepEqual(selected.map(item => item.series_title), ['句子里的日子不是人数', '字串不算上线', '只有月份但有日子戳', '有日子']);
+  assert.deepEqual(selected.map(item => item.series_title), ['已经过期', '已经上线', '字串不算上线', '有日子', '句子里的日子不是人数', '只有月份但有日子戳']);
+  assert.deepEqual(['只有月份', '空白', '季度', '备用时刻不算'].map(name => selected.some(item => item.series_title === name)), [false, false, false, false]);
   assert.equal(selected.find(item => item.series_title === '句子里的日子不是人数').reservations, 385000);
-  assert.equal(selected.find(item => item.series_title === '有日子').online_label, '11月7日');
-  assert.equal(selected.find(item => item.series_title === '只有月份但有日子戳').online_label, '12月6日');
+  assert.equal(selected.find(item => item.series_title === '句子里的日子不是人数').reservation_label, '预约人数38.5万人预约');
+  assert.equal(selected.find(item => item.series_title === '已经上线').reservation_label, '预约人数100万人预约');
+  assert.equal(selected.every(item => item.is_new === false && item.is_premiere === false), true);
+  assert.equal(selected.find(item => item.series_title === '有日子').online_label, '预计11月7日上线');
+  assert.equal(selected.find(item => item.series_title === '已经过期').online_label, '预计10月24日上线');
+  assert.equal(selected.find(item => item.series_title === '只有月份但有日子戳').online_label, '预计12月6日上线');
   assert.equal(selected[0].cover.includes('tplv-resize:320:0.webp'), true);
   assert.equal(selected[0].cover.includes('640'), false);
 });

@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMediaSources: () => ipcRenderer.invoke('get-media-sources'),
   browseCategories: () => ipcRenderer.invoke('browse-categories'),
   browseList: (options) => ipcRenderer.invoke('browse-list', options),
+  listPremieres: () => ipcRenderer.invoke('list-premieres'),
+  inspectRelease: (entries) => ipcRenderer.invoke('inspect-release', entries),
   browseUpcoming: (listener) => {
     const wrapped = (_event, payload) => listener?.(payload);
     ipcRenderer.on('upcoming-page', wrapped);

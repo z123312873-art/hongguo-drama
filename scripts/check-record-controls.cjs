@@ -69,6 +69,48 @@ test('favorite poster survives toggle and removal preserves other records and co
   assert.equal(h.storage.get('hongguo:public-library:v1'), '{broken');
 });
 
+test('an upcoming favorite keeps its online day and an old record still loads', () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  const when = Date.parse('2026-12-31T00:00:00+08:00');
+  library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, online_time: when });
+  assert.equal(library.readLocalLibrary().items[0].online_time, when);
+  library.saveLocalSeries({ id: 'a', title: '甲', favorite: true });
+  assert.equal(library.readLocalLibrary().items[0].online_time, when, 'a later save without the field keeps the online day');
+  h.storage.set('hongguo:public-library:v1', JSON.stringify([{ id: 'b', title: '乙', favorite: true, published_at: null, favorited_at: when, cover: '' }]));
+  const legacy = library.readLocalLibrary();
+  assert.equal(legacy.error, '');
+  assert.equal(legacy.items[0].online_time, null);
+  h.storage.set('hongguo:public-library:v1', JSON.stringify([{ id: 'c', title: '丙', favorite: true, published_at: null, favorited_at: when, cover: '', online_time: 'soon' }]));
+  const messy = library.readLocalLibrary();
+  assert.equal(messy.error, '');
+  assert.equal(messy.items[0].online_time, null);
+  assert.equal(messy.items[0].title, '丙');
+});
+
+test('a scheduled favorite waits, and a confirmed episode list restores play', async () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  const future = Date.parse('2026-12-31T00:00:00+08:00');
+  library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, online_time: future });
+  const played = [], notes = [];
+  const waiting = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library }, { onPlay: item => played.push(item), onUnavailable: message => notes.push(message) });
+  assert.match(waiting.find(n => n.props.className === 'release-online').children.join(''), /预计上线日期12月31日/);
+  waiting.find(n => n.props['aria-label'] === '播放《甲》').props.onClick();
+  assert.equal(played.length, 0);
+  assert.match(notes[0], /尚未上线/);
+  library.saveLocalSeries({ id: 'b', title: '乙', favorite: true, online_time: Date.now() - 1000 });
+  h.window.electronAPI.inspectRelease = async ids => ({ success: true, results: ids.map(item => ({ id: item.id, playable: item.id === 'b' })) });
+  const ready = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library }, { onPlay: item => played.push(item), onUnavailable: message => notes.push(message) });
+  await ready.flush();
+  const text = node => typeof node === 'string' || typeof node === 'number' ? String(node) : node?.children?.map(text).join('') || '';
+  const rowFor = title => ready.nodes().find(node => node.props.className === 'release-row' && text(node).includes(title));
+  assert.equal(rowFor('乙').children.some(node => text(node).includes('预计上线日期')), false);
+  assert.match(text(rowFor('甲')), /预计上线日期12月31日/);
+  ready.find(n => n.props['aria-label'] === '播放《乙》').props.onClick();
+  assert.equal(played.at(-1).seriesId, 'b');
+  ready.find(n => n.props['aria-label'] === '播放《甲》').props.onClick();
+  assert.equal(played.filter(item => item.seriesId === 'a').length, 0);
+});
+
 test('search x deletes a term without selecting it or starting a search', async () => {
   const h = fixture(), search = h.load('searchHistory.js');
   search.saveSearchTerm('甲'); search.saveSearchTerm('乙');

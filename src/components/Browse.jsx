@@ -13,7 +13,7 @@ import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, pagesToFill, sam
 import { firstPagePosters } from '../comicLayout.mjs';
 import { joinPages, loadPage } from '../catalogPages.mjs';
 import { DEFAULT_BROWSE_CATEGORIES } from '../browseCategories.mjs';
-import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
+import { HERO_RESERVED_ROWS, heroLineup, readDiscoverShelf, writeDiscoverShelf } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
 import ComicBrowse from './ComicBrowse';
 
@@ -50,11 +50,22 @@ function needsPublicScore(results, ratings, heats, checkedAt, id, now = Date.now
   return true;
 }
 
+function savedShelf() {
+  try { return readDiscoverShelf(globalThis.localStorage); }
+  catch { return { hero: [], posters: [] }; }
+}
+
 function writeSnapshot(source, category, genre, page, entry) {
   const key = snapshotKey(source, category, genre, page);
   pageCache.delete(key);
   pageCache.set(key, entry);
   if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+  try {
+    if (source === 'hongguo' && !genre && Number(page) === 1 && globalThis.localStorage) {
+      if (category === 'hot-drama') writeDiscoverShelf(localStorage, { hero: entry.results });
+      if (category === 'real-drama') writeDiscoverShelf(localStorage, { posters: entry.results });
+    }
+  } catch { /* the shelf only shortens the next open */ }
 }
 
 // Window size only. The live grid's top moves when genre chips, skeletons, or
@@ -114,7 +125,7 @@ function Browse({ onNavigate, active = true }) {
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState(() => savedShelf().posters);
   const [meta, setMeta] = useState({ total: 0, totalPages: 0, genres: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -164,8 +175,8 @@ function Browse({ onNavigate, active = true }) {
   // 已下载统计（按 series_id -> 已下载集数）
   const [downloadedMap, setDownloadedMap] = useState({});
   const [toast, setToast] = useState(null);
-  const [heroItems, setHeroItems] = useState([]);
-  const [heroReady, setHeroReady] = useState(false);
+  const [heroItems, setHeroItems] = useState(() => savedShelf().hero);
+  const [heroReady, setHeroReady] = useState(() => savedShelf().hero.length > 0);
   const heroRequest = useRef(0);
   const reserveRows = source === 'hongguo' && (!heroReady || heroItems.length > 0) ? HERO_RESERVED_ROWS : 0;
   reserveRowsRef.current = reserveRows;
@@ -237,8 +248,9 @@ function Browse({ onNavigate, active = true }) {
         setSourceUrl(cached.sourceUrl || fallbackUrl);
         keepGenres(cached.meta?.genres);
       } else {
-        setResults([]);
-        setMeta({ total: 0, totalPages: 0, genres: [] });
+        const keepShelf = source === 'hongguo' && cat === 'real-drama' && !gen && Number(pg) === 1;
+        setResults(current => (keepShelf && current.length ? current : []));
+        if (!keepShelf) setMeta({ total: 0, totalPages: 0, genres: [] });
         setSourceUrl(fallbackUrl);
       }
       const neededSpan = haveCards && pg === 1
@@ -472,15 +484,47 @@ function Browse({ onNavigate, active = true }) {
             sourcePages: Number(res.totalPages) || 1,
           });
           setHeroItems(heroLineup(results));
-        } else if (!lineup.length) setHeroItems([]);
+        } else if (!lineup.length) setHeroItems(current => (current.length ? current : []));
       } catch {
-        if (!cancelled && request === heroRequest.current && !lineup.length) setHeroItems([]);
+        if (!cancelled && request === heroRequest.current && !lineup.length) setHeroItems(current => (current.length ? current : []));
       } finally {
         if (!cancelled && request === heroRequest.current) setHeroReady(true);
       }
     })();
     return () => { cancelled = true; };
   }, [source, sourceIds]);
+
+  const premiereKey = source === 'hongguo' ? results.map(item => item?.series_id || '').join(',') : '';
+  useEffect(() => {
+    if (!premiereKey || typeof window.electronAPI?.listPremieres !== 'function') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electronAPI.listPremieres();
+        if (cancelled || !res?.success || !Array.isArray(res.ids) || !res.ids.length) return;
+        const ids = new Set(res.ids.map(String));
+        setResults(current => {
+          let changed = false;
+          const next = current.map(item => {
+            if (!item || item.is_premiere === true || !ids.has(String(item.series_id))) return item;
+            changed = true;
+            return { ...item, is_premiere: true };
+          });
+          return changed ? next : current;
+        });
+        setHeroItems(current => {
+          let changed = false;
+          const next = current.map(item => {
+            if (!item || item.is_premiere === true || !ids.has(String(item.series_id))) return item;
+            changed = true;
+            return { ...item, is_premiere: true };
+          });
+          return changed ? next : current;
+        });
+      } catch { /* the posters stay usable without the premiere badge */ }
+    })();
+    return () => { cancelled = true; };
+  }, [premiereKey]);
 
   // A list that is still loading shows only the pages that arrived so far, so its size says nothing about how
   // many posters a page holds. Judging it then started the load over and cleared the posters on screen.
@@ -687,7 +731,7 @@ function Browse({ onNavigate, active = true }) {
     const id = String(item.series_id || '');
     const saved = saveLocalSeries({
       id, title: item.series_title, cover: typeof item.cover === 'string' ? item.cover : '',
-      published_at: item.published_at, favorite: !favoriteIds.has(id),
+      published_at: item.published_at, online_time: item.online_time, favorite: !favoriteIds.has(id),
     });
     if (saved.error) showToast(saved.error, 'error');
     else setLibrary(saved);
@@ -710,11 +754,14 @@ function Browse({ onNavigate, active = true }) {
     <div className="browse-container">
       {source === 'hongguo' && (heroItems.length > 0
         ? <DiscoverHero items={heroItems} active={active} busy={detailLoading} onPlay={openSeries} />
-        : !heroReady && <div className="discover-hero discover-hero-pending" aria-hidden="true" />)}
+        : !heroReady && <div className="discover-hero discover-hero-pending" role="status"><span>正在整理横幅</span></div>)}
       <div className="browse-header">
         <div className="browse-title">
-          <div><h2>发现短剧</h2><p className="page-description">挑一部喜欢的，让故事继续。</p></div>
-          {source === 'hongguo' && <button type="button" className={`btn browse-upcoming ${upcoming ? 'btn-outline' : 'btn-primary'}`} aria-pressed={upcoming} onClick={() => setUpcoming(value => !value)}>抢先上线日</button>}
+          <div className="browse-title-row">
+            <h2>发现短剧</h2>
+            {source === 'hongguo' && <button type="button" className={`btn browse-upcoming ${upcoming ? 'btn-outline' : 'btn-primary'}`} aria-pressed={upcoming} onClick={() => setUpcoming(value => !value)}>{upcoming ? '返回观看' : '抢先上线日'}</button>}
+          </div>
+          <p className="page-description">挑一部喜欢的，让故事继续。</p>
         </div>
         <div className="browse-header-right">
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
@@ -817,9 +864,10 @@ function Browse({ onNavigate, active = true }) {
                 type="button"
                 key={item.series_id}
                 className="browse-card"
-                onClick={() => openSeries(item)}
+                onClick={() => { if (upcoming && source === 'hongguo') return; openSeries(item); }}
                 title={item.series_title}
               >
+                {upcoming && item.reservation_label && <span className="browse-reserve-band">{item.reservation_label}</span>}
                 <div className="browse-cover">
                   {(item.rank > 0 || (item.is_new === true && item.is_premiere !== true) || item.is_premiere === true || formatPublicScore(item.rating ?? ratings[String(item.series_id)])) && <div className="browse-cover-top">
                     {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
@@ -851,16 +899,16 @@ function Browse({ onNavigate, active = true }) {
                       <Check size={11} /> {dl.completed}/{dl.total}
                     </span>
                   )}
-                  <div className="browse-hover">
+                  {!(upcoming && source === 'hongguo') && <div className="browse-hover">
                     <span className="browse-hover-play">
                       <Play size={16} /> {dl && dl.completed > 0 ? '播放' : '查看'}
                     </span>
-                  </div>
+                  </div>}
                 </div>
                 <div className="browse-card-title">{item.series_title}</div>
                 {item.completion_status === 'completed' && <div className="browse-completion-label">已完结</div>}
                 {item.completion_status === 'ongoing' && <div className="browse-completion-label">更新中</div>}
-                {(item.online_label || item.heat || heats[String(item.series_id)]) && <div className="browse-card-heat">{item.online_label || item.heat || heats[String(item.series_id)]}</div>}
+                {(item.online_label || item.heat || heats[String(item.series_id)]) && <div className={item.online_label ? 'browse-card-date' : 'browse-card-heat'}>{item.online_label || item.heat || heats[String(item.series_id)]}</div>}
                 {item.tags && item.tags.length > 0 && (
                   <div className="browse-card-tags">
                     {[...item.tags].sort((a, b) => Number(tagLabels.includes(b)) - Number(tagLabels.includes(a))).slice(0, 3).map((t) => (

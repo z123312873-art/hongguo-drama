@@ -111,6 +111,7 @@ const onlinePreparing = new Map(); // vid -> shared preparation + abort controll
 const onlineSessions = new Map(); // opaque stream ID -> playback lifetime
 // cache key -> encrypted episode being kept while FFmpeg streams it, so a seekable MP4 can follow the stream
 const onlineCaptures = new Map();
+const onlinePrefetchFiles = new Map();
 
 function abortOnlineCapture(key) {
   const capture = onlineCaptures.get(key);
@@ -898,7 +899,7 @@ async function executeHongguoDownload(task) {
       if (playInfo.contentKey) {
         const decodedPath = tmpPath + '.decoded';
         try {
-          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token });
+          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token, codec: playInfo.codec, transcode: playInfo.transcode });
           task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           if (allowLowerQuality) notifyQuality(Number.parseInt(task.actualQuality, 10));
           source.token.throwIfRequested();
@@ -1294,13 +1295,8 @@ ipcMain.handle('browse-list', async (_event, options) => {
   try {
     const releases = require('./src/native/hongguo-app-new');
     if (typeof releases.premiereIds !== 'function' || typeof releases.warmNewReleases !== 'function') return listed;
-    if (!releases.premiereReady()) {
-      await Promise.race([
-        Promise.resolve(releases.warmNewReleases()).catch(() => {}),
-        new Promise(resolve => setTimeout(resolve, 900)),
-      ]);
-    }
-    const ids = releases.premiereIds();
+    if (!releases.premiereReady()) releases.warmNewReleases()?.catch?.(() => {});
+    const ids = releases.premiereReady() ? releases.premiereIds() : null;
     if (ids && typeof ids.has === 'function') {
       for (const item of listed.results) {
         if (item && ids.has(String(item.series_id))) item.is_premiere = true;
@@ -1310,17 +1306,76 @@ ipcMain.handle('browse-list', async (_event, options) => {
   return listed;
 });
 
+ipcMain.handle('list-premieres', async () => {
+  try {
+    const releases = require('./src/native/hongguo-app-new');
+    if (typeof releases.premiereIds !== 'function' || typeof releases.warmNewReleases !== 'function') return { success: false, ids: [] };
+    if (!releases.premiereReady()) {
+      await Promise.race([
+        Promise.resolve(releases.warmNewReleases()).catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 4000)),
+      ]);
+    }
+    return { success: true, ids: [...(releases.premiereIds() || [])] };
+  } catch {
+    return { success: false, ids: [] };
+  }
+});
+
+let releaseProbe;
+function getReleaseProbe() {
+  if (!releaseProbe) {
+    const { createReleaseProbe } = require('./src/native/release-availability');
+    releaseProbe = createReleaseProbe({
+      lookup: async (id) => {
+        const { confirmedOffline } = require('./src/native/release-availability');
+        try {
+          const detail = await require('./src/native/hongguo').fetchEpisodeList(id);
+          return Array.isArray(detail?.episodes) && detail.episodes.length > 0;
+        } catch (error) {
+          if (confirmedOffline(error)) return false;
+          throw error;
+        }
+      },
+    });
+  }
+  return releaseProbe;
+}
+
+let upcomingGeneration = 0;
 ipcMain.handle('browse-upcoming', async (event) => {
   const sender = event.sender;
-  const send = (payload) => { if (!sender.isDestroyed()) sender.send('upcoming-page', payload); };
+  const generation = ++upcomingGeneration;
+  const send = (payload) => { if (generation === upcomingGeneration && !sender.isDestroyed()) sender.send('upcoming-page', payload); };
   try {
     const { fetchUpcomingPage, absorbUpcoming, MAX_PAGES } = require('./src/native/upcoming');
+    const { releaseProbeIds, scheduleReleaseDrops, visibleUpcoming } = require('./src/native/release-availability');
     const { requestMetadata } = require('./src/native/app-source');
+    const probe = getReleaseProbe();
+    const gone = new Set();
     let state = { raw: [], items: [], offset: 0, sessionId: '', done: false };
+    const visible = () => visibleUpcoming(state.items, { known: id => probe.known(id), gone });
+    const publish = () => send({ items: visible(), done: state.done });
+    const drops = scheduleReleaseDrops({
+      ask: id => probe.ask(id),
+      shouldStop: () => generation !== upcomingGeneration,
+      onPlayable: id => { gone.add(String(id)); publish(); },
+      onUnavailable: () => publish(),
+      onUnknown: () => publish(),
+    });
+    const enqueue = () => {
+      for (const item of state.items) {
+        if (probe.known(item.series_id) === true) gone.add(String(item.series_id));
+      }
+      drops.push(releaseProbeIds(state.items).filter(id => probe.known(id) === undefined));
+    };
     for (let page = 0; page < MAX_PAGES && !state.done; page += 1) {
+      if (generation !== upcomingGeneration) return { success: true };
       const batch = await fetchUpcomingPage({ offset: state.offset, sessionId: state.sessionId }, (apiPath, values) => requestMetadata(apiPath, values));
       state = absorbUpcoming(state, batch, Date.now());
-      send({ items: state.items, done: state.done || page + 1 >= MAX_PAGES });
+      if (page + 1 >= MAX_PAGES) state = { ...state, done: true };
+      enqueue();
+      publish();
     }
     return { success: true };
   } catch (error) {
@@ -1328,6 +1383,26 @@ ipcMain.handle('browse-upcoming', async (event) => {
     send({ done: true, error: hint || error?.message || '即将上线的短剧暂时载入失败' });
     return { success: false, error: hint || error?.message || '即将上线的短剧暂时载入失败' };
   }
+});
+
+ipcMain.handle('inspect-release', async (_event, entries) => {
+  const list = Array.isArray(entries) ? entries : [];
+  const now = Date.now();
+  const probe = getReleaseProbe();
+  const results = [];
+  const seen = new Set();
+  for (const entry of list) {
+    const id = String(entry?.id || '').trim();
+    const online = Number(entry?.online_time);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    if (!Number.isFinite(online) || online <= 0 || online > now) {
+      results.push({ id, playable: false, skipped: true });
+      continue;
+    }
+    results.push({ id, playable: await probe.ask(id) });
+  }
+  return { success: true, results };
 });
 
 // The pages the discover view opens with are requested while the window is still starting, so they are
@@ -2235,6 +2310,7 @@ function awaitMediaOperation(promise, signal, timeout = 0) {
 
 /** Retry the complete operation so a broken body never counts as a successful download. */
 async function withMediaRecovery(vid, seriesId, options, consume) {
+  try { resolveLibrempeg(); } catch { /* 沒有轉碼程式時，相容片源仍走複製。 */ }
   const controller = new AbortController();
   const abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });
@@ -2393,6 +2469,22 @@ function registerStreamProtocol() {
         // A fallback can change encryption and size; serve Range only after decoding that candidate.
         if (playInfo.contentKey && !playInfo.spadeA) {
           if (request.method === 'HEAD') { cleanup(); return new Response(null, { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } }); }
+          const finished = adoptPrefetchFile(session.cacheKey || session.vid);
+          if (finished) {
+            entry.filePath = finished.filePath;
+            entry.disk = finished.disk;
+            entry.size = finished.size;
+            entry.mediaIdentity = identity;
+            entry.complete = true;
+            delete entry.playInfo;
+            onlineCache.set(session.cacheKey || session.vid, entry);
+            trimOnlineCache();
+            session.mediaStarted = true;
+            session.mediaIdentity = identity;
+            cleanup();
+            return diskMediaResponse(request, entry, session);
+          }
+          abortPrefetchFile(session.cacheKey || session.vid);
           const child = startContentKeyStream(playInfo, controller.signal, startOnlineCapture(session, entry, playInfo, identity));
           session.mediaStarted = true; session.mediaIdentity = identity;
           child.stdout.once('close', cleanup);
@@ -2500,6 +2592,79 @@ function registerLocalProtocol() {
   }));
 }
 
+function abortPrefetchFile(key) {
+  const job = onlinePrefetchFiles.get(key);
+  if (!job || job.adopted) return;
+  onlinePrefetchFiles.delete(key);
+  job.controller.abort();
+  const directory = job.disk?.directory;
+  job.promise?.catch(() => {});
+  if (directory) fs.rm(directory, { recursive: true, force: true }, () => {});
+}
+
+function adoptPrefetchFile(key) {
+  const job = onlinePrefetchFiles.get(key);
+  if (!job?.done || !job.filePath) return null;
+  job.adopted = true;
+  onlinePrefetchFiles.delete(key);
+  let size = 0;
+  try { size = fs.statSync(job.filePath).size; } catch { size = 0; }
+  if (!size) {
+    const directory = job.disk?.directory;
+    if (directory) fs.rm(directory, { recursive: true, force: true }, () => {});
+    return null;
+  }
+  return { filePath: job.filePath, disk: job.disk, size };
+}
+
+// The next episode keeps encoding in the background. Playback never waits for that file:
+// a finished file is served whole, and an unfinished one is dropped so the live stream can start.
+function beginBytevc2Prefetch(key, playInfo, signal) {
+  const existing = onlinePrefetchFiles.get(key);
+  if (existing) return existing;
+  if (signal?.aborted) return null;
+  const controller = new AbortController();
+  const job = { controller, done: false, adopted: false, filePath: '', disk: null, promise: null };
+  const abort = () => abortPrefetchFile(key);
+  signal?.addEventListener('abort', abort, { once: true });
+  job.promise = (async () => {
+    let directory = '';
+    let response;
+    try {
+      directory = await fsp.mkdtemp(path.join(app.getPath('temp'), 'hongguo-online-'));
+      job.disk = { directory, readers: 0 };
+      const filePath = path.join(directory, 'video.mp4');
+      const input = path.join(directory, 'encrypted.mp4');
+      response = await requestMedia(playInfo, { signal: controller.signal });
+      const total = Number(response.headers['content-length']) || 0;
+      if (total > ONLINE_MAX_BYTES) {
+        response.data.destroy();
+        throw Object.assign(new Error('本集过大，请下载后播放'), { code: 'MEDIA_TOO_LARGE' });
+      }
+      await pipeline(response.data, fs.createWriteStream(input, { mode: 0o600 }), { signal: controller.signal });
+      await decryptContentKeyFile(input, filePath, playInfo.contentKey, {
+        signal: controller.signal, codec: playInfo.codec, transcode: playInfo.transcode, profile: 'prefetch',
+      });
+      await fsp.unlink(input).catch(() => {});
+      const size = (await fsp.stat(filePath)).size;
+      if (!size) throw new Error('媒体解密没有生成可用文件');
+      if (onlinePrefetchFiles.get(key) !== job) {
+        fs.rm(directory, { recursive: true, force: true }, () => {});
+        return;
+      }
+      job.filePath = filePath;
+      job.done = true;
+    } catch {
+      response?.data?.destroy?.();
+      if (onlinePrefetchFiles.get(key) === job) onlinePrefetchFiles.delete(key);
+      if (!job.adopted && directory) fs.rm(directory, { recursive: true, force: true }, () => {});
+    }
+  })();
+  onlinePrefetchFiles.set(key, job);
+  if (signal?.aborted) abortPrefetchFile(key);
+  return job;
+}
+
 /**
  * Keep the encrypted episode while it streams. When the download finishes it becomes an ordinary MP4 in the online
  * cache, which `prepare-online-play` hands out once the player needs to seek. Returns null when it cannot be kept.
@@ -2547,7 +2712,7 @@ function startContentKeyStream(playInfo, signal, capture = null) {
   const plan = require('./src/native/transcode-args').streamPlan(playInfo);
   const executable = plan.tool === 'librempeg' ? resolveLibrempeg() : resolveFfmpeg('ffmpeg');
   if (!executable) throw new Error(plan.tool === 'librempeg'
-    ? '本集暂未提供兼容的 H.264/HEVC 片源'
+    ? require('./src/native/app-source').NEWER_CODEC_UNREADY
     : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const { spawn } = require('child_process');
   const child = spawn(executable, plan.args,
@@ -2574,23 +2739,28 @@ function startContentKeyStream(playInfo, signal, capture = null) {
 }
 
 /** App CENC uses native FFmpeg for both senc and saiz/saio layouts. Never log key/args. */
-async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode } = {}) {
+async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode, profile } = {}) {
   if (typeof contentKey !== 'string' || !/^[a-f\d]{32}$/i.test(contentKey)) throw new Error('片源解密密钥格式无效');
   if (signal?.aborted) throw new Error('已取消媒体解密');
   cancelToken?.throwIfRequested();
   const transcoding = codec === 'bytevc2' || transcode === 'bytevc2';
   const executable = transcoding ? resolveLibrempeg() : resolveFfmpeg('ffmpeg');
   if (!executable) throw new Error(transcoding
-    ? '本集暂未提供兼容的 H.264/HEVC 片源'
+    ? require('./src/native/app-source').NEWER_CODEC_UNREADY
     : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const args = transcoding
-    ? require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output)
+    ? (profile === 'prefetch'
+      ? require('./src/native/transcode-args').bytevc2PrefetchArgs(contentKey, input, output)
+      : require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output))
     : ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output];
   try {
     await new Promise((resolve, reject) => {
       const { spawn } = require('child_process');
       const child = spawn(executable, args,
       { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      if (profile === 'prefetch' && child.pid) {
+        try { require('os').setPriority(child.pid, 10); } catch (_) { /* 播放中的那一集仍用一般優先順序。 */ }
+      }
       let cancelled = false, killTimer;
       const abort = () => {
         if (cancelled) return;
@@ -2734,6 +2904,8 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!seekable && playInfo.contentKey && !playInfo.spadeA) {
               if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
+              const transcoding = playInfo.codec === 'bytevc2' || playInfo.transcode === 'bytevc2';
+              if (prefetch && transcoding) beginBytevc2Prefetch(key, playInfo, controller.signal);
               return {...entry,playInfo};
             }
             else if (!seekable && !prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
@@ -2758,8 +2930,9 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
     }
     if (!onlineSessions.has(streamId)) throw new Error('已取消播放');
     session.entry = { ...entry }; entry.lastUsed = Date.now();
+    const transcoding = !!(entry.playInfo && (entry.playInfo.codec === 'bytevc2' || entry.playInfo.transcode === 'bytevc2'));
     return { success: true, url: `${STREAM_SCHEME}://play/${streamId}`, streamId, size: entry.size,
-      cached, streaming: !!entry.playInfo, notice: entry.notice || '' };
+      cached, streaming: !!entry.playInfo, transcoding, notice: entry.notice || '' };
   } catch (error) {
     releaseOnlineSession(streamId);
     const sources = Array.isArray(error.sources) ? error.sources.map(item => ({
