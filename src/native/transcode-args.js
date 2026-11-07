@@ -21,7 +21,7 @@ function bytevc2FileArgs(contentKey, input, output) {
 
 function bytevc2PrefetchArgs(contentKey, input, output) {
   return ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-threads', '2',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-threads', '4',
     '-g', '48', '-keyint_min', '48', '-sc_threshold', '0', '-force_key_frames', 'expr:gte(t,n_forced*1)',
     '-c:a', 'copy', '-movflags', '+faststart', '-f', 'mp4', output];
 }

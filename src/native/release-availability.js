@@ -32,14 +32,23 @@ function confirmedOffline(error) {
   return /未获取到剧集数据|分集列表为空|官网页面未找到分集数据/.test(String(error?.message || ''));
 }
 
-function visibleUpcoming(items, { now = Date.now(), known = () => undefined, gone = new Set() } = {}) {
+function visibleUpcoming(items, { now = Date.now(), gone = new Set() } = {}) {
   const today = taipeiDay(now);
   return (items || []).filter(item => {
     const id = String(item?.series_id || item?.id || '');
     if (!id || gone.has(id)) return false;
     const day = taipeiDay(item?.online_time);
-    if (day && today && day < today && known(id) !== 'error') return false;
+    // A date before today stays off the wall. A failed check is not proof the show launched.
+    if (day && today && day < today) return false;
     return true;
+  });
+}
+
+function releaseProbeIds(items, now = Date.now()) {
+  const today = taipeiDay(now);
+  return dueReleaseIds(items, now).filter(id => {
+    const item = (items || []).find(row => String(row?.series_id || row?.id || '') === id);
+    return Boolean(item) && taipeiDay(item.online_time) === today;
   });
 }
 
@@ -133,6 +142,7 @@ module.exports = {
   dueReleaseIds,
   confirmedOffline,
   visibleUpcoming,
+  releaseProbeIds,
   createReleaseProbe,
   scheduleReleaseDrops,
 };

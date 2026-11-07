@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { posterColumns, posterSlots } from '../../catalogFill.mjs';
-import { HERO_INTERVAL_MS, HERO_LIMIT, HERO_RESERVED_ROWS, heroLineup, heroOffsetPercent, heroSlides } from '../../discoverHero.mjs';
+import { DISCOVER_SHELF_KEY, HERO_INTERVAL_MS, HERO_LIMIT, HERO_RESERVED_ROWS, heroLineup, heroOffsetPercent, heroSlides, readDiscoverShelf, writeDiscoverShelf } from '../../discoverHero.mjs';
 import { uiScale } from '../../uiScale.mjs';
 
 const series = (rank, id = String(7600000000000000000n + BigInt(rank))) => ({
@@ -68,6 +68,34 @@ test('1K, 2K and 4K poster grids lose two rows and never drop the last row', () 
   const cramped = posterSlots({ width: 900, height: 120, minCard: 150, reservedRows: 9 });
   assert.equal(cramped, posterColumns({ width: 900, minCard: 150 }), 'a short window keeps one poster row');
   assert.equal(posterSlots({ width: 0, height: 800, reservedRows: 2 }), 0);
+});
+
+test('the last banner and first poster page can be shown again before the network returns', () => {
+  const stored = new Map();
+  const storage = {
+    getItem: key => stored.get(key) || null,
+    setItem: (key, value) => stored.set(key, value),
+  };
+  const hero = series(1);
+  const poster = { series_id: '7600000000000000201', series_title: '短剧名', cover: 'https://example.test/a.jpg', tags: ['都市', 1, '逆袭'], is_premiere: true };
+  writeDiscoverShelf(storage, { hero: [hero, { series_id: '12', series_title: '太短', rank: 1 }], posters: [poster, null, { series_title: '没有编号' }] });
+  writeDiscoverShelf(storage, { posters: [poster, { series_id: '7600000000000000202', series_title: '第二部' }] });
+  const shelf = readDiscoverShelf(storage);
+  assert.equal(shelf.hero.length, 1);
+  assert.equal(shelf.hero[0].series_id, hero.series_id);
+  assert.equal(shelf.hero[0].cover, '');
+  assert.deepEqual(shelf.posters.map(item => item.series_id), ['7600000000000000201', '7600000000000000202']);
+  assert.deepEqual(shelf.posters[0].tags, ['都市', '逆袭']);
+  assert.equal(shelf.posters[0].is_premiere, true);
+  assert.equal(stored.has(DISCOVER_SHELF_KEY), true);
+  stored.set(DISCOVER_SHELF_KEY, '{');
+  assert.deepEqual(readDiscoverShelf(storage), { hero: [], posters: [] });
+  assert.deepEqual(readDiscoverShelf(null), { hero: [], posters: [] });
+  const browse = fs.readFileSync(new URL('../Browse.jsx', import.meta.url), 'utf8');
+  assert.match(browse, /savedShelf\(\)\.hero/);
+  assert.match(browse, /savedShelf\(\)\.posters/);
+  assert.match(browse, /正在整理横幅/);
+  assert.doesNotMatch(browse, /discover-hero-pending" aria-hidden/);
 });
 
 test('discover page asks the live hot-drama list and the sidebar no longer has a feed page', () => {

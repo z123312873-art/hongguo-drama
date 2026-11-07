@@ -26,6 +26,9 @@ test('discover layout stays inside 1K, 2K and 4K widths', () => {
   assert.match(reserve, /text-align: center/);
   assert.doesNotMatch(reserve, /font-scale/);
   assert.doesNotMatch(reserve, /#1d4ed8/);
+  const title = css.match(/\.browse-card-title \{[^}]*\}/)[0];
+  assert.match(title, /min-height: calc\(42px \* var\(--font-scale, 1\)\)/);
+  assert.match(title, /-webkit-line-clamp: 2/);
   const date = css.match(/\.browse-card-date \{[^}]*\}/)[0];
   assert.match(date, /text-align: center/);
   assert.match(date, /font-size: 14px/);

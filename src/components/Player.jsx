@@ -85,6 +85,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const [mediaBuffering, setMediaBuffering] = useState(false);
   const [sawPicture, setSawPicture] = useState(false);
   const [onlineProgress, setOnlineProgress] = useState(null); // {percent, phase}
+  const [onlineTranscoding, setOnlineTranscoding] = useState(false);
   const [cacheInfo, setCacheInfo] = useState({ count: 0, bytes: 0 });
   const [downloadedRevision, setDownloadedRevision] = useState(0);
   const [downloadedMap, setDownloadedMap] = useState({}); // series_id -> {completed,total}
@@ -239,6 +240,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     setOnlineVid(null);
     setOnlineUrl('');
     setOnlineProgress(null);
+    setOnlineTranscoding(false);
     setMediaBuffering(false);
     setSawPicture(false);
     setCompatProgress(null);
@@ -790,6 +792,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         request.prepared = true;
         setMediaBuffering(true);
         setOnlineUrl(res.url);
+        setOnlineTranscoding(Boolean(res.transcoding));
         setOnlineProgress(null);
         refreshOnlineCacheInfo();
         if (res.notice) showToast(res.notice);
@@ -1885,7 +1888,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           </div>
         ) : (
           <div className="compat-overlay" role="status">
-            <RefreshCw size={26} className="spin" /><p>正在加载视频…</p>
+            <RefreshCw size={26} className="spin" /><p>{onlineTranscoding ? '正在转档…' : '正在加载视频…'}</p>
             <button className="btn btn-outline" onClick={() => stopPlayback()}>取消播放</button>
           </div>
         ))}

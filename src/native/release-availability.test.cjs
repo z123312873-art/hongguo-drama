@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { taipeiDay, rememberRelease, readRelease, dueReleaseIds, confirmedOffline, visibleUpcoming, createReleaseProbe, scheduleReleaseDrops } = require('./release-availability');
+const { taipeiDay, rememberRelease, readRelease, dueReleaseIds, confirmedOffline, visibleUpcoming, releaseProbeIds, createReleaseProbe, scheduleReleaseDrops } = require('./release-availability');
 
 const taipei = iso => Date.parse(iso);
 
@@ -70,7 +70,7 @@ test('a stopped check does not report a later id', async () => {
   assert.deepEqual(found, ['可播']);
 });
 
-test('a past preview leaves the wall unless the check itself failed', () => {
+test('a date before today leaves the wall even when the episode check fails', () => {
   const now = taipei('2026-11-07T12:00:00+08:00');
   const items = [
     { series_id: '旧', online_time: taipei('2026-10-26T00:00:00+08:00') },
@@ -78,9 +78,10 @@ test('a past preview leaves the wall unless the check itself failed', () => {
     { series_id: '未来', online_time: taipei('2026-11-08T00:00:00+08:00') },
     { series_id: '查不到', online_time: taipei('2026-10-27T00:00:00+08:00') },
   ];
-  const known = id => (id === '查不到' ? 'error' : undefined);
-  assert.deepEqual(visibleUpcoming(items, { now, known }).map(item => item.series_id), ['今天', '未来', '查不到']);
-  assert.deepEqual(visibleUpcoming(items, { now, known, gone: new Set(['未来']) }).map(item => item.series_id), ['今天', '查不到']);
+  const known = id => (id === '查不到' ? 'error' : id === '旧' ? false : undefined);
+  assert.deepEqual(visibleUpcoming(items, { now, known }).map(item => item.series_id), ['今天', '未来']);
+  assert.deepEqual(visibleUpcoming(items, { now, known, gone: new Set(['未来']) }).map(item => item.series_id), ['今天']);
+  assert.deepEqual(releaseProbeIds(items, now), ['今天']);
   assert.equal(confirmedOffline(new Error('获取分集失败：官网数据源（官网页面未找到分集数据（vid_list）），备用接口（未获取到剧集数据）')), true);
   assert.equal(confirmedOffline(new Error('获取分集失败：官网数据源（加载超时或连接中断），备用接口（ECONNRESET）')), false);
   assert.equal(confirmedOffline(new Error('备用接口分集列表为空')), true);

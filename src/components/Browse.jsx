@@ -13,7 +13,7 @@ import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, pagesToFill, sam
 import { firstPagePosters } from '../comicLayout.mjs';
 import { joinPages, loadPage } from '../catalogPages.mjs';
 import { DEFAULT_BROWSE_CATEGORIES } from '../browseCategories.mjs';
-import { HERO_RESERVED_ROWS, heroLineup } from '../discoverHero.mjs';
+import { HERO_RESERVED_ROWS, heroLineup, readDiscoverShelf, writeDiscoverShelf } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
 import ComicBrowse from './ComicBrowse';
 
@@ -50,11 +50,22 @@ function needsPublicScore(results, ratings, heats, checkedAt, id, now = Date.now
   return true;
 }
 
+function savedShelf() {
+  try { return readDiscoverShelf(globalThis.localStorage); }
+  catch { return { hero: [], posters: [] }; }
+}
+
 function writeSnapshot(source, category, genre, page, entry) {
   const key = snapshotKey(source, category, genre, page);
   pageCache.delete(key);
   pageCache.set(key, entry);
   if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+  try {
+    if (source === 'hongguo' && !genre && Number(page) === 1 && globalThis.localStorage) {
+      if (category === 'hot-drama') writeDiscoverShelf(localStorage, { hero: entry.results });
+      if (category === 'real-drama') writeDiscoverShelf(localStorage, { posters: entry.results });
+    }
+  } catch { /* the shelf only shortens the next open */ }
 }
 
 // Window size only. The live grid's top moves when genre chips, skeletons, or
@@ -114,7 +125,7 @@ function Browse({ onNavigate, active = true }) {
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState(() => savedShelf().posters);
   const [meta, setMeta] = useState({ total: 0, totalPages: 0, genres: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -164,8 +175,8 @@ function Browse({ onNavigate, active = true }) {
   // 已下载统计（按 series_id -> 已下载集数）
   const [downloadedMap, setDownloadedMap] = useState({});
   const [toast, setToast] = useState(null);
-  const [heroItems, setHeroItems] = useState([]);
-  const [heroReady, setHeroReady] = useState(false);
+  const [heroItems, setHeroItems] = useState(() => savedShelf().hero);
+  const [heroReady, setHeroReady] = useState(() => savedShelf().hero.length > 0);
   const heroRequest = useRef(0);
   const reserveRows = source === 'hongguo' && (!heroReady || heroItems.length > 0) ? HERO_RESERVED_ROWS : 0;
   reserveRowsRef.current = reserveRows;
@@ -237,8 +248,9 @@ function Browse({ onNavigate, active = true }) {
         setSourceUrl(cached.sourceUrl || fallbackUrl);
         keepGenres(cached.meta?.genres);
       } else {
-        setResults([]);
-        setMeta({ total: 0, totalPages: 0, genres: [] });
+        const keepShelf = source === 'hongguo' && cat === 'real-drama' && !gen && Number(pg) === 1;
+        setResults(current => (keepShelf && current.length ? current : []));
+        if (!keepShelf) setMeta({ total: 0, totalPages: 0, genres: [] });
         setSourceUrl(fallbackUrl);
       }
       const neededSpan = haveCards && pg === 1
@@ -472,15 +484,47 @@ function Browse({ onNavigate, active = true }) {
             sourcePages: Number(res.totalPages) || 1,
           });
           setHeroItems(heroLineup(results));
-        } else if (!lineup.length) setHeroItems([]);
+        } else if (!lineup.length) setHeroItems(current => (current.length ? current : []));
       } catch {
-        if (!cancelled && request === heroRequest.current && !lineup.length) setHeroItems([]);
+        if (!cancelled && request === heroRequest.current && !lineup.length) setHeroItems(current => (current.length ? current : []));
       } finally {
         if (!cancelled && request === heroRequest.current) setHeroReady(true);
       }
     })();
     return () => { cancelled = true; };
   }, [source, sourceIds]);
+
+  const premiereKey = source === 'hongguo' ? results.map(item => item?.series_id || '').join(',') : '';
+  useEffect(() => {
+    if (!premiereKey || typeof window.electronAPI?.listPremieres !== 'function') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.electronAPI.listPremieres();
+        if (cancelled || !res?.success || !Array.isArray(res.ids) || !res.ids.length) return;
+        const ids = new Set(res.ids.map(String));
+        setResults(current => {
+          let changed = false;
+          const next = current.map(item => {
+            if (!item || item.is_premiere === true || !ids.has(String(item.series_id))) return item;
+            changed = true;
+            return { ...item, is_premiere: true };
+          });
+          return changed ? next : current;
+        });
+        setHeroItems(current => {
+          let changed = false;
+          const next = current.map(item => {
+            if (!item || item.is_premiere === true || !ids.has(String(item.series_id))) return item;
+            changed = true;
+            return { ...item, is_premiere: true };
+          });
+          return changed ? next : current;
+        });
+      } catch { /* the posters stay usable without the premiere badge */ }
+    })();
+    return () => { cancelled = true; };
+  }, [premiereKey]);
 
   // A list that is still loading shows only the pages that arrived so far, so its size says nothing about how
   // many posters a page holds. Judging it then started the load over and cleared the posters on screen.
@@ -710,7 +754,7 @@ function Browse({ onNavigate, active = true }) {
     <div className="browse-container">
       {source === 'hongguo' && (heroItems.length > 0
         ? <DiscoverHero items={heroItems} active={active} busy={detailLoading} onPlay={openSeries} />
-        : !heroReady && <div className="discover-hero discover-hero-pending" aria-hidden="true" />)}
+        : !heroReady && <div className="discover-hero discover-hero-pending" role="status"><span>正在整理横幅</span></div>)}
       <div className="browse-header">
         <div className="browse-title">
           <div className="browse-title-row">
