@@ -1,0 +1,21 @@
+name: Retitle the 4.3 release
+on:
+  push:
+    branches: ['cursor/rea-readme-45-7419']
+permissions:
+  contents: read
+jobs:
+  retitle:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Remove the formal label from 4.3 without moving latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release edit v4.3 --title "4.3" --latest=false
+          test "$(gh release view v4.3 --json name,isPrerelease --jq '[.name,.isPrerelease] | @tsv')" = $'4.3\tfalse'
+          test "$(gh release view --json tagName --jq .tagName)" = "v4.5"
