@@ -823,6 +823,7 @@ function Browse({ onNavigate, active = true }) {
                 onClick={() => { if (upcoming && source === 'hongguo') return; openSeries(item); }}
                 title={item.series_title}
               >
+                {upcoming && item.reservation_label && <span className="browse-reserve-band">{item.reservation_label}</span>}
                 <div className="browse-cover">
                   {(item.rank > 0 || (item.is_new === true && item.is_premiere !== true) || item.is_premiere === true || formatPublicScore(item.rating ?? ratings[String(item.series_id)])) && <div className="browse-cover-top">
                     {item.rank > 0 && <span className="browse-rank-badge">第 {item.rank} 名</span>}
@@ -834,7 +835,6 @@ function Browse({ onNavigate, active = true }) {
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>
                   )}
-                  {upcoming && item.reservation_label && <span className="browse-reserve-badge">{item.reservation_label}</span>}
                   <span
                     role="button"
                     tabIndex={0}

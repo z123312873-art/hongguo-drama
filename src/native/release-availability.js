@@ -17,14 +17,30 @@ function rememberRelease(cache, id, playable, now = Date.now()) {
   if (!cache || cache.day !== day) {
     cache = { day, entries: new Map() };
   }
-  cache.entries.set(String(id), playable === true);
+  cache.entries.set(String(id), playable === true ? true : playable === 'error' ? 'error' : false);
   return cache;
 }
 
 function readRelease(cache, id, now = Date.now()) {
   if (!cache || cache.day !== taipeiDay(now)) return undefined;
   const value = cache.entries.get(String(id));
-  return value === undefined ? undefined : value === true;
+  if (value === undefined) return undefined;
+  return value === true || value === 'error' ? value : false;
+}
+
+function confirmedOffline(error) {
+  return /未获取到剧集数据|分集列表为空|官网页面未找到分集数据/.test(String(error?.message || ''));
+}
+
+function visibleUpcoming(items, { now = Date.now(), known = () => undefined, gone = new Set() } = {}) {
+  const today = taipeiDay(now);
+  return (items || []).filter(item => {
+    const id = String(item?.series_id || item?.id || '');
+    if (!id || gone.has(id)) return false;
+    const day = taipeiDay(item?.online_time);
+    if (day && today && day < today && known(id) !== 'error') return false;
+    return true;
+  });
 }
 
 function dueReleaseIds(items, now = Date.now()) {
@@ -58,12 +74,13 @@ function createReleaseProbe({ lookup, now = () => Date.now() }) {
         const pending = Promise.resolve()
           .then(() => lookup(key))
           .then(playable => {
-            cache = rememberRelease(cache, key, playable === true, now());
-            return playable === true;
+            const state = playable === true ? true : playable === 'error' ? 'error' : false;
+            cache = rememberRelease(cache, key, state, now());
+            return state;
           })
           .catch(() => {
-            cache = rememberRelease(cache, key, false, now());
-            return false;
+            cache = rememberRelease(cache, key, 'error', now());
+            return 'error';
           })
           .finally(() => inflight.delete(key));
         inflight.set(key, pending);
@@ -73,7 +90,7 @@ function createReleaseProbe({ lookup, now = () => Date.now() }) {
   };
 }
 
-function scheduleReleaseDrops({ ask, shouldStop = () => false, onPlayable }) {
+function scheduleReleaseDrops({ ask, shouldStop = () => false, onPlayable, onUnavailable, onUnknown }) {
   const queue = [];
   const seen = new Set();
   let running = false;
@@ -86,7 +103,9 @@ function scheduleReleaseDrops({ ask, shouldStop = () => false, onPlayable }) {
         const id = queue.shift();
         const playable = await ask(id);
         if (shouldStop()) return;
-        if (playable) onPlayable(id);
+        if (playable === true) onPlayable(id);
+        else if (playable === false) onUnavailable?.(id);
+        else onUnknown?.(id);
       }
     } finally {
       running = false;
@@ -112,6 +131,8 @@ module.exports = {
   rememberRelease,
   readRelease,
   dueReleaseIds,
+  confirmedOffline,
+  visibleUpcoming,
   createReleaseProbe,
   scheduleReleaseDrops,
 };

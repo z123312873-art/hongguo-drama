@@ -17,11 +17,19 @@ test('discover layout stays inside 1K, 2K and 4K widths', () => {
     assert.ok(150 * scale <= content / 2, `${width} poster does not swallow the row`);
   }
   assert.match(css, /\.browse-header \{[^}]*flex-wrap: wrap/);
-  assert.match(css, /\.browse-upcoming \{ flex: none; \}/);
+  assert.match(css, /\.browse-title-row \{[^}]*justify-content: flex-start[^}]*flex-wrap: nowrap/);
+  assert.match(css, /\.browse-title-row \.browse-upcoming \{[^}]*font-size: 15px/);
+  assert.doesNotMatch(css.match(/\.browse-title-row \.browse-upcoming \{[^}]*\}/)[0], /font-scale/);
   assert.match(css, /\.browse-title-row \{[^}]*align-items: center/);
-  const reserve = css.match(/\.browse-reserve-badge \{[^}]*\}/)[0];
-  assert.match(reserve, /font-size: 11px/);
+  const reserve = css.match(/\.browse-reserve-band \{[^}]*\}/)[0];
+  assert.match(reserve, /font-size: 12px/);
+  assert.match(reserve, /text-align: center/);
   assert.doesNotMatch(reserve, /font-scale/);
+  assert.doesNotMatch(reserve, /#1d4ed8/);
+  const date = css.match(/\.browse-card-date \{[^}]*\}/)[0];
+  assert.match(date, /text-align: center/);
+  assert.match(date, /font-size: 14px/);
+  assert.doesNotMatch(date, /font-scale/);
   const calendar = fs.readFileSync(new URL('../ReleaseCalendar.css', import.meta.url), 'utf8');
   const online = calendar.match(/\.release-online \{[^}]*\}/)[0];
   assert.match(online, /font-size: 12px/);

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { taipeiDay, rememberRelease, readRelease, dueReleaseIds, createReleaseProbe, scheduleReleaseDrops } = require('./release-availability');
+const { taipeiDay, rememberRelease, readRelease, dueReleaseIds, confirmedOffline, visibleUpcoming, createReleaseProbe, scheduleReleaseDrops } = require('./release-availability');
 
 const taipei = iso => Date.parse(iso);
 
@@ -32,7 +32,8 @@ test('one lookup is shared, a failure stays false, and the next Taipei day asks 
     now: () => clock,
     lookup: async id => {
       calls.push(id);
-      if (id === '失败') throw new Error('empty');
+      if (id === '失败') throw new Error('加载超时或连接中断');
+      if (id === '未上线') return false;
       return id === '可播';
     },
   });
@@ -41,8 +42,10 @@ test('one lookup is shared, a failure stays false, and the next Taipei day asks 
   assert.deepEqual(calls, ['可播']);
   assert.equal(await probe.ask('可播'), true);
   assert.equal(calls.length, 1);
-  assert.equal(await probe.ask('失败'), false);
-  assert.equal(probe.known('失败'), false);
+  assert.equal(await probe.ask('失败'), 'error');
+  assert.equal(probe.known('失败'), 'error');
+  assert.equal(await probe.ask('未上线'), false);
+  assert.equal(probe.known('未上线'), false);
   clock = taipei('2026-11-08T00:10:00+08:00');
   assert.equal(probe.known('可播'), undefined);
   assert.equal(await probe.ask('可播'), true);
@@ -65,4 +68,20 @@ test('a stopped check does not report a later id', async () => {
   drops.push(['下一']);
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(found, ['可播']);
+});
+
+test('a past preview leaves the wall unless the check itself failed', () => {
+  const now = taipei('2026-11-07T12:00:00+08:00');
+  const items = [
+    { series_id: '旧', online_time: taipei('2026-10-26T00:00:00+08:00') },
+    { series_id: '今天', online_time: taipei('2026-11-07T00:10:00+08:00') },
+    { series_id: '未来', online_time: taipei('2026-11-08T00:00:00+08:00') },
+    { series_id: '查不到', online_time: taipei('2026-10-27T00:00:00+08:00') },
+  ];
+  const known = id => (id === '查不到' ? 'error' : undefined);
+  assert.deepEqual(visibleUpcoming(items, { now, known }).map(item => item.series_id), ['今天', '未来', '查不到']);
+  assert.deepEqual(visibleUpcoming(items, { now, known, gone: new Set(['未来']) }).map(item => item.series_id), ['今天', '查不到']);
+  assert.equal(confirmedOffline(new Error('获取分集失败：官网数据源（官网页面未找到分集数据（vid_list）），备用接口（未获取到剧集数据）')), true);
+  assert.equal(confirmedOffline(new Error('获取分集失败：官网数据源（加载超时或连接中断），备用接口（ECONNRESET）')), false);
+  assert.equal(confirmedOffline(new Error('备用接口分集列表为空')), true);
 });

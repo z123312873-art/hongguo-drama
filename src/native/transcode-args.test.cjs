@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { streamPlan, bytevc2FileArgs, copyStreamArgs } = require('./transcode-args');
+const { streamPlan, bytevc2FileArgs, bytevc2PrefetchArgs, copyStreamArgs } = require('./transcode-args');
 
 test('compatible streams stay on copy and bytevc2 uses a separate transcoder', () => {
   const copy = streamPlan({ contentKey: 'ab', codec: 'h264' });
@@ -21,4 +21,9 @@ test('compatible streams stay on copy and bytevc2 uses a separate transcoder', (
   assert.equal(file.includes('veryfast'), true);
   assert.equal(file.includes('ultrafast'), false);
   assert.equal(file.at(-1), 'out.mp4');
+  const prefetch = bytevc2PrefetchArgs('cd', 'in.mp4', 'next.mp4');
+  for (const token of ['ultrafast', 'zerolatency', '2', '+faststart']) assert.equal(prefetch.includes(token), true, token);
+  assert.equal(prefetch.includes('veryfast'), false);
+  assert.equal(prefetch.includes('4'), false);
+  assert.equal(prefetch.at(-1), 'next.mp4');
 });

@@ -1316,8 +1316,14 @@ function getReleaseProbe() {
     const { createReleaseProbe } = require('./src/native/release-availability');
     releaseProbe = createReleaseProbe({
       lookup: async (id) => {
-        const detail = await require('./src/native/hongguo').fetchEpisodeList(id);
-        return Array.isArray(detail?.episodes) && detail.episodes.length > 0;
+        const { confirmedOffline } = require('./src/native/release-availability');
+        try {
+          const detail = await require('./src/native/hongguo').fetchEpisodeList(id);
+          return Array.isArray(detail?.episodes) && detail.episodes.length > 0;
+        } catch (error) {
+          if (confirmedOffline(error)) return false;
+          throw error;
+        }
       },
     });
   }
@@ -1331,17 +1337,19 @@ ipcMain.handle('browse-upcoming', async (event) => {
   const send = (payload) => { if (generation === upcomingGeneration && !sender.isDestroyed()) sender.send('upcoming-page', payload); };
   try {
     const { fetchUpcomingPage, absorbUpcoming, MAX_PAGES } = require('./src/native/upcoming');
-    const { dueReleaseIds, scheduleReleaseDrops } = require('./src/native/release-availability');
+    const { dueReleaseIds, scheduleReleaseDrops, visibleUpcoming } = require('./src/native/release-availability');
     const { requestMetadata } = require('./src/native/app-source');
     const probe = getReleaseProbe();
     const gone = new Set();
     let state = { raw: [], items: [], offset: 0, sessionId: '', done: false };
-    const visible = () => state.items.filter(item => !gone.has(String(item.series_id)));
+    const visible = () => visibleUpcoming(state.items, { known: id => probe.known(id), gone });
     const publish = () => send({ items: visible(), done: state.done });
     const drops = scheduleReleaseDrops({
       ask: id => probe.ask(id),
       shouldStop: () => generation !== upcomingGeneration,
       onPlayable: id => { gone.add(String(id)); publish(); },
+      onUnavailable: () => publish(),
+      onUnknown: () => publish(),
     });
     const enqueue = () => {
       for (const item of state.items) {
@@ -2630,7 +2638,7 @@ function startContentKeyStream(playInfo, signal, capture = null) {
 }
 
 /** App CENC uses native FFmpeg for both senc and saiz/saio layouts. Never log key/args. */
-async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode } = {}) {
+async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode, profile } = {}) {
   if (typeof contentKey !== 'string' || !/^[a-f\d]{32}$/i.test(contentKey)) throw new Error('片源解密密钥格式无效');
   if (signal?.aborted) throw new Error('已取消媒体解密');
   cancelToken?.throwIfRequested();
@@ -2640,13 +2648,18 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
     ? require('./src/native/app-source').NEWER_CODEC_UNREADY
     : '未找到内置 FFmpeg，无法准备该片源。请重新下载完整发行包并运行；若已自行安装 FFmpeg，请完全退出软件后重启再试');
   const args = transcoding
-    ? require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output)
+    ? (profile === 'prefetch'
+      ? require('./src/native/transcode-args').bytevc2PrefetchArgs(contentKey, input, output)
+      : require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output))
     : ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output];
   try {
     await new Promise((resolve, reject) => {
       const { spawn } = require('child_process');
       const child = spawn(executable, args,
       { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      if (profile === 'prefetch' && child.pid) {
+        try { require('os').setPriority(child.pid, 10); } catch (_) { /* 播放中的那一集仍用一般優先順序。 */ }
+      }
       let cancelled = false, killTimer;
       const abort = () => {
         if (cancelled) return;
@@ -2790,7 +2803,29 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!seekable && playInfo.contentKey && !playInfo.spadeA) {
               if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
-              return {...entry,playInfo};
+              const transcoding = playInfo.codec === 'bytevc2' || playInfo.transcode === 'bytevc2';
+              if (!(prefetch && transcoding)) return {...entry,playInfo};
+              const directory = await fsp.mkdtemp(path.join(app.getPath('temp'), 'hongguo-online-'));
+              entry.disk = { directory, readers: 0 };
+              entry.filePath = path.join(directory, 'video.mp4');
+              const input = path.join(directory, 'encrypted.mp4');
+              let response;
+              try {
+                response = await requestMedia(playInfo, { signal: controller.signal });
+                const total = Number(response.headers['content-length']) || 0;
+                if (total > ONLINE_MAX_BYTES) { response.data.destroy(); throw Object.assign(new Error('本集过大，请下载后播放'), { code: 'MEDIA_TOO_LARGE' }); }
+                await pipeline(response.data, fs.createWriteStream(input, { mode: 0o600 }), { signal: controller.signal });
+                await decryptContentKeyFile(input, entry.filePath, playInfo.contentKey, { signal: controller.signal, codec: playInfo.codec, transcode: playInfo.transcode, profile: 'prefetch' });
+                await fsp.unlink(input).catch(() => {});
+                entry.size = (await fsp.stat(entry.filePath)).size;
+                if (!entry.size) throw new Error('媒体解密没有生成可用文件');
+              } catch (error) {
+                response?.data?.destroy?.();
+                disposeOnlineDisk(entry);
+                delete entry.disk;
+                delete entry.filePath;
+                throw error;
+              }
             }
             else if (!seekable && !prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
             else {
