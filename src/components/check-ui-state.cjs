@@ -1124,6 +1124,8 @@ async function mount(file, api, props = {}) {
     await ui.flush();
     assert.ok(ui.button('红果立即登录'));
     assert.ok(ui.text().includes('尚未登录'));
+    assert.ok(ui.nodes().some(n => n.props.className === 'account-strip is-out'), 'logged-out account row matches the sidebar');
+    assert.equal(ui.nodes().some(n => n.props.className === 'account-strip'), false);
     ui.button('发送验证码')?.props.onClick();
     assert.equal(calls.length, 0, 'login fields stay closed until the footer button');
     ui.button('红果立即登录').props.onClick(); ui.render();
@@ -1132,6 +1134,9 @@ async function mount(file, api, props = {}) {
     ui.dispatchEvent(escape); ui.render();
     assert.equal(ui.find(n => n.props['aria-label'] === '手机号'), undefined, 'escape closes the login');
     ui.button('红果立即登录').props.onClick(); ui.render();
+    const regionOptions = ui.nodes().filter(n => n.type === 'option').map(n => [].concat(n.children).join(''));
+    assert.ok(regionOptions.some(label => label.startsWith('台湾 ')));
+    assert.equal(regionOptions.some(label => label.includes('中国')), false);
     ui.find(n => n.props['aria-label'] === '手机号').props.onChange({ target: { value: '' } }); ui.render();
     await ui.button('发送验证码').props.onClick(); await ui.flush();
     assert.equal(calls.filter(call => call[0] === 'send').length, 0);
@@ -1153,6 +1158,7 @@ async function mount(file, api, props = {}) {
     assert.equal(calls.filter(call => call[0] === 'login')[0][1].code, '0740');
     assert.ok(ui.button('帐号登出'));
     assert.ok(ui.text().includes('测试昵称'));
+    assert.ok(ui.nodes().some(n => n.props.className === 'account-strip'), 'a signed-in account keeps its row');
     assert.equal(ui.find(n => n.props['aria-label'] === '验证码'), undefined);
     ui.button('帐号登出').props.onClick(); ui.render();
     ui.button('取消').props.onClick(); ui.render();
@@ -1161,6 +1167,7 @@ async function mount(file, api, props = {}) {
     await ui.button('退出').props.onClick(); await ui.flush();
     assert.ok(ui.button('红果立即登录'));
     assert.ok(ui.text().includes('尚未登录'));
+    assert.ok(ui.nodes().some(n => n.props.className === 'account-strip is-out'));
     ui.unmount();
   });
 

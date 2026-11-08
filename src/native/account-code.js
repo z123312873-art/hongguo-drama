@@ -1,6 +1,7 @@
 'use strict';
 
 const { HONGGUO_PROFILE, registerDevice } = require('./playback-device');
+const { wirePhone } = require('./account-profile');
 const { signFull, signInternational, encodeQuery } = require('./account-sign');
 
 const HOST = 'https://api5-normal-lq.fqnovel.com';
@@ -74,8 +75,7 @@ function queryFor(device) {
   };
 }
 
-async function formBody(countryCode, phone, extra) {
-  const { wirePhone } = await import('../accountProfile.mjs');
+function formBody(countryCode, phone, extra) {
   return Buffer.from(encodeQuery({
     mobile: xorHex(wirePhone(countryCode, phone)),
     account_sdk_source: 'app',

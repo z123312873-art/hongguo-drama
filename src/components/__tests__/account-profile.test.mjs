@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  ACCOUNT_REGIONS, DEFAULT_REGION, SESSION_MS, acceptLogin, accountActionLabel, accountLabel,
+  ACCOUNT_REGIONS, DEFAULT_REGION, SESSION_MS, acceptLogin, accountActionLabel, accountLabel, regionLabel,
   initialLoginDraft, normalizeCode, preparePhone, publicAccount, reduceLogin, sessionStatus,
 } from '../../accountProfile.mjs';
 import { createAccountHandlers, finishLogin, sendLoginCode } from '../../accountLogin.mjs';
@@ -17,6 +17,10 @@ const NOW = Date.parse('2026-11-09T00:00:00+08:00');
 assert.equal(ACCOUNT_REGIONS.length, 14);
 assert.equal(DEFAULT_REGION, '+886');
 assert.equal(ACCOUNT_REGIONS[0].code, '+886');
+assert.deepEqual(ACCOUNT_REGIONS.slice(0, 4).map(region => region.name), ['台湾', '大陆', '香港', '澳门']);
+assert.ok(ACCOUNT_REGIONS.every(region => !region.name.startsWith('中国')));
+assert.equal(regionLabel('中国台湾'), '台湾');
+assert.equal(regionLabel('马来西亚'), '马来西亚');
 assert.equal(new Set(ACCOUNT_REGIONS.map(region => region.code)).size, 14);
 
 const missing = preparePhone('', '13912345678');

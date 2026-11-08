@@ -3687,8 +3687,8 @@ function accountCode() {
   return accountCodeClient;
 }
 
-async function accountHandlers() {
-  const { createAccountHandlers } = await import('./src/accountLogin.mjs');
+function accountHandlers() {
+  const { createAccountHandlers } = require('./src/native/account-session');
   const code = accountCode();
   return createAccountHandlers({
     getAccount: () => store.getAccount(),

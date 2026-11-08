@@ -1,5 +1,5 @@
 import React from 'react';
-import { ACCOUNT_REGIONS, accountActionLabel, accountLabel } from '../accountProfile.mjs';
+import { ACCOUNT_REGIONS, accountActionLabel, accountLabel, regionLabel } from '../accountProfile.mjs';
 
 function Avatar({ status, onClick }) {
   const label = status.loggedIn ? '帐号头像' : '尚未登录';
@@ -15,7 +15,7 @@ function Avatar({ status, onClick }) {
 export function AccountStrip({ status, onAvatar }) {
   const name = accountLabel(status);
   return (
-    <div className="account-strip">
+    <div className={status?.loggedIn ? 'account-strip' : 'account-strip is-out'}>
       <Avatar status={status} onClick={onAvatar} />
       <div className="account-name" title={name}>{name}</div>
     </div>
@@ -57,7 +57,7 @@ export function AccountDialog({ draft, onClose, onCountry, onPhone, onCode, onSe
           <div className="account-fields">
             <label className="account-field"><span>国家或地区</span>
               <select className="input-field" aria-label="国家或地区" autoFocus value={draft.countryCode} onChange={event => onCountry(event.target.value)}>
-                {ACCOUNT_REGIONS.map(region => <option key={region.code} value={region.code}>{region.name} {region.code}</option>)}
+                {ACCOUNT_REGIONS.map(region => <option key={region.code} value={region.code}>{regionLabel(region.name)} {region.code}</option>)}
               </select>
             </label>
             <label className="account-field"><span>手机号</span>

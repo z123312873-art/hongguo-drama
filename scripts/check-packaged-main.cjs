@@ -32,6 +32,9 @@ function walk(file) {
   if (file.endsWith('.mjs')) failures.push(`${relative} is ESM; the packaged main process cannot import it from app.asar`);
   const source = fs.readFileSync(file, 'utf8');
   if (/^\s*import\s/m.test(source) || /^\s*export\s/m.test(source)) failures.push(`${relative} contains an ESM import`);
+  for (const match of source.matchAll(/import\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
+    failures.push(`${relative} dynamically imports ${match[1]}; the packaged main process must use require`);
+  }
   for (const match of source.matchAll(/require\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
     const target = resolveRequired(file, match[1]);
     if (!target) failures.push(`${relative} requires missing ${match[1]}`);
@@ -41,6 +44,9 @@ function walk(file) {
 
 for (const name of roots) walk(path.join(root, name));
 assert.deepEqual(failures, [], failures.join('\n'));
+assert.ok(seen.has('src/native/account-session.js'));
+assert.ok(seen.has('src/native/account-profile.js'));
+assert.ok(seen.has('src/native/account-code.js'));
 assert.ok(seen.has('src/native/watch-history.js'));
 assert.ok(seen.has('src/native/season-title.js'));
 assert.ok(![...seen].some((file) => file.endsWith('.mjs')));
