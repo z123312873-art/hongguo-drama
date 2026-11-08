@@ -84,7 +84,7 @@ async function mount(file, api, props = {}) {
     vm.runInContext(compile(resolved), sandbox, { filename: resolved });
     return module.exports;
   };
-  const Loaded = loadModule(path.resolve(__dirname, `${file}.jsx`)).default;
+  const Loaded = loadModule(path.resolve(__dirname, file.endsWith('.jsx') ? file : `${file}.jsx`)).default;
   Component = (next) => Loaded(file === 'Player' ? { setEpisodesOpen() {}, ...next } : next);
   const render = () => {
     let guard = 0;
@@ -1101,6 +1101,91 @@ async function mount(file, api, props = {}) {
     ui.find(n => n.props['aria-label'] === '下载目录').props.onChange({ target: { value: '/next' } }); ui.render();
     await ui.button('保存设置').props.onClick(); await ui.flush();
     assert.equal(stored.auto_delete_watched, false, 'successful save clears the earlier edit intent');
+    ui.unmount();
+  });
+
+  await test('account sidebar logs in from the footer and logs out after confirmation', async () => {
+    const calls = [];
+    let signedIn = false;
+    const ui = await mount('../App', {
+      getAppInfo: async () => ({ version: '4.6.0', appName: '红果短剧' }),
+      getWindowLayout: async () => 'landscape',
+      accountStatus: async () => (signedIn
+        ? { loggedIn: true, nickname: '测试昵称', avatarUrl: 'https://example.com/a.jpg' }
+        : { loggedIn: false }),
+      accountSendCode: async (input) => { calls.push(['send', input]); return { ok: true, retryAfter: 2 }; },
+      accountLogin: async (input) => {
+        calls.push(['login', input]);
+        signedIn = true;
+        return { ok: true, status: { loggedIn: true, nickname: '测试昵称', avatarUrl: 'https://example.com/a.jpg' } };
+      },
+      accountLogout: async () => { calls.push(['logout']); signedIn = false; return { loggedIn: false }; },
+    });
+    await ui.flush();
+    assert.ok(ui.button('红果立即登录'));
+    assert.ok(ui.text().includes('尚未登录'));
+    ui.button('发送验证码')?.props.onClick();
+    assert.equal(calls.length, 0, 'login fields stay closed until the footer button');
+    ui.button('红果立即登录').props.onClick(); ui.render();
+    const escape = new Event('keydown');
+    Object.defineProperty(escape, 'key', { value: 'Escape' });
+    ui.dispatchEvent(escape); ui.render();
+    assert.equal(ui.find(n => n.props['aria-label'] === '手机号'), undefined, 'escape closes the login');
+    ui.button('红果立即登录').props.onClick(); ui.render();
+    ui.find(n => n.props['aria-label'] === '手机号').props.onChange({ target: { value: '' } }); ui.render();
+    await ui.button('发送验证码').props.onClick(); await ui.flush();
+    assert.equal(calls.filter(call => call[0] === 'send').length, 0);
+    assert.ok(ui.text().includes('请输入手机号'));
+    ui.find(n => n.props['aria-label'] === '手机号').props.onChange({ target: { value: '9123-45678' } }); ui.render();
+    await ui.button('发送验证码').props.onClick(); await ui.flush();
+    assert.equal(calls[0][1].phone, '912345678');
+    assert.equal(calls[0][1].countryCode, '+886');
+    const early = ui.find(n => n.props['aria-label'] === '验证码');
+    early.props.onChange({ target: { value: '074' } }); ui.render();
+    early.props.onKeyDown({ key: 'Enter', preventDefault() {} });
+    await ui.flush();
+    assert.equal(calls.filter(call => call[0] === 'login').length, 0, 'three digits do not submit');
+    const code = ui.find(n => n.props['aria-label'] === '验证码');
+    code.props.onChange({ target: { value: '0740' } }); ui.render();
+    assert.equal(calls.filter(call => call[0] === 'login').length, 0, 'four digits do not submit by themselves');
+    ui.find(n => n.props['aria-label'] === '验证码').props.onKeyDown({ key: 'Enter', preventDefault() {} });
+    await ui.flush();
+    assert.equal(calls.filter(call => call[0] === 'login')[0][1].code, '0740');
+    assert.ok(ui.button('帐号登出'));
+    assert.ok(ui.text().includes('测试昵称'));
+    assert.equal(ui.find(n => n.props['aria-label'] === '验证码'), undefined);
+    ui.button('帐号登出').props.onClick(); ui.render();
+    ui.button('取消').props.onClick(); ui.render();
+    assert.ok(ui.button('帐号登出'));
+    ui.button('帐号登出').props.onClick(); ui.render();
+    await ui.button('退出').props.onClick(); await ui.flush();
+    assert.ok(ui.button('红果立即登录'));
+    assert.ok(ui.text().includes('尚未登录'));
+    ui.unmount();
+  });
+
+  await test('unreleased notice clears on its own and when changing page', async () => {
+    let report;
+    const waiting = '您目前的预约收藏短剧，尚未上线，请耐心等候';
+    const disk = '保存失败，请检查磁盘空间或目录权限；本次变更未能保存。';
+    const ui = await mount('../App', {
+      getAppInfo: async () => ({ version: '4.6.0' }),
+      getWindowLayout: async () => 'landscape',
+      onStorageError: (cb) => { report = cb; return () => {}; },
+    });
+    await ui.flush();
+    report({ error: waiting }); ui.render();
+    assert.ok(ui.text().includes(waiting));
+    ui.button('搜索与下载').props.onClick(); ui.render();
+    assert.equal(ui.text().includes(waiting), false);
+    report({ error: disk }); ui.render();
+    ui.advanceTimers(5000); ui.render();
+    ui.button('发现短剧').props.onClick(); ui.render();
+    assert.ok(ui.text().includes(disk));
+    report({ error: waiting }); ui.render();
+    ui.advanceTimers(2000); ui.render();
+    assert.equal(ui.text().includes(waiting), false);
+    assert.ok(ui.text().includes(disk) === false);
     ui.unmount();
   });
   process.exitCode = failures ? 1 : 0;

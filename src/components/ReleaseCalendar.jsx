@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { publicDateKey, readLocalLibrary, removeLocalSeries, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import './ReleaseCalendar.css';
 
-const WAITING_TEXT = '您目前的预约收藏短剧，尚未上线，请耐心等候';
+const WAITING_NOTICE = '您目前的预约收藏短剧，尚未上线，请耐心等候';
 
 function onlineDateText(timestamp) {
   const shifted = new Date(Number(timestamp) + 8 * 60 * 60 * 1000);
@@ -62,7 +62,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
       <div className="release-row-actions">
         <button type="button" className="btn btn-sm btn-outline" aria-label={`取消收藏《${item.title}》`} aria-pressed={true} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: false }))}>取消收藏</button>
         <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title="仅移除本机收藏记录，不删除视频文件" onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
-        <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => { if (waiting) { onUnavailable?.(WAITING_TEXT); return; } onPlay?.({ seriesId: item.id, title: item.title }); }}>{opening === item.id ? '打开中…' : '播放'}</button>
+        <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => { if (waiting) { onUnavailable?.(WAITING_NOTICE); return; } onPlay?.({ seriesId: item.id, title: item.title }); }}>{opening === item.id ? '打开中…' : '播放'}</button>
       </div>
     </li>;
   };

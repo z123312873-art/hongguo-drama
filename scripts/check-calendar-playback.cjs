@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 const { transformSync } = require('esbuild');
+const createAppExtra = require('./app-view-shim.cjs');
 const { mount: mountPlayer } = require('./check-player-resume.cjs');
 const appSource = transformSync(fs.readFileSync(path.join(__dirname, '../src/App.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 const mainSource = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
@@ -48,10 +49,11 @@ function fixture({ exists = true, dismissed = false, saveError = '', resolveErro
     },
   };
   const module = { exports: {} };
+  const appExtra = createAppExtra(react);
   vm.runInNewContext(appSource, { module, exports: module.exports, window: { electronAPI: api }, navigator: {},
-    require: name => name === 'react' ? react : name === './theme' ? { initializeTheme() {} }
+    require: name => appExtra(name) || (name === 'react' ? react : name === './theme' ? { initializeTheme() {} }
       : name.includes('scriptPreference') ? { getScriptPreference: () => 'traditional', setScriptPreference() {}, subscribeScript: () => () => {} }
-      : name === './components/useStealthWindow' ? { __esModule: true, default: () => ({}) } : component(name),
+      : name === './components/useStealthWindow' ? { __esModule: true, default: () => ({}) } : component(name)),
   });
   const render = () => { cursor = 0; tree = module.exports.default(); effects.splice(0).forEach(fn => fn()); };
   const find = predicate => {

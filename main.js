@@ -3675,6 +3675,34 @@ function applyEditableSettings(current, incoming) {
   return merged;
 }
 
+async function accountHandlers() {
+  const { createAccountHandlers } = await import('./src/accountLogin.mjs');
+  return createAccountHandlers({
+    getAccount: () => store.getAccount(),
+    saveAccount: (record) => store.saveAccount(record),
+  });
+}
+
+ipcMain.handle('account-status', async () => {
+  try { return await (await accountHandlers()).status(); }
+  catch { return { loggedIn: false }; }
+});
+
+ipcMain.handle('account-send-code', async (_event, input) => {
+  try { return await (await accountHandlers()).sendCode(input); }
+  catch { return { ok: false, error: '验证码暂时无法发送，请稍后再试' }; }
+});
+
+ipcMain.handle('account-login', async (_event, input) => {
+  try { return await (await accountHandlers()).login(input); }
+  catch { return { ok: false, error: '登录没有完成，请重试' }; }
+});
+
+ipcMain.handle('account-logout', async () => {
+  try { return await (await accountHandlers()).logout(); }
+  catch { return { loggedIn: false }; }
+});
+
 ipcMain.handle('get-settings', async () => settingsForRenderer(getCurrentSettings()));
 
 ipcMain.handle('save-settings', async (event, settings) => {

@@ -18,5 +18,5 @@ assert.equal(librempegPart.includes('--disable-x86asm'), false);
 assert.match(fs.readFileSync(path.join(root, '.github/workflows/windows.yml'), 'utf8'), /\bnasm\b/);
 const filters = pkg.build.win.extraResources[0].filter;
 assert.ok(filters.includes('librempeg.exe'));
-assert.equal(pkg.version, '4.5.0');
+assert.equal(pkg.version, '4.6.0');
 console.log('PASS librempeg build stays on the pinned commit without the AGPL flag');

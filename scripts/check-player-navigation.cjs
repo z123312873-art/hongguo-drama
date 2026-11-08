@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const { transformSync } = require('esbuild');
+const createAppExtra = require('./app-view-shim.cjs');
 const slots = [];
 let cursor = 0;
 const react = {
@@ -15,8 +16,11 @@ const react = {
   useRef: value => ({ current: value }), useCallback: fn => fn, useEffect() {}, useLayoutEffect() {},
   useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
 };
+const appExtra = createAppExtra(react);
 const context = { module: { exports: {} }, navigator: { platform: 'Mac' }, require: name => {
   if (name === 'react') return react;
+  const extra = appExtra(name);
+  if (extra) return extra;
   if (name.endsWith('useStealthWindow')) return () => ({ stealthMode: false, toggleStealth() {} });
   if (name.includes('scriptPreference')) return { getScriptPreference: () => 'hans', setScriptPreference() {}, subscribeScript: () => () => {} };
   return name;

@@ -143,6 +143,26 @@ function saveMergeTasks(list) {
   flush();
 }
 
+function getAccount() {
+  const value = loadCache().account;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value;
+}
+
+function saveAccount(record) {
+  const current = loadCache();
+  if (!record) delete current.account;
+  else {
+    current.account = {
+      userId: typeof record.userId === 'string' ? record.userId : '',
+      nickname: typeof record.nickname === 'string' ? record.nickname : '',
+      avatarUrl: typeof record.avatarUrl === 'string' ? record.avatarUrl : '',
+      loggedInAt: Number(record.loggedInAt) || 0,
+    };
+  }
+  flush();
+}
+
 module.exports = {
   setErrorHandler: (handler) => { errorHandler = handler; },
   init,
@@ -156,4 +176,6 @@ module.exports = {
   savePlayback,
   getMergeTasks,
   saveMergeTasks,
+  getAccount,
+  saveAccount,
 };

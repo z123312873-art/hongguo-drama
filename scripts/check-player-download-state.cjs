@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
+const createAppExtra = require('./app-view-shim.cjs');
 const { mount } = require('./check-player-resume.cjs');
 
 function fixture() {
@@ -49,8 +50,11 @@ function mountApp() {
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
   };
   const api = new Proxy({ onNavigate(fn) { navigateEvent = fn; } }, { get: (o, k) => o[k] || (() => Promise.resolve({})) });
+  const appExtra = createAppExtra(react);
   const context = { module: { exports: {} }, window: { electronAPI: api }, navigator: { platform: 'Mac' }, require: name => {
     if (name === 'react') return react;
+    const extra = appExtra(name);
+    if (extra) return extra;
     if (name.endsWith('useStealthWindow')) return () => ({ stealthMode: false });
     if (name.includes('scriptPreference')) return { getScriptPreference: () => 'hans', setScriptPreference() {}, subscribeScript: () => () => {} };
     return name;

@@ -1,6 +1,6 @@
 # 红果短剧
 
-当前正式版：4.5。版本说明只留 `docs/release-4.5.md`。
+已发布的正式版：4.5。版本说明留 `docs/release-4.5.md`。这一轮源码是 4.6 预发布，说明见 `docs/release-4.6.md`。
 <!-- impeccable:product-schema 1 -->
 
 ## Platform

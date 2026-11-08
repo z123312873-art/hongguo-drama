@@ -160,6 +160,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAlwaysOnTop: (value) => ipcRenderer.invoke('set-always-on-top', value),
   setEpisodePanelOpen: (value) => ipcRenderer.invoke('set-episode-panel-open', value),
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  accountStatus: () => ipcRenderer.invoke('account-status'),
+  accountSendCode: (input) => ipcRenderer.invoke('account-send-code', input),
+  accountLogin: (input) => ipcRenderer.invoke('account-login', input),
+  accountLogout: () => ipcRenderer.invoke('account-logout'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   onStorageError: (cb) => {
     const listener = (_e, data) => cb(data);

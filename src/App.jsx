@@ -13,6 +13,9 @@ import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
 import ReleaseCalendar from './components/ReleaseCalendar';
 import AppUpdateNotice from './components/AppUpdateNotice';
+import useAccountSession from './components/useAccountSession';
+import { AccountAccess, AccountDialog, AccountStrip } from './components/AccountChrome';
+import { WAITING_DISMISS_MS, isWaitingNotice, noticeAfterDelay, noticeAfterNavigate } from './waitingNotice.mjs';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
@@ -79,6 +82,7 @@ export default function App() {
       setCalendarOpening('');
       pageRef.current = nextPage;
     }
+    setStorageError(current => noticeAfterNavigate(current));
     if (nextPage === 'player') setPlayerMounted(true);
     setVisited((pages) => pages.includes(nextPage) ? pages : [...pages, nextPage]);
     setPage(nextPage);
@@ -143,6 +147,13 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!isWaitingNotice(storageError)) return undefined;
+    const timer = setTimeout(() => setStorageError(current => noticeAfterDelay(current)), WAITING_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [storageError]);
+
+  const account = useAccountSession();
   const script = useSyncExternalStore(subscribeScript, getScriptPreference, getScriptPreference);
   const isMac = appInfo?.platform === 'darwin' || (!appInfo?.platform && /Mac/.test(navigator.platform));
   const currentPage = MENU.find((item) => item.id === page);
@@ -155,6 +166,7 @@ export default function App() {
           <div className="logo"><Play size={21} /></div>
           <div><div className="brand-text">{appInfo?.appName || '红果短剧'}</div><div className="brand-sub">{appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待'}</div></div>
         </div>
+        {AccountStrip({ status: account.status, onAvatar: account.startLogout })}
         <nav className="sidebar-menu">
           <div className="sidebar-group-label">内容</div>
           {MENU.filter((item) => item.id !== 'settings').map((item) => {
@@ -172,6 +184,7 @@ export default function App() {
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
             <Settings size={19} /><span>设置</span>
           </button>
+          {AccountAccess({ status: account.status, confirming: account.confirming, onLogin: account.startLogin, onLogout: account.startLogout, onConfirm: account.logout, onCancel: account.cancelLogout })}
           <div className="footer-note"><span>{appInfo?.preview ? '功能预览' : '红果短剧(Tanney)'}</span><span>{appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : ''}</span></div>
         </div>
       </aside>
@@ -214,6 +227,10 @@ export default function App() {
             </button>
           </div>
         </header>
+        <div className="compact-account">
+          {AccountStrip({ status: account.status, onAvatar: account.startLogout })}
+          {AccountAccess({ status: account.status, confirming: account.confirming, onLogin: account.startLogin, onLogout: account.startLogout, onConfirm: account.logout, onCancel: account.cancelLogout })}
+        </div>
         <nav className="compact-navigation" aria-label="竖屏导航">
           {MENU.map((item) => {
             const Icon = item.icon;
@@ -227,6 +244,7 @@ export default function App() {
         <AppUpdateNotice />
         {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{renderPage(id)}</main>)}
       </div>
+      {account.open && !stealthMode ? AccountDialog({ draft: account.draft, onClose: account.closeLogin, onCountry: account.setCountry, onPhone: account.setPhone, onCode: account.setCode, onSend: account.send, onSubmit: account.submit, onChangeNumber: account.changeNumber }) : null}
     </div>
   );
 }

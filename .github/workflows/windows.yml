@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.5-release-') || startsWith(github.ref, 'refs/heads/windows/4.5-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.6-pre-') || startsWith(github.ref, 'refs/heads/windows/4.5-release-') || startsWith(github.ref, 'refs/heads/windows/4.5-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -338,6 +338,73 @@ jobs:
             echo "4.5 pre-release is still present" >&2
             exit 1
           fi
+          gh release list --limit 20
+  publish-release-4-6-pre:
+    needs: windows
+    if: startsWith(github.ref, 'refs/heads/windows/4.6-pre-')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release candidate
+        id: candidate
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Retry the release candidate download once
+        if: steps.candidate.outcome == 'failure'
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Publish the 4.6 pre-release without replacing the 4.5 formal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=installer-4.6-traditional-pre
+          setup="release/hongguo-downloader-4.6-win-x64-setup.exe"
+          blockmap="$setup.blockmap"
+          latest="release/latest.yml"
+          portable="release/hongguo-downloader-4.6-win-x64.zip"
+          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
+          grep -Fq "hongguo-downloader-4.6-win-x64-setup.exe" "$latest"
+          grep -Eq '^version: 4\.6\.0$' "$latest"
+          setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
+          setup_size=$(stat -c %s "$setup")
+          portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
+          notes=$(cat <<EOF
+          摘要：
+          - 新增「紅果立即登入」。登入成功後顯示頭像與暱稱，按鈕改為帳號登出
+          - 未上線提示會自動關閉
+
+          4.6 預發佈，未簽章。4.5 仍是正式版。下載與安裝都要自己確認。
+
+          檔名：hongguo-downloader-4.6-win-x64-setup.exe
+          SHA256：$setup_sha
+          大小：$setup_size
+          便攜 ZIP：hongguo-downloader-4.6-win-x64.zip
+          便攜 ZIP SHA256：$portable_sha
+          對應提交：$GITHUB_SHA
+          EOF
+          )
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease=true --latest=false --title "4.6 預發佈" --notes "$notes"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --title "4.6 預發佈" --notes "$notes"
+          fi
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
+          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
+          gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
+            if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
+              gh release delete-asset "$tag" "$name" --yes
+            fi
+          done
+          test "$(gh release view "$tag" --json isPrerelease,isDraft --jq '(.isPrerelease == true) and (.isDraft == false)')" = "true"
+          test "$(gh release view --json tagName --jq .tagName)" != "$tag"
           gh release list --limit 20
   publish-release:
     needs: windows
