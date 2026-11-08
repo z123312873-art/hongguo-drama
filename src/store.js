@@ -143,6 +143,27 @@ function saveMergeTasks(list) {
   flush();
 }
 
+function deviceFields(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const deviceId = typeof value.deviceId === 'string' ? value.deviceId : '';
+  const installId = typeof value.installId === 'string' ? value.installId : '';
+  const cdid = typeof value.cdid === 'string' ? value.cdid : '';
+  if (!/^\d{1,30}$/.test(deviceId) || !/^\d{1,30}$/.test(installId) || !/^[0-9a-f-]{36}$/i.test(cdid)) return null;
+  return { deviceId, installId, cdid };
+}
+
+function getLoginDevice() {
+  return deviceFields(loadCache().loginDevice);
+}
+
+function saveLoginDevice(device) {
+  const current = loadCache();
+  const next = deviceFields(device);
+  if (!next) delete current.loginDevice;
+  else current.loginDevice = next;
+  flush();
+}
+
 function getAccount() {
   const value = loadCache().account;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -178,4 +199,6 @@ module.exports = {
   saveMergeTasks,
   getAccount,
   saveAccount,
+  getLoginDevice,
+  saveLoginDevice,
 };

@@ -77,6 +77,7 @@ assert.equal(acceptLogin({ nickname: '甲' }, NOW).ok, false);
 
 assert.equal(sessionStatus({ nickname: '甲', loggedInAt: NOW }, NOW).loggedIn, false);
 assert.equal(sessionStatus({ userId: '42', nickname: '甲', avatarUrl: 'http://example.com/a.jpg', loggedInAt: NOW }, NOW).avatarUrl, '');
+assert.equal(sessionStatus({ userId: '42', nickname: '甲', avatarUrl: 'https://example.com/mosaic-legacy/a.png', loggedInAt: NOW }, NOW).avatarUrl, '');
 assert.equal(sessionStatus({ userId: '42', loggedInAt: NOW }, NOW + SESSION_MS - 1).loggedIn, true);
 assert.equal(sessionStatus({ userId: '42', loggedInAt: NOW }, NOW + SESSION_MS).expired, true);
 assert.equal(sessionStatus({ userId: '42', loggedInAt: NOW + 10 * 60 * 1000 }, NOW).loggedIn, false);

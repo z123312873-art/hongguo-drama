@@ -3675,11 +3675,26 @@ function applyEditableSettings(current, incoming) {
   return merged;
 }
 
+let accountCodeClient;
+function accountCode() {
+  if (!accountCodeClient) {
+    const { createCodeClient } = require('./src/native/account-code');
+    accountCodeClient = createCodeClient({
+      getDevice: () => store.getLoginDevice(),
+      saveDevice: (device) => store.saveLoginDevice(device),
+    });
+  }
+  return accountCodeClient;
+}
+
 async function accountHandlers() {
   const { createAccountHandlers } = await import('./src/accountLogin.mjs');
+  const code = accountCode();
   return createAccountHandlers({
     getAccount: () => store.getAccount(),
     saveAccount: (record) => store.saveAccount(record),
+    sendTransport: (input) => code.send(input),
+    loginTransport: (input) => code.login(input),
   });
 }
 
@@ -3699,7 +3714,10 @@ ipcMain.handle('account-login', async (_event, input) => {
 });
 
 ipcMain.handle('account-logout', async () => {
-  try { return await (await accountHandlers()).logout(); }
+  try {
+    accountCode().reset();
+    return await (await accountHandlers()).logout();
+  }
   catch { return { loggedIn: false }; }
 });
 

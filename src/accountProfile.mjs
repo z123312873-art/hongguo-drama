@@ -21,6 +21,27 @@ const SKEW_MS = 5 * 60 * 1000;
 const CODE_LIMIT = 8;
 const NICKNAME_LIMIT = 32;
 
+export function wirePhone(countryCode, phone) {
+  const region = regionByCode(countryCode);
+  const local = String(phone ?? '');
+  if (!region || !/^\d+$/.test(local)) return '';
+  if (region.code === '+86') return `${region.code}${local}`;
+  const widths = region.max === 10 ? [3, 4, 3] : region.max === 11 ? [3, 4, 4] : [];
+  if (!widths.length) {
+    const width = region.max % 4 === 0 ? 4 : 3;
+    for (let left = region.max; left > 0; left -= width) widths.push(width);
+  }
+  const groups = [];
+  let rest = local;
+  for (const width of widths) {
+    if (!rest) break;
+    const take = Math.min(width, rest.length);
+    groups.push(rest.slice(0, take));
+    rest = rest.slice(take);
+  }
+  return `${region.code}${groups.join(' ')}`;
+}
+
 export function regionByCode(code) {
   return ACCOUNT_REGIONS.find(region => region.code === code) || null;
 }
@@ -45,12 +66,12 @@ export function normalizeCode(value) {
 export function retryDelay(value) {
   if (value === 0) return 0;
   const number = Number(value);
-  if (!Number.isInteger(number) || number < 0 || number > 300) return 60;
+  if (!Number.isInteger(number) || number < 0 || number > 3600) return 60;
   return number;
 }
 
 export function httpsAvatar(value) {
-  if (typeof value !== 'string' || !value || value.length > 500) return '';
+  if (typeof value !== 'string' || !value || value.length > 500 || value.includes('mosaic-legacy')) return '';
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password) return '';

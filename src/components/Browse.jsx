@@ -10,6 +10,7 @@ import { applyPublicRatings } from '../publicRatings.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
 import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, pagesToFill, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
+import { keepRicherSnapshot, pageWindow, reuseFreshSnapshot, shownBrowseTotal } from '../browseWindow.mjs';
 import { firstPagePosters } from '../comicLayout.mjs';
 import { joinPages, loadPage } from '../catalogPages.mjs';
 import { DEFAULT_BROWSE_CATEGORIES } from '../browseCategories.mjs';
@@ -57,13 +58,17 @@ function savedShelf() {
 
 function writeSnapshot(source, category, genre, page, entry) {
   const key = snapshotKey(source, category, genre, page);
-  pageCache.delete(key);
-  pageCache.set(key, entry);
-  if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+  const previous = pageCache.get(key);
+  const stored = keepRicherSnapshot(previous, entry);
+  if (stored !== previous) {
+    pageCache.delete(key);
+    pageCache.set(key, stored);
+    if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+  }
   try {
     if (source === 'hongguo' && !genre && Number(page) === 1 && globalThis.localStorage) {
       if (category === 'hot-drama') writeDiscoverShelf(localStorage, { hero: entry.results });
-      if (category === 'real-drama') writeDiscoverShelf(localStorage, { posters: entry.results });
+      if (category === 'real-drama' && stored === entry) writeDiscoverShelf(localStorage, { posters: entry.results });
     }
   } catch { /* the shelf only shortens the next open */ }
 }
@@ -241,26 +246,30 @@ function Browse({ onNavigate, active = true }) {
           return changed ? { ...current, [cat]: next } : current;
         });
       };
-      if (haveCards) {
-        pageSpan.current = cached.pageSpan || 1;
-        setResults(cached.results);
-        setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
-        setSourceUrl(cached.sourceUrl || fallbackUrl);
-        keepGenres(cached.meta?.genres);
-      } else {
-        const keepShelf = source === 'hongguo' && cat === 'real-drama' && !gen && Number(pg) === 1;
-        setResults(current => (keepShelf && current.length ? current : []));
-        if (!keepShelf) setMeta({ total: 0, totalPages: 0, genres: [] });
-        setSourceUrl(fallbackUrl);
-      }
       const neededSpan = haveCards && pg === 1
         ? pagesToFill(slots, cached.perPage || cached.results.length, cached.sourcePages || 1, maxJoinedPages(source))
         : 1;
       const stale = !haveCards || Date.now() - cached.savedAt >= PAGE_CACHE_TTL_MS;
-      // A category click keeps the posters it already has. Only a short first page of a fresh list grows.
-      if (haveCards && !forceRefresh && (stale || neededSpan <= (cached.pageSpan || 1))) {
+      const visible = haveCards && !stale;
+      if (haveCards) pageSpan.current = cached.pageSpan || 1;
+      // A fresh list stays on screen. An expired one is loaded again instead of remaining as the whole catalog.
+      if (reuseFreshSnapshot({ haveCards, stale, forceRefresh, neededSpan, pageSpan: cached?.pageSpan || 1 })) {
+        setResults(cached.results);
+        setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(cached.sourceUrl || fallbackUrl);
+        keepGenres(cached.meta?.genres);
         setLoading(false);
         return;
+      }
+      if (haveCards && !stale) {
+        setResults(cached.results);
+        setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(cached.sourceUrl || fallbackUrl);
+        keepGenres(cached.meta?.genres);
+      } else if (!(source === 'hongguo' && cat === 'real-drama' && !gen && Number(pg) === 1)) {
+        setResults([]);
+        setMeta({ total: 0, totalPages: 0, genres: [] });
+        setSourceUrl(fallbackUrl);
       }
       setLoading(true);
       listTimer.current = setTimeout(() => {
@@ -268,7 +277,7 @@ function Browse({ onNavigate, active = true }) {
         if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
         invalidateList();
         setLoading(false);
-        setError(haveCards ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
+        setError(visible ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
       }, LIST_TIMEOUT_MS);
       try {
         const planned = sourcePageWindow(pg, pageSpan.current, Number.MAX_SAFE_INTEGER);
@@ -301,13 +310,13 @@ function Browse({ onNavigate, active = true }) {
         const replies = new Array(Math.max(0, windowed.count - 1)).fill(null);
         let shownCount = firstResults.length;
         const showArrived = () => {
-          if (haveCards) return;
+          if (visible) return;
           const arrived = joinPages(firstResults, replies, res.hasMore === true);
           if (arrived.results.length <= shownCount) return;
           shownCount = arrived.results.length;
           setResults(arrived.results);
         };
-        if (!haveCards && windowed.count > 1 && firstResults.length) {
+        if (!visible && windowed.count > 1 && firstResults.length) {
           setResults(firstResults);
           setMeta({ total: res.total || firstResults.length, totalPages: windowed.uiPages || 0, genres: res.genres || [], hasMore: false });
           keepGenres(res.genres);
@@ -329,7 +338,7 @@ function Browse({ onNavigate, active = true }) {
           perPage: firstResults.length,
           sourcePages: openEnded && lastHasMore ? OPEN_SOURCE_PAGES : reportedPages,
         };
-        if (!next.results.length && haveCards && res.unsupported !== true) {
+        if (!next.results.length && visible && res.unsupported !== true) {
           throw new Error(res.emptyMessage || '来源这次没有返回片单，请稍后重试。');
         }
         rememberCatalogTitles(next.results);
@@ -346,7 +355,7 @@ function Browse({ onNavigate, active = true }) {
       } catch (e) {
         if (request !== listRequest.current) return;
         if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
-        setError(`${haveCards ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
+        setError(`${visible ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
       } finally {
         if (request === listRequest.current) {
           clearTimeout(listTimer.current);
@@ -737,18 +746,8 @@ function Browse({ onNavigate, active = true }) {
     else setLibrary(saved);
   };
   const totalPages = meta.totalPages || 0;
-  const pageNumbers = useMemo(() => {
-    if (!totalPages) return [];
-    const out = [];
-    const cur = page;
-    const push = (n) => {
-      if (n >= 1 && n <= totalPages && !out.includes(n)) out.push(n);
-    };
-    out.push(1);
-    for (let i = cur - 1; i <= cur + 1; i++) push(i);
-    push(totalPages);
-    return out.sort((a, b) => a - b);
-  }, [totalPages, page]);
+  const pageNumbers = useMemo(() => pageWindow(totalPages, page), [totalPages, page]);
+  const shownTotal = shownBrowseTotal({ source, category, genre, total: meta.total });
 
   return (
     <div className="browse-container">
@@ -767,7 +766,7 @@ function Browse({ onNavigate, active = true }) {
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
           <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />搜索短剧</button>
           <button className="btn btn-outline" disabled={loading || sourcesLoading || upcoming} onClick={() => (comicView ? setComicReload(value => value + 1) : loadList(category, genre, page, true))}><RefreshCw size={15} />刷新片单</button>
-          {!upcoming && meta.total > 0 && <span className="browse-stat">共 {meta.total} 部</span>}
+          {!upcoming && shownTotal > 0 && <span className="browse-stat">共 {shownTotal} 部</span>}
         </div>
       </div>
 
