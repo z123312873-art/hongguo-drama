@@ -1,6 +1,6 @@
 'use strict';
 
-// The account picture comes from the app profile. Pictures the app serves can be HEIC
+// The account picture comes from the account profile. Account pictures can be HEIC
 // (Chromium cannot draw it), signed and short-lived, or plain http. The main process
 // therefore fetches the picture itself, keeps only formats a page can draw, and hands the
 // page a small data: URL that also survives a restart after the signed address expires.

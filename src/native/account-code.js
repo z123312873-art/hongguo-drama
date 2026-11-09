@@ -201,8 +201,8 @@ function createCodeClient({
   };
   // Signed account request for the reading API. Resolves to the parsed body only when the
   // server confirms it (code 0 and no nested error); anything else throws.
-  // The phone app signs reading calls with the full signature; numbers outside +86 sign in with the
-  // international one. Try the sign-in's own signature first, then the other once, and keep what worked.
+  // Try the sign-in's own signature first; if the reply is refused, try the other one once and keep
+  // whichever worked for later calls.
   let readingSign = '';
   const requestOnce = async (signAs, method, path, query, body) => {
     const response = await call(path, signAs, body, method, query, 'application/json; charset=utf-8');

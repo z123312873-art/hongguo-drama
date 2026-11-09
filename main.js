@@ -3537,7 +3537,7 @@ function historyRows() {
   return watchHistory.listHistory(seriesRegistry, store.getPlayback(), getCurrentSettings().watch_sequels_enabled !== false);
 }
 
-// ===== 帐号历史（登录后与手机同一份） =====
+// ===== 帐号历史（登录后与手机双向合并） =====
 const cloudHistoryApi = require('./src/native/cloud-history');
 const CLOUD_HISTORY_TTL = 60 * 1000;
 let cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
@@ -3567,57 +3567,87 @@ async function loadCloudHistory(force = false) {
   return state.pending;
 }
 
-function pendingCloudIds(userId) {
-  const map = store.getPlayback() || {};
-  return new Set(Object.keys(map).filter(id => map[id]?.cloudPending === userId));
-}
-
-// Signed in with a working session: the account list. Otherwise this computer's list.
-async function watchHistoryView(force = false) {
-  const local = historyRows();
-  if (!signedInRecord()) return { success: true, results: local, sync: { mode: 'local' } };
-  const state = await loadCloudHistory(force);
-  if (!state) return { success: true, results: local, sync: { mode: 'local', error: '登录已过期或这台电脑没有保存会话，请重新登录后同步手机历史' } };
-  if (!state.rows) return { success: true, results: local, sync: { mode: 'local', error: `手机历史暂时读不到，先显示这台电脑的记录（${state.error || '请稍后重试'}）` } };
+// What is sent up for one record: its progress, plus the episode id and total when known.
+function uploadEntryFor(sid, record, userId) {
+  const series = seriesRegistry.find(item => String(item.series_id) === sid);
+  const episode = (series?.episodes || []).find(item => Number(item.vid_index) === record.vid_index);
+  const cloud = cloudHistory.userId === userId ? (cloudHistory.rows || []).find(row => row.series_id === sid) : null;
   return {
-    success: true,
-    results: cloudHistoryApi.mergeHistory(state.rows, local, pendingCloudIds(state.userId)),
-    sync: { mode: 'cloud', syncedAt: state.fetchedAt, ...(state.error ? { error: `刚才没有更新成功，显示的是 ${new Date(state.fetchedAt).toLocaleTimeString('zh-CN')} 读到的手机历史` } : {}) },
+    series_id: sid, vid_index: record.vid_index, currentTime: Number(record.currentTime) || 0, updatedAt: record.updatedAt,
+    total: Math.max(Number(series?.total) || 0, series?.episodes?.length || 0, Number(record.knownTotal) || 0, Number(record.remote?.total) || 0),
+    cloudVid: String(episode?.vid || episode?.video_id || cloud?.cloudVid || ''),
+    seasonIndex: cloud?.seasonIndex || 0, multiSeason: cloud?.multiSeason === true, duration: cloud?.duration || 0,
   };
 }
 
-// While signed in, a play is also written to the account (a few seconds after the last save).
+// Two-way merge with the account (see reconcileHistory). Uploads count as synced only once the
+// account lists them, so an upload the server ignored is retried, never mistaken for a deletion.
+let historySync = null;
+async function syncCloudHistory(force = false) {
+  if (historySync) return historySync;
+  historySync = (async () => {
+    const state = await loadCloudHistory(force);
+    if (!state?.rows) return state;
+    if (!force && state.mergedAt === state.fetchedAt) return state;
+    const userId = state.userId;
+    const plan = cloudHistoryApi.reconcileHistory({ playback: store.getPlayback(), cloudRows: state.rows, userId });
+    store.savePlayback(plan.playback);
+    const sent = [];
+    const failures = [];
+    for (const sid of plan.toUpload.slice(0, 30)) {
+      if (syncedAccountId() !== userId) return state;
+      const record = store.getPlayback()[sid];
+      if (!record) continue;
+      try { await cloudHistoryApi.uploadEntry(cloudRequest(), uploadEntryFor(sid, record, userId)); sent.push(sid); }
+      catch (error) { failures.push(error.message); }
+    }
+    if (sent.length) {
+      try {
+        const rows = await cloudHistoryApi.fetchHistory(cloudRequest());
+        if (cloudHistory === state) Object.assign(state, { rows, fetchedAt: Date.now() });
+        const listed = new Set(rows.map(row => row.series_id));
+        const map = store.getPlayback();
+        for (const sid of sent) if (map[sid] && listed.has(sid)) map[sid] = { ...map[sid], cloudSynced: userId };
+        store.savePlayback(map);
+      } catch (error) { failures.push(error.message); }
+    }
+    Object.assign(state, { mergedAt: state.fetchedAt, notice: plan.notice,
+      uploadError: failures.length ? `有 ${failures.length} 部没有同步到手机，稍后会再试（${failures[0]}）` : '' });
+    return state;
+  })().finally(() => { historySync = null; });
+  return historySync;
+}
+
+// Signed in: this computer's records merged both ways with the account. Signed out or unreadable:
+// this computer's records only, with the reason.
+async function watchHistoryView(force = false) {
+  if (!signedInRecord()) return { success: true, results: historyRows(), sync: { mode: 'local' } };
+  const state = await syncCloudHistory(force);
+  const local = historyRows();
+  if (!state) return { success: true, results: local, sync: { mode: 'local', error: '登录已过期或这台电脑没有保存会话，请重新登录后同步手机历史' } };
+  if (!state.rows) return { success: true, results: local, sync: { mode: 'local', error: `手机历史暂时读不到，先显示这台电脑的记录（${state.error || '请稍后重试'}）` } };
+  const errors = [state.error ? `刚才没有更新成功，显示的是 ${new Date(state.fetchedAt).toLocaleTimeString('zh-CN')} 合并的结果` : '', state.uploadError || ''].filter(Boolean);
+  return {
+    success: true,
+    results: local.map(row => ({ ...row, synced: watchHistory.sourceOf(String(row.series_id)) === 'hongguo' ? row.cloudSynced === state.userId : undefined })),
+    sync: { mode: 'cloud', syncedAt: state.fetchedAt, ...(errors.length ? { error: errors.join('；') } : {}), ...(state.notice ? { notice: state.notice } : {}) },
+  };
+}
+
+// While signed in, a Hongguo play is also written to the account (a few seconds after the last save).
 function scheduleCloudUpload(seriesId) {
   const userId = syncedAccountId();
   if (!userId) return;
   const sid = String(seriesId);
-  // Only Hongguo dramas exist in the account; other sources stay on this computer.
   if (watchHistory.sourceOf(sid) !== 'hongguo') return;
-  const map = store.getPlayback();
-  if (!map[sid]) return;
-  if (map[sid].cloudPending !== userId) { map[sid] = { ...map[sid], cloudPending: userId }; store.savePlayback(map); }
   clearTimeout(cloudUploads.get(sid));
   cloudUploads.set(sid, setTimeout(async () => {
     cloudUploads.delete(sid);
     if (syncedAccountId() !== userId) return;
     const record = store.getPlayback()[sid];
-    const series = seriesRegistry.find(item => String(item.series_id) === sid);
-    if (!record || !series) return;
-    const episode = (series.episodes || []).find(item => Number(item.vid_index) === record.vid_index);
-    const cloud = cloudHistory.userId === userId ? (cloudHistory.rows || []).find(row => row.series_id === sid) : null;
+    if (!record) return;
     try {
-      await cloudHistoryApi.uploadEntry(cloudRequest(), {
-        series_id: sid, vid_index: record.vid_index, currentTime: record.currentTime, updatedAt: record.updatedAt,
-        total: Math.max(Number(series.total) || 0, series.episodes?.length || 0, record.knownTotal || 0),
-        cloudVid: String(episode?.vid || episode?.video_id || cloud?.cloudVid || ''),
-        seasonIndex: cloud?.seasonIndex || 0, multiSeason: cloud?.multiSeason === true, duration: cloud?.duration || 0,
-      });
-      const latest = store.getPlayback();
-      if (latest[sid]?.cloudPending === userId && latest[sid].updatedAt === record.updatedAt) {
-        const { cloudPending, ...rest } = latest[sid];
-        latest[sid] = rest;
-        store.savePlayback(latest);
-      }
+      await cloudHistoryApi.uploadEntry(cloudRequest(), uploadEntryFor(sid, record, userId));
       if (cloudHistory.userId === userId) cloudHistory.fetchedAt = 0;
       sendToRenderer('watch-history-updated', {});
     } catch (error) {
@@ -3626,10 +3656,11 @@ function scheduleCloudUpload(seriesId) {
   }, 5000));
 }
 
-// Signed in: remove from the account first; only a confirmed removal also clears this computer.
+// Signed in, a Hongguo drama is removed from the account first; only a confirmed removal also clears
+// this computer, so the next merge cannot bring it back.
 async function removeWatchHistoryEverywhere(seriesId, { missingOk = false } = {}) {
   const sid = String(seriesId);
-  const userId = syncedAccountId();
+  const userId = watchHistory.sourceOf(sid) === 'hongguo' ? syncedAccountId() : '';
   const map = store.getPlayback();
   if (userId) {
     const state = await loadCloudHistory(true);
@@ -3647,7 +3678,8 @@ async function removeWatchHistoryEverywhere(seriesId, { missingOk = false } = {}
   }
   clearTimeout(cloudUploads.get(sid));
   cloudUploads.delete(sid);
-  if (watchHistory.forgetPlayback(map, sid)) store.savePlayback(map);
+  const latest = store.getPlayback();
+  if (watchHistory.forgetPlayback(latest, sid)) store.savePlayback(latest);
   else if (!userId && !missingOk) return { success: false, error: '这部剧不在观看记录中' };
   sendToRenderer('watch-history-updated', { removedSeriesId: sid });
   return { success: true, cloud: !!userId };
@@ -3658,7 +3690,9 @@ async function refreshWatchHistory(force = false) {
   if (!force && getCurrentSettings().watch_updates_enabled === false) return { success: true, checked: 0, disabled: true };
   historyRefresh = (async () => {
     const now = Date.now();
-    const due = historyRows().filter(item => force || now - item.lastCheckedAt >= HISTORY_CHECK_INTERVAL)
+    // Dramas added from the account get update checks once their episode list is on this computer.
+    const due = historyRows().filter(item => seriesRegistry.some(entry => String(entry.series_id) === String(item.series_id)))
+      .filter(item => force || now - item.lastCheckedAt >= HISTORY_CHECK_INTERVAL)
       .sort((a, b) => a.lastCheckedAt - b.lastCheckedAt);
     const batch = due.slice(0, 20);
     let checked = 0, failed = 0;
@@ -3739,6 +3773,62 @@ async function refreshWatchHistory(force = false) {
   return historyRefresh;
 }
 
+// ===== 帐号收藏（登录后与手机双向合并） =====
+const cloudFavoritesApi = require('./src/native/cloud-favorites');
+const favoriteMeta = new Map();
+
+// Title and poster for a favorite the phone added: the account history, the local registry, then
+// one episode-list read (a few at a time). Unknown stays unknown instead of being made up.
+async function favoriteDetails(rows) {
+  const history = cloudHistory.userId && cloudHistory.rows ? new Map(cloudHistory.rows.map(row => [row.series_id, row])) : new Map();
+  const missing = [];
+  for (const row of rows) {
+    const known = favoriteMeta.get(row.id) || history.get(row.id) || seriesRegistry.find(item => String(item.series_id) === row.id);
+    if (known?.series_title) favoriteMeta.set(row.id, { series_title: known.series_title, cover: known.cover || '' });
+    else missing.push(row.id);
+  }
+  const queue = missing.slice(0, 30);
+  await Promise.all(Array.from({ length: 3 }, async () => {
+    while (queue.length) {
+      const id = queue.shift();
+      try {
+        const data = await hongguo.fetchEpisodeList(id);
+        if (data?.series_title) favoriteMeta.set(id, { series_title: data.series_title, cover: data.cover || '' });
+      } catch { /* listed by id until a later read finds the name */ }
+    }
+  }));
+  return rows.map(row => {
+    const meta = favoriteMeta.get(row.id);
+    return { ...row, title: meta?.series_title || '', cover: typeof meta?.cover === 'string' && /^https?:\/\//i.test(meta.cover) ? meta.cover : '' };
+  });
+}
+
+ipcMain.handle('cloud-favorites', async () => {
+  const userId = syncedAccountId();
+  if (!userId) {
+    return { success: true, mode: 'local', ...(signedInRecord() ? { error: '登录已过期或这台电脑没有保存会话，请重新登录后同步手机收藏' } : {}) };
+  }
+  try {
+    const rows = await cloudFavoritesApi.fetchFavorites(cloudRequest(), userId);
+    return { success: true, mode: 'cloud', userId, rows: await favoriteDetails(rows) };
+  } catch (error) {
+    return { success: true, mode: 'local', userId, error: `手机收藏暂时读不到，先显示这台电脑的收藏（${error.message || '请稍后重试'}）` };
+  }
+});
+
+ipcMain.handle('cloud-favorite-set', async (_event, seriesId, on) => {
+  const userId = syncedAccountId();
+  if (!userId) return { success: false, error: '没有登录，收藏只保存在这台电脑' };
+  const id = cloudFavoritesApi.readId(String(seriesId || ''));
+  if (!id || typeof on !== 'boolean') return { success: false, error: '这部剧无法同步到手机收藏' };
+  try {
+    const rows = await cloudFavoritesApi.setFavorite(cloudRequest(), userId, id, on);
+    return { success: true, userId, rows: rows.map(row => ({ ...row })) };
+  } catch (error) {
+    return { success: false, code: error.code || '', error: error.message || '手机收藏同步失败' };
+  }
+});
+
 ipcMain.handle('remove-watch-history', async (_event, seriesId) => {
   try { return await removeWatchHistoryEverywhere(seriesId, { missingOk: true }); }
   catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
@@ -3749,7 +3839,7 @@ ipcMain.handle('get-watch-history', async () => {
   catch (error) { return { success: true, results: historyRows(), sync: { mode: 'local', error: error.message } }; }
 });
 ipcMain.handle('refresh-watch-history', async () => {
-  const cloud = syncedAccountId() ? await loadCloudHistory(true) : null;
+  const cloud = syncedAccountId() ? await syncCloudHistory(true) : null;
   const result = await refreshWatchHistory(true);
   return cloud?.error ? { ...result, cloudError: cloud.error } : result;
 });

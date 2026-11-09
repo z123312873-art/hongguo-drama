@@ -1,0 +1,81 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { planFavorites, newCancels, markConfirmed } from '../../favoriteSync.mjs';
+
+const NOW = 1_800_000_000_000;
+const U = '1234567890123456', OTHER = '6543210987654321';
+const item = (id, extra = {}) => ({ id, title: `剧${id}`, published_at: null, favorite: true, favorited_at: 1_700_000_000_000, cover: '', online_time: null, cloud_user: null, ...extra });
+const cloud = (id, extra = {}) => ({ id, favoritedAt: 1_750_000_000_000, title: `云${id}`, cover: 'https://x/c.jpg', ...extra });
+const ids = list => list.filter(i => i.favorite).map(i => i.id).sort();
+
+test('first sign-in merges both sides: phone favorites come in, playable local ones go up', () => {
+  const plan = planFavorites({ items: [item('7300000000000000001'), item('7300000000000000002')], cloud: [cloud('7300000000000000002'), cloud('7300000000000000003')], userId: U, now: NOW });
+  assert.deepEqual(ids(plan.items), ['7300000000000000001', '7300000000000000002', '7300000000000000003']);
+  assert.deepEqual(plan.toAdd, ['7300000000000000001']);
+  const added = plan.items.find(i => i.id === '7300000000000000003');
+  assert.equal(added.title, '云7300000000000000003');
+  assert.equal(added.cloud_user, U);
+  assert.equal(added.favorited_at, 1_750_000_000_000);
+  assert.equal(plan.items.find(i => i.id === '7300000000000000002').title, '剧7300000000000000002', 'local name kept');
+});
+
+test('removed on the phone: a confirmed favorite disappears here too', () => {
+  const plan = planFavorites({ items: [item('7300000000000000001', { cloud_user: U }), item('7300000000000000002', { cloud_user: U })], cloud: [cloud('7300000000000000002')], userId: U, now: NOW });
+  assert.deepEqual(ids(plan.items), ['7300000000000000002']);
+  assert.deepEqual(plan.toAdd, []);
+  assert.equal(plan.items.find(i => i.id === '7300000000000000001').cloud_user, null);
+});
+
+test('an empty account list never clears this computer', () => {
+  const plan = planFavorites({ items: [item('7300000000000000001', { cloud_user: U })], cloud: [], userId: U, now: NOW });
+  assert.deepEqual(ids(plan.items), ['7300000000000000001']);
+  assert.match(plan.notice, /先保留/);
+  assert.equal(plan.changed, false);
+});
+
+test('not online yet: stays here, never sent', () => {
+  const plan = planFavorites({ items: [item('7300000000000000001', { online_time: NOW + 86400000 })], cloud: [cloud('7300000000000000002')], userId: U, now: NOW });
+  assert.deepEqual(plan.toAdd, []);
+  assert.deepEqual(ids(plan.items), ['7300000000000000001', '7300000000000000002']);
+  const online = planFavorites({ items: [item('7300000000000000001', { online_time: NOW - 1 })], cloud: [cloud('7300000000000000002')], userId: U, now: NOW });
+  assert.deepEqual(online.toAdd, ['7300000000000000001'], 'goes up once online');
+});
+
+test('another account: favorites confirmed elsewhere are neither sent nor removed', () => {
+  const plan = planFavorites({ items: [item('7300000000000000001', { cloud_user: OTHER })], cloud: [cloud('7300000000000000002')], userId: U, now: NOW });
+  assert.deepEqual(plan.toAdd, []);
+  assert.deepEqual(ids(plan.items), ['7300000000000000001', '7300000000000000002']);
+});
+
+test('cancellations: pending ones are sent and not re-added; favorited again means keep', () => {
+  const items = [item('7300000000000000001', { favorite: false, cloud_user: U })];
+  const plan = planFavorites({ items, cloud: [cloud('7300000000000000001')], userId: U, cancels: ['7300000000000000001'], now: NOW });
+  assert.deepEqual(plan.toCancel, ['7300000000000000001']);
+  assert.deepEqual(ids(plan.items), [], 'the phone copy does not bring it back while the cancel is pending');
+  const again = planFavorites({ items: [item('7300000000000000001', { cloud_user: U })], cloud: [cloud('7300000000000000001')], userId: U, cancels: ['7300000000000000001'], now: NOW });
+  assert.deepEqual(again.toCancel, []);
+  assert.deepEqual(again.cancels, []);
+  const done = planFavorites({ items, cloud: [], userId: U, cancels: ['7300000000000000001'], now: NOW });
+  assert.deepEqual(done.cancels, [], 'already gone from the account');
+});
+
+test('new cancellations only for confirmed favorites of this account', () => {
+  const before = [item('a', { cloud_user: U }), item('b', { cloud_user: U }), item('c'), item('d', { cloud_user: OTHER })];
+  const after = [item('a', { cloud_user: U, favorite: false }), item('c', { favorite: false })];
+  assert.deepEqual(newCancels(before, after, U), ['a', 'b']);
+  assert.equal(markConfirmed(before, 'c', U, true).find(i => i.id === 'c').cloud_user, U);
+  assert.equal(markConfirmed(before, 'a', U, false).find(i => i.id === 'a').cloud_user, null);
+});
+
+test('a phone favorite without a known name keeps an id-based label, never a made-up name', () => {
+  const plan = planFavorites({ items: [], cloud: [cloud('7300000000000000009', { title: '', cover: '' })], userId: U, now: NOW });
+  assert.equal(plan.items[0].title, '短剧 000009');
+  const named = planFavorites({ items: plan.items, cloud: [cloud('7300000000000000009', { title: '真名' })], userId: U, now: NOW });
+  assert.equal(named.items[0].title, '真名', 'the real name replaces the label later');
+  assert.equal(named.toAdd.length, 0);
+});
+
+test('caps the account changes sent in one pass', () => {
+  const items = Array.from({ length: 30 }, (_, i) => item(String(7300000000000000100n + BigInt(i))));
+  assert.equal(planFavorites({ items, cloud: [cloud('7300000000000000001')], userId: U, now: NOW }).toAdd.length, 20);
+});

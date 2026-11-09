@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cloudRow, fetchHistory, uploadEntry, deleteEntry, mergeHistory, updateBody, finished, LIST_PATH, UPDATE_PATH } = require('./cloud-history');
+const { cloudRow, fetchHistory, uploadEntry, deleteEntry, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH } = require('./cloud-history');
 
 const raw = (id, extra = {}) => ({
   book_id_str: id, book_name: `剧${id}`, thumb_url: 'https://p3-sign.fqnovelpic.com/novel-pic/x~tplv-a.heic?x-signature=1',
@@ -112,26 +112,67 @@ test('delete is confirmed by reading the list again', async () => {
   await assert.rejects(deleteEntry(stays.request, { series_id: '' }));
 });
 
-test('merge: the account decides the list; local progress wins only when newer; pending plays are added once', () => {
-  const cloud = [cloudRow(raw('7300000000000000001', { read_timestamp_ms: 2000 })), cloudRow(raw('7300000000000000002', { read_timestamp_ms: 1000 }))];
-  const local = [
-    { series_id: '7300000000000000001', series_title: '本地名', total: 82, vid_index: 7, currentTime: 5, updatedAt: 3000, completed: false, sequels: [{ series_id: '7300000000000000009' }], hasUpdates: true, unreadEpisodes: 2 },
-    { series_id: '7300000000000000002', series_title: 'b', total: 80, vid_index: 1, currentTime: 1, updatedAt: 500, completed: false },
-    { series_id: '7300000000000000003', series_title: 'pending', total: 10, vid_index: 1, currentTime: 1, updatedAt: 4000 },
-    { series_id: '7300000000000000004', series_title: 'old local only', total: 10, vid_index: 1, currentTime: 1, updatedAt: 100 },
-    { series_id: 'hema:12', series_title: 'other source', total: 10, vid_index: 1, currentTime: 1, updatedAt: 5000 },
-  ];
-  const rows = mergeHistory(cloud, local, new Set(['7300000000000000003']));
-  assert.deepEqual(rows.map(r => r.series_id), ['7300000000000000003', '7300000000000000001', '7300000000000000002']);
-  const first = rows.find(r => r.series_id === '7300000000000000001');
-  assert.equal(first.vid_index, 7, 'newer local progress');
-  assert.equal(first.total, 82);
-  assert.equal(first.sequels.length, 1, '疑似续作 stays');
-  assert.equal(first.hasUpdates, true);
-  const second = rows.find(r => r.series_id === '7300000000000000002');
-  assert.equal(second.vid_index, 3, 'newer phone progress');
-  assert.equal(rows.find(r => r.series_id === '7300000000000000003').synced, false);
-  assert.deepEqual(mergeHistory([], local, new Set()), [], 'an empty account shows an empty list');
-  assert.equal(mergeHistory(cloud, [], new Set()).length, 2);
-  assert.deepEqual(mergeHistory(cloud, null).map(r => r.sequels), [[], []]);
+const U = '1234567890123456', OTHER = '6543210987654321';
+const local = (extra = {}) => ({ watched: true, vid_index: 2, currentTime: 5, updatedAt: 1000, ...extra });
+const row = (id, extra = {}) => cloudRow(raw(id, { read_timestamp_ms: 5000, ...extra }));
+
+test('local only: never-synced records are sent up and kept', () => {
+  const plan = reconcileHistory({ playback: { '7300000000000000001': local() }, cloudRows: [row('7300000000000000002')], userId: U });
+  assert.deepEqual(plan.toUpload, ['7300000000000000001']);
+  assert.ok(plan.playback['7300000000000000001']);
+  assert.deepEqual(plan.removed, []);
+});
+
+test('account only: added to this computer with name, poster, progress and the synced mark', () => {
+  const plan = reconcileHistory({ playback: {}, cloudRows: [row('7300000000000000002', { vid_index: 80, current_play_position: 89000 })], userId: U });
+  const added = plan.playback['7300000000000000002'];
+  assert.equal(added.vid_index, 80);
+  assert.equal(added.currentTime, 89);
+  assert.equal(added.updatedAt, 5000);
+  assert.equal(added.cloudSynced, U);
+  assert.equal(added.remote.title, '剧7300000000000000002');
+  assert.equal(added.completedEpisode, 80, 'finished on the phone stays finished here');
+  assert.deepEqual(plan.toUpload, []);
+});
+
+test('both sides: the newer progress wins per drama', () => {
+  const plan = reconcileHistory({
+    playback: { '7300000000000000001': local({ updatedAt: 9000, vid_index: 7 }), '7300000000000000002': local({ updatedAt: 1000, vid_index: 1, sequels: [{ series_id: '9' }] }), '7300000000000000003': local({ updatedAt: 5300 }) },
+    cloudRows: [row('7300000000000000001'), row('7300000000000000002'), row('7300000000000000003')], userId: U,
+  });
+  assert.equal(plan.playback['7300000000000000001'].vid_index, 7, 'local newer is kept');
+  assert.deepEqual(plan.toUpload, ['7300000000000000001'], 'and sent up');
+  assert.equal(plan.playback['7300000000000000002'].vid_index, 3, 'phone newer comes in');
+  assert.equal(plan.playback['7300000000000000002'].sequels.length, 1, 'local extras stay');
+  assert.equal(plan.playback['7300000000000000003'].vid_index, 2, 'within a second counts as the same');
+  for (const id of ['7300000000000000001', '7300000000000000002', '7300000000000000003']) assert.equal(plan.playback[id].cloudSynced, U);
+});
+
+test('deleted on the phone: a record synced before and missing now is removed here', () => {
+  const plan = reconcileHistory({ playback: { '7300000000000000001': local({ cloudSynced: U }), '7300000000000000004': local() }, cloudRows: [row('7300000000000000002')], userId: U });
+  assert.deepEqual(plan.removed, ['7300000000000000001']);
+  assert.equal(plan.playback['7300000000000000001'], undefined);
+  assert.ok(plan.playback['7300000000000000004'], 'a never-synced record is not deleted');
+  assert.deepEqual(plan.toUpload, ['7300000000000000004']);
+});
+
+test('an empty account list deletes nothing', () => {
+  const plan = reconcileHistory({ playback: { '7300000000000000001': local({ cloudSynced: U }), '7300000000000000004': local() }, cloudRows: [], userId: U });
+  assert.ok(plan.playback['7300000000000000001']);
+  assert.deepEqual(plan.removed, []);
+  assert.match(plan.notice, /先保留/);
+  assert.deepEqual(plan.toUpload, ['7300000000000000004']);
+});
+
+test('another account: records synced elsewhere are neither sent nor removed', () => {
+  const plan = reconcileHistory({ playback: { '7300000000000000001': local({ cloudSynced: OTHER }) }, cloudRows: [row('7300000000000000002')], userId: U });
+  assert.ok(plan.playback['7300000000000000001']);
+  assert.deepEqual(plan.toUpload, []);
+  assert.deepEqual(plan.removed, []);
+});
+
+test('records that are not watched yet are left alone', () => {
+  const plan = reconcileHistory({ playback: { '7300000000000000001': { lastCheckedAt: 1 } }, cloudRows: [row('7300000000000000002')], userId: U });
+  assert.deepEqual(plan.toUpload, []);
+  assert.deepEqual(plan.playback['7300000000000000001'], { lastCheckedAt: 1 });
 });
