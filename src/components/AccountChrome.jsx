@@ -4,12 +4,12 @@ import { ACCOUNT_REGIONS, accountActionLabel, accountLabel, avatarPicture, regio
 function Avatar({ status, onClick }) {
   const label = status.loggedIn ? '帐号头像' : '尚未登录';
   // A picture that fails to load falls back to the default icon instead of a broken image.
-  const [failed, setFailed] = useState('');
+  const [failed, setFailed] = useState([]);
   const picture = avatarPicture(status, failed);
   return (
     <button type="button" className="account-avatar" aria-label={label} disabled={!status.loggedIn} onClick={onClick}>
       {picture
-        ? <img src={picture} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setFailed(picture)} />
+        ? <img src={picture} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setFailed(current => current.includes(picture) ? current : [...current, picture])} />
         : <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="8" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M5 19c1.4-3 3.8-4.5 7-4.5S17.6 16 19 19" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>}
     </button>
   );

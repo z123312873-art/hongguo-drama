@@ -1,5 +1,5 @@
 // main.js
-const { app, BrowserWindow, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen } = require('electron');
+const { app, BrowserWindow, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen, safeStorage } = require('electron');
 const path = require('path');
 const IS_PREVIEW = require('./package.json').name === 'hongguo-experience-preview';
 if (IS_PREVIEW) {
@@ -2166,6 +2166,7 @@ ipcMain.handle('save-playback-position', async (event, seriesId, vidIndex, curre
     if (!series) return { success: false, error: '未找到短剧档案' };
     map[sid] = watchHistory.recordPlayback(map[sid], series, Number(vidIndex), Number(currentTime), Date.now(), metadata);
     store.savePlayback(map);
+    scheduleCloudUpload(sid);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -2174,7 +2175,15 @@ ipcMain.handle('save-playback-position', async (event, seriesId, vidIndex, curre
 
 ipcMain.handle('get-playback-position', async (event, seriesId) => {
   const map = store.getPlayback() || {};
-  return map[String(seriesId)] || null;
+  const sid = String(seriesId);
+  const local = map[sid] || null;
+  // Signed in: the phone may have watched further; resume from whichever is newer.
+  const userId = syncedAccountId();
+  const cloud = userId && cloudHistory.userId === userId ? (cloudHistory.rows || []).find(row => row.series_id === sid) : null;
+  if (cloud && (!local || !(Number(local.updatedAt) >= cloud.updatedAt))) {
+    return { ...(local || {}), vid_index: cloud.vid_index, currentTime: cloud.currentTime, updatedAt: cloud.updatedAt, watched: true };
+  }
+  return local;
 });
 
 /**
@@ -3528,6 +3537,122 @@ function historyRows() {
   return watchHistory.listHistory(seriesRegistry, store.getPlayback(), getCurrentSettings().watch_sequels_enabled !== false);
 }
 
+// ===== 帐号历史（登录后与手机同一份） =====
+const cloudHistoryApi = require('./src/native/cloud-history');
+const CLOUD_HISTORY_TTL = 60 * 1000;
+let cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
+const cloudUploads = new Map();
+
+function cloudRequest() {
+  const code = accountCode();
+  return (method, path, query, body) => code.request(method, path, query, body);
+}
+
+async function loadCloudHistory(force = false) {
+  const userId = syncedAccountId();
+  if (!userId) return null;
+  if (cloudHistory.userId !== userId) cloudHistory = { userId, rows: null, fetchedAt: 0, error: '', pending: null };
+  if (!force && cloudHistory.rows && Date.now() - cloudHistory.fetchedAt < CLOUD_HISTORY_TTL) return cloudHistory;
+  if (cloudHistory.pending) return cloudHistory.pending;
+  const state = cloudHistory;
+  state.pending = cloudHistoryApi.fetchHistory(cloudRequest()).then(rows => {
+    if (cloudHistory !== state) return cloudHistory;
+    Object.assign(state, { rows, fetchedAt: Date.now(), error: '' });
+    persistAccountSession();
+    return state;
+  }, error => {
+    if (cloudHistory === state) state.error = String(error?.message || '手机历史暂时读不到');
+    return state;
+  }).finally(() => { state.pending = null; });
+  return state.pending;
+}
+
+function pendingCloudIds(userId) {
+  const map = store.getPlayback() || {};
+  return new Set(Object.keys(map).filter(id => map[id]?.cloudPending === userId));
+}
+
+// Signed in with a working session: the account list. Otherwise this computer's list.
+async function watchHistoryView(force = false) {
+  const local = historyRows();
+  if (!signedInRecord()) return { success: true, results: local, sync: { mode: 'local' } };
+  const state = await loadCloudHistory(force);
+  if (!state) return { success: true, results: local, sync: { mode: 'local', error: '登录已过期或这台电脑没有保存会话，请重新登录后同步手机历史' } };
+  if (!state.rows) return { success: true, results: local, sync: { mode: 'local', error: `手机历史暂时读不到，先显示这台电脑的记录（${state.error || '请稍后重试'}）` } };
+  return {
+    success: true,
+    results: cloudHistoryApi.mergeHistory(state.rows, local, pendingCloudIds(state.userId)),
+    sync: { mode: 'cloud', syncedAt: state.fetchedAt, ...(state.error ? { error: `刚才没有更新成功，显示的是 ${new Date(state.fetchedAt).toLocaleTimeString('zh-CN')} 读到的手机历史` } : {}) },
+  };
+}
+
+// While signed in, a play is also written to the account (a few seconds after the last save).
+function scheduleCloudUpload(seriesId) {
+  const userId = syncedAccountId();
+  if (!userId) return;
+  const sid = String(seriesId);
+  // Only Hongguo dramas exist in the account; other sources stay on this computer.
+  if (watchHistory.sourceOf(sid) !== 'hongguo') return;
+  const map = store.getPlayback();
+  if (!map[sid]) return;
+  if (map[sid].cloudPending !== userId) { map[sid] = { ...map[sid], cloudPending: userId }; store.savePlayback(map); }
+  clearTimeout(cloudUploads.get(sid));
+  cloudUploads.set(sid, setTimeout(async () => {
+    cloudUploads.delete(sid);
+    if (syncedAccountId() !== userId) return;
+    const record = store.getPlayback()[sid];
+    const series = seriesRegistry.find(item => String(item.series_id) === sid);
+    if (!record || !series) return;
+    const episode = (series.episodes || []).find(item => Number(item.vid_index) === record.vid_index);
+    const cloud = cloudHistory.userId === userId ? (cloudHistory.rows || []).find(row => row.series_id === sid) : null;
+    try {
+      await cloudHistoryApi.uploadEntry(cloudRequest(), {
+        series_id: sid, vid_index: record.vid_index, currentTime: record.currentTime, updatedAt: record.updatedAt,
+        total: Math.max(Number(series.total) || 0, series.episodes?.length || 0, record.knownTotal || 0),
+        cloudVid: String(episode?.vid || episode?.video_id || cloud?.cloudVid || ''),
+        seasonIndex: cloud?.seasonIndex || 0, multiSeason: cloud?.multiSeason === true, duration: cloud?.duration || 0,
+      });
+      const latest = store.getPlayback();
+      if (latest[sid]?.cloudPending === userId && latest[sid].updatedAt === record.updatedAt) {
+        const { cloudPending, ...rest } = latest[sid];
+        latest[sid] = rest;
+        store.savePlayback(latest);
+      }
+      if (cloudHistory.userId === userId) cloudHistory.fetchedAt = 0;
+      sendToRenderer('watch-history-updated', {});
+    } catch (error) {
+      console.warn('[History] 手机历史同步失败:', error.message);
+    }
+  }, 5000));
+}
+
+// Signed in: remove from the account first; only a confirmed removal also clears this computer.
+async function removeWatchHistoryEverywhere(seriesId, { missingOk = false } = {}) {
+  const sid = String(seriesId);
+  const userId = syncedAccountId();
+  const map = store.getPlayback();
+  if (userId) {
+    const state = await loadCloudHistory(true);
+    if (!state?.rows) return { success: false, error: `手机历史暂时读不到，没有移除（${state?.error || '请稍后重试'}）` };
+    const row = state.rows.find(item => item.series_id === sid);
+    if (row) {
+      try {
+        const after = await cloudHistoryApi.deleteEntry(cloudRequest(), row);
+        if (cloudHistory === state) Object.assign(state, { rows: after, fetchedAt: Date.now(), error: '' });
+      } catch (error) {
+        if (error.rows && cloudHistory === state) Object.assign(state, { rows: error.rows, fetchedAt: Date.now() });
+        return { success: false, error: error.code === 'CLOUD_DELETE_UNCONFIRMED' ? error.message : `从手机历史移除失败：${error.message || '请稍后重试'}` };
+      }
+    } else if (!map[sid]) return { success: false, error: '这部剧不在观看记录中' };
+  }
+  clearTimeout(cloudUploads.get(sid));
+  cloudUploads.delete(sid);
+  if (watchHistory.forgetPlayback(map, sid)) store.savePlayback(map);
+  else if (!userId && !missingOk) return { success: false, error: '这部剧不在观看记录中' };
+  sendToRenderer('watch-history-updated', { removedSeriesId: sid });
+  return { success: true, cloud: !!userId };
+}
+
 async function refreshWatchHistory(force = false) {
   if (historyRefresh) return historyRefresh;
   if (!force && getCurrentSettings().watch_updates_enabled === false) return { success: true, checked: 0, disabled: true };
@@ -3615,25 +3740,22 @@ async function refreshWatchHistory(force = false) {
 }
 
 ipcMain.handle('remove-watch-history', async (_event, seriesId) => {
-  try {
-    const map = { ...store.getPlayback() };
-    delete map[String(seriesId)];
-    store.savePlayback(map);
-    sendToRenderer('watch-history-updated', { removedSeriesId: String(seriesId) });
-    return { success: true };
-  } catch (error) { return { success: false, error: error.message }; }
+  try { return await removeWatchHistoryEverywhere(seriesId, { missingOk: true }); }
+  catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
 });
 
-ipcMain.handle('get-watch-history', async () => ({ success: true, results: historyRows() }));
-ipcMain.handle('refresh-watch-history', async () => refreshWatchHistory(true));
+ipcMain.handle('get-watch-history', async () => {
+  try { return await watchHistoryView(false); }
+  catch (error) { return { success: true, results: historyRows(), sync: { mode: 'local', error: error.message } }; }
+});
+ipcMain.handle('refresh-watch-history', async () => {
+  const cloud = syncedAccountId() ? await loadCloudHistory(true) : null;
+  const result = await refreshWatchHistory(true);
+  return cloud?.error ? { ...result, cloudError: cloud.error } : result;
+});
 ipcMain.handle('delete-watch-history', async (_event, seriesId) => {
-  try {
-    const map = store.getPlayback();
-    if (!watchHistory.forgetPlayback(map, seriesId)) return { success: false, error: '这部剧不在观看记录中' };
-    store.savePlayback(map);
-    sendToRenderer('watch-history-updated', { removedSeriesId: String(seriesId) });
-    return { success: true };
-  } catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
+  try { return await removeWatchHistoryEverywhere(seriesId); }
+  catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
 });
 ipcMain.handle('acknowledge-watch-updates', async (_event, seriesId, snapshot) => {
   try {
@@ -3676,6 +3798,30 @@ function applyEditableSettings(current, incoming) {
 }
 
 let accountCodeClient;
+// The session is kept only encrypted by the OS (safeStorage); without that it lives in memory until restart.
+function readSavedSession() {
+  try {
+    const blob = store.getLoginSession();
+    if (!blob || !safeStorage?.isEncryptionAvailable?.()) return null;
+    return JSON.parse(safeStorage.decryptString(Buffer.from(blob, 'base64')));
+  } catch { return null; }
+}
+
+function persistAccountSession() {
+  try {
+    const snapshot = accountCodeClient?.snapshot();
+    if (!snapshot || !safeStorage?.isEncryptionAvailable?.()) { store.saveLoginSession(''); return false; }
+    store.saveLoginSession(safeStorage.encryptString(JSON.stringify(snapshot)).toString('base64'));
+    return true;
+  } catch { return false; }
+}
+
+function forgetAccountSession() {
+  accountCodeClient?.reset();
+  try { store.saveLoginSession(''); } catch { /* the next start drops an unreadable session */ }
+  cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
+}
+
 function accountCode() {
   if (!accountCodeClient) {
     const { createCodeClient } = require('./src/native/account-code');
@@ -3683,12 +3829,17 @@ function accountCode() {
       getDevice: () => store.getLoginDevice(),
       saveDevice: (device) => store.saveLoginDevice(device),
     });
+    const record = store.getAccount();
+    const saved = readSavedSession();
+    if (record?.userId && saved?.userId === record.userId) accountCodeClient.restore(saved);
+    else if (saved) store.saveLoginSession('');
   }
   return accountCodeClient;
 }
 
 function accountHandlers() {
   const { createAccountHandlers } = require('./src/native/account-session');
+  const { fetchAvatar } = require('./src/native/account-avatar');
   const code = accountCode();
   return createAccountHandlers({
     getAccount: () => store.getAccount(),
@@ -3696,11 +3847,35 @@ function accountHandlers() {
     sendTransport: (input) => code.send(input),
     loginTransport: (input) => code.login(input),
     profileTransport: () => code.profile(),
+    avatarTransport: (candidates) => fetchAvatar(candidates),
   });
 }
 
+// The signed-in account that the in-memory session belongs to, or '' when history stays local.
+function signedInRecord() {
+  try {
+    const record = store.getAccount?.();
+    const { publicAccount } = require('./src/native/account-profile');
+    return record && publicAccount(record, Date.now()).loggedIn ? record : null;
+  } catch { return null; }
+}
+
+function syncedAccountId() {
+  const record = signedInRecord();
+  if (!record) return '';
+  try {
+    const code = accountCode();
+    return code.signedIn() && code.user() === record.userId ? record.userId : '';
+  } catch { return ''; }
+}
+
 ipcMain.handle('account-status', async () => {
-  try { return await (await accountHandlers()).status(); }
+  try {
+    const status = await (await accountHandlers()).status();
+    // Only a session that belonged to a finished sign-in is dropped; a code in progress keeps its cookies.
+    if (!status.loggedIn && (accountCodeClient?.signedIn() || store.getLoginSession())) forgetAccountSession();
+    return status;
+  }
   catch { return { loggedIn: false }; }
 });
 
@@ -3710,12 +3885,24 @@ ipcMain.handle('account-send-code', async (_event, input) => {
 });
 
 ipcMain.handle('account-login', async (_event, input) => {
-  try { return await (await accountHandlers()).login(input); }
+  try {
+    const result = await (await accountHandlers()).login(input);
+    if (result?.ok) {
+      cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
+      persistAccountSession();
+      sendToRenderer('watch-history-updated', {});
+    }
+    return result;
+  }
   catch { return { ok: false, error: '登录没有完成，请重试' }; }
 });
 
 ipcMain.handle('account-refresh', async () => {
-  try { return await (await accountHandlers()).refresh(); }
+  try {
+    const status = await (await accountHandlers()).refresh();
+    if (status?.loggedIn) persistAccountSession();
+    return status;
+  }
   catch {
     try { return await (await accountHandlers()).status(); }
     catch { return { loggedIn: false }; }
@@ -3724,8 +3911,10 @@ ipcMain.handle('account-refresh', async () => {
 
 ipcMain.handle('account-logout', async () => {
   try {
-    accountCode().reset();
-    return await (await accountHandlers()).logout();
+    forgetAccountSession();
+    const status = await (await accountHandlers()).logout();
+    sendToRenderer('watch-history-updated', {});
+    return status;
   }
   catch { return { loggedIn: false }; }
 });

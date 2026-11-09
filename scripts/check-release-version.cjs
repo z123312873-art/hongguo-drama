@@ -131,4 +131,6 @@ assert(noteBullets.every(item => Array.from(item).length <= 72), 'Each 4.6 summa
 assert(noteBullets.some(item => item.includes('安裝檔裡的登入可以送出驗證碼')));
 assert(noteBullets.some(item => item.includes('側欄同一底色')));
 assert(noteBullets.some(item => item.includes('拿掉前面的中國')));
+assert(noteBullets.some(item => item.includes('手機換過的頭像')));
+assert(noteBullets.some(item => item.includes('與手機「歷史」同一份')));
 console.log(`PASS ${checks} version pairs, equivalent versions, invalid versions and unpublished releases`);

@@ -212,3 +212,46 @@ test('legacy calendar uses local catalog posters without restoring removed rows'
   assert.equal(library.readLocalLibrary().items.length, 0);
   assert.ok(!ui.find(n => n.type === 'img'));
 });
+
+test('signed-in history: says it is the phone list, counts follow the account rows, removal says it includes the phone, phone-only rows resolve then resume', async () => {
+  const h = fixture(); let played = [], resolved = [], sync = { mode: 'cloud', syncedAt: Date.now() };
+  let rows = [
+    { series_id: '7300000000000000001', series_title: '手机看过', vid_index: 5, total: 80, completed: false, currentTime: 12, updatedAt: Date.now(), synced: true },
+    { series_id: '7300000000000000002', series_title: '手机看完', vid_index: 80, total: 80, completed: true, currentTime: 88, updatedAt: Date.now() - 1, synced: true },
+    { series_id: '7300000000000000003', series_title: '刚播放', vid_index: 1, total: 10, completed: false, currentTime: 3, updatedAt: Date.now() - 2, synced: false },
+  ];
+  h.window.electronAPI = {
+    getWatchHistory: async () => ({ success: true, results: rows, sync }),
+    playSeries: async request => { played.push(request); return played.length === 1 ? { success: false, code: 'SERIES_NOT_FOUND', error: '未找到短剧档案' } : { success: true }; },
+    searchResolve: async id => { resolved.push(id); return { success: true, data: { episodes: [] } }; },
+    acknowledgeWatchUpdates: async () => ({ success: true }),
+    removeWatchHistory: async id => { rows = rows.filter(row => row.series_id !== id); return { success: true, cloud: true }; },
+  };
+  const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
+  const text = () => ui.nodes().flatMap(n => n.children || []).filter(c => typeof c === 'string').join('|');
+  const filter = label => ui.find(n => n.type === 'button' && n.children.join('') === label);
+  assert.ok(text().includes('已登录：与手机「历史」同一份。'));
+  assert.ok(filter('全部 3') && filter('未看完 2') && filter('已看完 1'));
+  assert.ok(text().includes('正在同步到手机…'), 'a play not yet confirmed by the account is marked');
+  await ui.find(n => n.props.className === 'history-resume').props.onClick(); await ui.flush();
+  assert.deepEqual(resolved, ['7300000000000000001'], 'a phone-only drama loads its episodes first');
+  assert.equal(JSON.stringify(played.at(-1)), JSON.stringify({ seriesId: '7300000000000000001', vidIndex: 5, resume: true }));
+  await ui.find(n => n.props['aria-label'] === '从观看记录移除 手机看完').props.onClick(); await ui.flush();
+  const confirm = ui.find(n => n.props['aria-label'] === '确认从观看记录移除 手机看完');
+  assert.ok(confirm.children.includes('确认移除（含手机）'));
+  await confirm.props.onClick(); await ui.flush();
+  assert.ok(filter('全部 2') && filter('已看完 0'));
+  assert.ok(text().includes('已从帐号历史移除《手机看完》'));
+});
+
+test('history falls back to this computer with the reason when the account cannot be read', async () => {
+  const h = fixture();
+  h.window.electronAPI = {
+    getWatchHistory: async () => ({ success: true, results: [{ series_id: 'a', series_title: '甲', vid_index: 1, total: 2, updatedAt: Date.now() }], sync: { mode: 'local', error: '手机历史暂时读不到，先显示这台电脑的记录（HTTP 500）' } }),
+  };
+  const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
+  const text = ui.nodes().flatMap(n => n.children || []).filter(c => typeof c === 'string').join('|');
+  assert.ok(text.includes('未同步：记录仅保存在这台电脑。'));
+  assert.ok(text.includes('手机历史暂时读不到'));
+  assert.ok(ui.find(n => n.type === 'button' && n.children.join('') === '全部 1'));
+});

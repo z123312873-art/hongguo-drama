@@ -2,6 +2,7 @@
 
 const { HONGGUO_PROFILE, registerDevice } = require('./playback-device');
 const { cleanNickname, wirePhone } = require('./account-profile');
+const { avatarCandidates } = require('./account-avatar');
 const { signFull, signInternational, encodeQuery } = require('./account-sign');
 
 const HOST = 'https://api5-normal-lq.fqnovel.com';
@@ -56,7 +57,7 @@ function readId(value) {
 }
 
 function avatarUrl(value) {
-  if (typeof value !== 'string' || value.length > 500 || !value.startsWith('https://') || value.includes('mosaic-legacy')) return '';
+  if (typeof value !== 'string' || value.length > 2048 || !value.startsWith('https://') || value.includes('mosaic-legacy')) return '';
   try {
     const url = new URL(value);
     if (url.username || url.password) return '';
@@ -117,11 +118,12 @@ function readProfile(payload, userId = '') {
   const owner = readId(data.user_id_str) || readId(data.user_id);
   if (userId && owner && owner !== userId) return null;
   const nickname = cleanNickname(data.user_name);
-  const picture = [data.avatar_url, data.expand_avatar_url, data.basic_info?.user_avatar]
-    .map(avatarUrl)
-    .find(Boolean) || '';
-  if (!nickname && !picture) return null;
-  return { nickname, avatarUrl: picture };
+  // A picture set in the app can sit in any of these fields, as a string or a url_list object.
+  const pictures = avatarCandidates(data.avatar_url, data.expand_avatar_url, data.basic_info?.user_avatar,
+    data.avatar_large, data.avatar_thumb, data.avatar_medium, data.user_avatar);
+  const picture = pictures.map(avatarUrl).find(Boolean) || '';
+  if (!nickname && !pictures.length) return null;
+  return { nickname, avatarUrl: picture, avatarCandidates: pictures };
 }
 
 function createCodeClient({
@@ -156,13 +158,14 @@ function createCodeClient({
     saveDevice(next);
     return next;
   };
-  const call = async (path, countryCode, body, method = 'POST') => {
+  const call = async (path, countryCode, body, method = 'POST', extraQuery = {}, contentType = 'application/x-www-form-urlencoded; charset=UTF-8') => {
     const current = await device();
     const bytes = Buffer.from(body || '');
     const stamp = now();
+    const query = { ...queryFor(current), ...extraQuery };
     const signed = countryCode === '+86'
-      ? signFull(queryFor(current), bytes, stamp, current.deviceId)
-      : signInternational(queryFor(current), bytes, stamp);
+      ? signFull(query, bytes, stamp, current.deviceId)
+      : signInternational(query, bytes, stamp);
     const headers = {
       ...signed.headers,
       'User-Agent': HONGGUO_PROFILE.userAgent,
@@ -176,8 +179,9 @@ function createCodeClient({
       'X-Vc-Bdturing-Sdk-Version': '4.0.3.cn',
       Lc: '101',
     };
-    if (method === 'POST') headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
-    if (method === 'GET' && token) headers['X-Tt-Token'] = token;
+    if (method === 'POST') headers['Content-Type'] = contentType;
+    // Sign-in requests never carry an older session's token; account reads and writes do.
+    if (!path.startsWith('/passport/mobile/') && token) headers['X-Tt-Token'] = token;
     if (cookies.size) headers.Cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
     const url = `${HOST}${path}?${signed.raw}`;
     const response = method === 'GET' ? await get(url, { headers }) : await post(url, { headers, body: bytes });
@@ -195,9 +199,65 @@ function createCodeClient({
       return null;
     }
   };
+  // Signed account request for the reading API. Resolves to the parsed body only when the
+  // server confirms it (code 0 and no nested error); anything else throws.
+  // The phone app signs reading calls with the full signature; numbers outside +86 sign in with the
+  // international one. Try the sign-in's own signature first, then the other once, and keep what worked.
+  let readingSign = '';
+  const requestOnce = async (signAs, method, path, query, body) => {
+    const response = await call(path, signAs, body, method, query, 'application/json; charset=utf-8');
+    if (response?.status !== 200) throw new Error(`HTTP ${response?.status || 0}`);
+    const payload = parseBody(response.text);
+    if (!payload || typeof payload !== 'object') throw new Error('BAD_BODY');
+    if (payload.code === undefined || String(payload.code) !== '0') throw new Error(`CODE ${payload.code}`);
+    const nested = errorCode(payload);
+    if (nested && nested !== '0') throw new Error(`CODE ${nested}`);
+    return payload;
+  };
+  const request = async (method, path, query = {}, json = undefined) => {
+    if (!signedIn() || !signedRegion) throw new Error('NOT_SIGNED_IN');
+    const body = json === undefined ? '' : (typeof json === 'string' ? json : JSON.stringify(json));
+    const first = readingSign || signedRegion;
+    try {
+      const payload = await requestOnce(first, method, path, query, body);
+      readingSign = first;
+      return payload;
+    } catch (error) {
+      const other = first === '+86' ? signedRegion : '+86';
+      if (other === first || error.message === 'NOT_SIGNED_IN') throw error;
+      let payload;
+      try { payload = await requestOnce(other, method, path, query, body); } catch { throw error; }
+      readingSign = other;
+      return payload;
+    }
+  };
   return {
-    reset() { cookies.clear(); token = ''; signedRegion = ''; signedUser = ''; },
+    reset() { cookies.clear(); token = ''; signedRegion = ''; signedUser = ''; readingSign = ''; },
     profile,
+    request,
+    signedIn: () => Boolean(signedIn() && signedRegion && signedUser),
+    user: () => signedUser,
+    // What has to be kept (encrypted) so the session still works after a restart.
+    snapshot() {
+      if (!signedIn() || !signedRegion || !signedUser) return null;
+      return { userId: signedUser, region: signedRegion, token, cookies: Object.fromEntries(cookies) };
+    },
+    restore(session) {
+      if (!session || typeof session !== 'object') return false;
+      const userId = readId(session.userId);
+      const region = typeof session.region === 'string' && /^\+\d{1,4}$/.test(session.region) ? session.region : '';
+      const saved = session.cookies && typeof session.cookies === 'object' && !Array.isArray(session.cookies) ? session.cookies : {};
+      const pairs = Object.entries(saved).filter(([name, value]) => /^[\w.-]{1,64}$/.test(name) && typeof value === 'string' && value && value.length <= 4096 && !/[;\r\n]/.test(value));
+      const savedToken = typeof session.token === 'string' && session.token.length <= 4096 && !/[\r\n]/.test(session.token) ? session.token : '';
+      if (!userId || !region || (!savedToken && !pairs.some(([name]) => name === 'sessionid' || name === 'sessionid_ss'))) return false;
+      cookies.clear();
+      for (const [name, value] of pairs) cookies.set(name, value);
+      token = savedToken;
+      readingSign = '';
+      signedRegion = region;
+      signedUser = userId;
+      return true;
+    },
     async send({ countryCode, phone } = {}) {
       const extra = { auto_read: '0', unbind_exist: '34', type: xorHex('24') };
       let response;
@@ -217,6 +277,7 @@ function createCodeClient({
     },
     async login({ countryCode, phone, code } = {}) {
       token = '';
+      readingSign = '';
       signedRegion = '';
       signedUser = '';
       let response;
@@ -242,10 +303,11 @@ function createCodeClient({
         userId,
         nickname: read?.nickname || '',
         avatarUrl: read?.avatarUrl || avatarUrl(data.avatar_url),
+        avatarCandidates: read?.avatarCandidates || [],
         profileFrom: read ? 'user-info' : '',
       };
     },
   };
 }
 
-module.exports = { createCodeClient, xorHex, parseBody, readProfile, PROFILE_TIMEOUT_MS };
+module.exports = { createCodeClient, xorHex, parseBody, readProfile, readId, PROFILE_TIMEOUT_MS };

@@ -12,6 +12,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const [status, setStatus] = useState('');
   const [pendingRemove, setPendingRemove] = useState('');
   const [filter, setFilter] = useState('all');
+  const [sync, setSync] = useState({ mode: 'local' });
   const request = useRef(0);
   const openingRef = useRef(false);
   const openingRequest = useRef(0);
@@ -26,6 +27,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       if (!result?.success) throw new Error(result?.error || '观看记录加载失败');
       const next = result.results || [];
       setRows(next);
+      setSync(result.sync?.mode === 'cloud' ? result.sync : { mode: 'local', error: result.sync?.error || '' });
       setPendingRemove(current => next.some(item => item.series_id === current) ? current : '');
       setError('');
     } catch (failure) {
@@ -49,6 +51,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       const result = await window.electronAPI.refreshWatchHistory();
       if (!result?.success) throw new Error(result?.error || '检查失败，请重试');
       await load();
+      if (result.cloudError) setError(`手机历史没有更新成功：${result.cloudError}`);
       setStatus(`已检查 ${result.checked} 部${result.failed ? `，${result.failed} 部检查不完整，可稍后重试` : ''}${result.remaining ? `；还有 ${result.remaining} 部，点击继续检查` : ''}`);
     } catch (failure) { setError(failure.message || '检查失败，请重试'); }
     finally { setChecking(false); }
@@ -66,7 +69,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       if (!result?.success) throw new Error(result?.error || '移除失败，请重试');
       request.current++;
       setRows(current => current.filter(item => item.series_id !== row.series_id));
-      setStatus(`已移除《${row.series_title}》的观看记录，视频文件不受影响。`);
+      setStatus(result.cloud ? `已从帐号历史移除《${row.series_title}》，手机重新进入「历史」后也会消失；视频文件不受影响。` : `已移除《${row.series_title}》的观看记录，视频文件不受影响。`);
     } catch (failure) { setError(failure.message || '移除失败，请重试'); }
     finally { setRemoving(''); }
   };
@@ -90,7 +93,15 @@ export default function WatchHistory({ active = true, onNavigate }) {
         }
         if (!result?.success) throw new Error(result?.error || '打开播放器失败');
       } else {
-        const result = await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
+        let result = await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
+        if (!result?.success && version !== openingRequest.current) return;
+        // A drama watched only on the phone is not on this computer yet: load its episodes first.
+        if (!result?.success && result?.code === 'SERIES_NOT_FOUND') {
+          const detail = await window.electronAPI.searchResolve(row.series_id);
+          if (version !== openingRequest.current) return;
+          if (!detail?.success) throw new Error(detail?.error || '这部剧的详情暂不可用');
+          result = await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
+        }
         if (!result?.success) throw new Error(result?.error || '打开播放器失败');
       }
       const acknowledged = await window.electronAPI.acknowledgeWatchUpdates(row.series_id, { total: row.total, sequelIds: (row.sequels || []).map(item => item.series_id) });
@@ -102,12 +113,14 @@ export default function WatchHistory({ active = true, onNavigate }) {
 
   return <section className="history-container" aria-labelledby="history-title">
     <div className="history-header">
-      <div><h1 id="history-title">观看记录</h1><p>继续上次的故事。记录仅保存在这台电脑。</p></div>
+      <div><h1 id="history-title">观看记录</h1><p>继续上次的故事。{sync.mode === 'cloud' ? '已登录：与手机「历史」同一份。' : '未同步：记录仅保存在这台电脑。'}</p></div>
       <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || loading || !!removing || !rows.length}>
         <RefreshCw size={15} className={checking ? 'spin' : ''} />{checking ? '正在检查更新…' : '检查更新'}
       </button>
     </div>
-    <p className="history-hint">检查更新只包含这份列表里的剧。移除后不再检查该剧，已下载视频仍保留；再次播放会重新出现。不同剧号的新一季标为“疑似续作”。</p>
+    {sync.mode === 'local' && sync.error && <p className="history-error" role="status">{sync.error}</p>}
+    {sync.mode === 'cloud' && sync.error && <p className="history-hint" role="status">{sync.error}</p>}
+    <p className="history-hint">{sync.mode === 'cloud' ? '移除会同时从手机历史删除。登录前在这台电脑看的剧不会自动上传，登出后会再出现。' : ''}检查更新只包含这份列表里的剧。移除后不再检查该剧，已下载视频仍保留；再次播放会重新出现。不同剧号的新一季标为“疑似续作”。</p>
     <div className="history-filter" role="group" aria-label="观看进度筛选">
       {[
         ['all', '全部', rows.length],
@@ -133,13 +146,14 @@ export default function WatchHistory({ active = true, onNavigate }) {
           <span className="history-progress">看到第 {row.vid_index} 集 / 共 {row.total} 集 · {Math.floor((row.currentTime || 0) / 60)}:{String(Math.floor((row.currentTime || 0) % 60)).padStart(2, '0')}</span>
           <span className="history-time">最近观看 {new Date(row.updatedAt).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
           {row.unreadEpisodes > 0 && <span className="history-update">新增 {row.unreadEpisodes} 集</span>}
+          {sync.mode === 'cloud' && row.synced === false && <span className="history-time">正在同步到手机…</span>}
         </span>
         <span className="history-action"><Play size={15} />{opening === row.series_id ? '打开中…' : '继续观看'}</span>
       </button>
       <button type="button" className="btn btn-outline btn-sm history-remove" disabled={!!opening || checking || !!removing}
         aria-label={pendingRemove === row.series_id ? `确认从观看记录移除 ${row.series_title}` : `从观看记录移除 ${row.series_title}`}
-        title={pendingRemove === row.series_id ? '不删除已下载视频' : '从观看记录移除，不再检查这部剧'}
-        onClick={() => removeRow(row)}><Trash2 size={14} />{removing === row.series_id ? '移除中…' : pendingRemove === row.series_id ? '确认移除' : '移除'}</button>
+        title={pendingRemove === row.series_id ? (sync.mode === 'cloud' ? '手机历史也会移除；不删除已下载视频' : '不删除已下载视频') : '从观看记录移除，不再检查这部剧'}
+        onClick={() => removeRow(row)}><Trash2 size={14} />{removing === row.series_id ? '移除中…' : pendingRemove === row.series_id ? (sync.mode === 'cloud' ? '确认移除（含手机）' : '确认移除') : '移除'}</button>
       {pendingRemove === row.series_id && <button type="button" className="btn btn-outline btn-sm" onClick={() => setPendingRemove('')}>取消</button>}
       </div>
       {!!row.sequels?.length && <div className="history-sequels"><span>疑似续作</span>{row.sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(row, sequel)}>{sequel.series_title}</button>)}</div>}
