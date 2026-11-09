@@ -26,8 +26,8 @@ function flag(value) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
-// Finished on the phone means: the last episode, played to (nearly) its end. Without a duration the
-// last episode alone does not count, so an unknown never inflates 已看完.
+// Finished means: the last episode, played to (nearly) its end. Without a duration the last episode
+// alone does not count, so an unknown never inflates 已看完.
 function finished(index, total, positionSec, durationSec) {
   if (!(total > 0) || index < total) return false;
   if (!(durationSec > 0)) return false;
@@ -91,7 +91,7 @@ async function fetchHistory(request, { maxPages = MAX_PAGES } = {}) {
   throw new Error('手机历史太多页，没有读完');
 }
 
-// JSON with the long ids written as numbers, as the app sends them, without float rounding.
+// JSON with the long ids written as numbers, without float rounding.
 function idJson(value) {
   return JSON.stringify(value).replace(/"\\u0000id:(\d+)"/g, '$1');
 }
