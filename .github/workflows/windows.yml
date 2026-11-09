@@ -378,9 +378,9 @@ jobs:
           portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
           notes=$(cat <<EOF
           摘要：
-          - 新增「紅果立即登入」。驗證碼會實際送出，登入成功後顯示頭像與暱稱，按鈕改為帳號登出
+          - 新增「紅果立即登入」。驗證碼會實際送出，登入後顯示紅果帳號的暱稱與頭像，按鈕改為帳號登出
           - 安裝檔裡的登入可以送出驗證碼，台灣和其他地區用同一套檢查
-          - 尚未登入時，頭像那一列跟側欄同一底色
+          - 頭像那一列登入前後都跟側欄同一底色，登入後不再是白底
           - 地區名稱拿掉前面的中國，只留台灣、大陸、香港、澳門等自己的名字
           - 未上線提示會自動關閉
           - 熱播榜顯示 100 部，分類未選標籤時不再顯示共 800 部
@@ -397,6 +397,8 @@ jobs:
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
+            # Move the reused pre-release tag to this commit so its source and notes match the installer.
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true > /dev/null
             gh release edit "$tag" --prerelease=true --latest=false --title "4.6 預發佈" --notes "$notes"
           else
             gh release create "$tag" --target "$GITHUB_SHA" --prerelease --title "4.6 預發佈" --notes "$notes"
@@ -410,6 +412,7 @@ jobs:
           done
           test "$(gh release view "$tag" --json isPrerelease,isDraft --jq '(.isPrerelease == true) and (.isDraft == false)')" = "true"
           test "$(gh release view --json tagName --jq .tagName)" != "$tag"
+          test "$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
           gh release list --limit 20
   publish-release:
     needs: windows

@@ -1,12 +1,15 @@
-import React from 'react';
-import { ACCOUNT_REGIONS, accountActionLabel, accountLabel, regionLabel } from '../accountProfile.mjs';
+import React, { useState } from 'react';
+import { ACCOUNT_REGIONS, accountActionLabel, accountLabel, avatarPicture, regionLabel } from '../accountProfile.mjs';
 
 function Avatar({ status, onClick }) {
   const label = status.loggedIn ? '帐号头像' : '尚未登录';
+  // A picture that fails to load falls back to the default icon instead of a broken image.
+  const [failed, setFailed] = useState('');
+  const picture = avatarPicture(status, failed);
   return (
     <button type="button" className="account-avatar" aria-label={label} disabled={!status.loggedIn} onClick={onClick}>
-      {status.avatarUrl
-        ? <img src={status.avatarUrl} alt="" />
+      {picture
+        ? <img src={picture} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setFailed(picture)} />
         : <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="8" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M5 19c1.4-3 3.8-4.5 7-4.5S17.6 16 19 19" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>}
     </button>
   );
@@ -14,10 +17,14 @@ function Avatar({ status, onClick }) {
 
 export function AccountStrip({ status, onAvatar }) {
   const name = accountLabel(status);
+  // A real nickname is shown exactly as set in the app; only the built-in labels follow the 繁/简 switch.
+  const own = Boolean(status?.loggedIn && status.nickname);
   return (
     <div className={status?.loggedIn ? 'account-strip' : 'account-strip is-out'}>
       <Avatar status={status} onClick={onAvatar} />
-      <div className="account-name" title={name}>{name}</div>
+      {own
+        ? <div className="account-name" title={name} data-script="keep">{name}</div>
+        : <div className="account-name" title={name}>{name}</div>}
     </div>
   );
 }

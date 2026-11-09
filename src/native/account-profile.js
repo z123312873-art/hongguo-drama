@@ -76,6 +76,17 @@ function retryDelay(value) {
   return number;
 }
 
+// Names come from the account, so drop invisible and control characters, then cap by characters, not UTF-16 units.
+function cleanNickname(value) {
+  if (typeof value !== 'string') return '';
+  return [...value.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '').trim()]
+    .slice(0, NICKNAME_LIMIT).join('').trim();
+}
+
+// Only names read from the app profile are shown. Sessions saved before that kept the
+// passport default name, so they show the generic signed-in label until the next sign-in.
+const PROFILE_FROM = 'user-info';
+
 function httpsAvatar(value) {
   if (typeof value !== 'string' || !value || value.length > 500 || value.includes('mosaic-legacy')) return '';
   try {
@@ -94,22 +105,37 @@ function sessionStatus(record, now) {
   if (!userId || userId === '0' || !Number.isFinite(loggedInAt)) return { loggedIn: false };
   if (loggedInAt > now + SKEW_MS) return { loggedIn: false };
   if (now - loggedInAt >= SESSION_MS) return { loggedIn: false, expired: true };
-  const nickname = typeof record.nickname === 'string' ? record.nickname.trim().slice(0, NICKNAME_LIMIT) : '';
+  const nickname = record.profileFrom === PROFILE_FROM ? cleanNickname(record.nickname) : '';
   return { loggedIn: true, nickname, avatarUrl: httpsAvatar(record.avatarUrl) };
 }
 
 function acceptLogin(payload, now) {
   const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
   if (!userId || userId === '0') return { ok: false, error: '登录没有完成，请重试' };
-  const nickname = typeof payload?.nickname === 'string' ? payload.nickname.trim().slice(0, NICKNAME_LIMIT) : '';
+  const fromProfile = payload?.profileFrom === PROFILE_FROM;
   return {
     ok: true,
     record: {
       userId,
-      nickname,
+      nickname: fromProfile ? cleanNickname(payload?.nickname) : '',
       avatarUrl: httpsAvatar(payload?.avatarUrl),
+      profileFrom: fromProfile ? PROFILE_FROM : '',
       loggedInAt: now,
     },
+  };
+}
+
+// A later profile read only updates the same, still-valid account; a sign-out or another sign-in in between wins.
+function mergeProfile(record, userId, profile, now) {
+  if (!profile || !sessionStatus(record, now).loggedIn || record.userId !== userId) return null;
+  const nickname = cleanNickname(profile.nickname);
+  const avatarUrl = httpsAvatar(profile.avatarUrl);
+  if (!nickname && !avatarUrl) return null;
+  return {
+    ...record,
+    nickname: nickname || (record.profileFrom === PROFILE_FROM ? cleanNickname(record.nickname) : ''),
+    avatarUrl: avatarUrl || httpsAvatar(record.avatarUrl),
+    profileFrom: nickname || record.profileFrom === PROFILE_FROM ? PROFILE_FROM : '',
   };
 }
 
@@ -121,8 +147,15 @@ function publicAccount(record, now) {
 
 function normalizeStatus(value) {
   if (!value || value.loggedIn !== true) return { loggedIn: false };
-  const nickname = typeof value.nickname === 'string' ? value.nickname.trim().slice(0, NICKNAME_LIMIT) : '';
+  const nickname = cleanNickname(value.nickname);
   return { loggedIn: true, nickname, avatarUrl: httpsAvatar(value.avatarUrl) };
+}
+
+// The picture to draw, or '' for the default icon: signed out, no picture, or this picture failed to load.
+function avatarPicture(status, failedUrl) {
+  if (!status?.loggedIn) return '';
+  const url = httpsAvatar(status.avatarUrl);
+  return url && url !== failedUrl ? url : '';
 }
 
 function accountLabel(status) {
@@ -190,8 +223,8 @@ function reduceLogin(state, action) {
 }
 
 module.exports = {
-  ACCOUNT_REGIONS, DEFAULT_REGION, SESSION_MS,
+  ACCOUNT_REGIONS, DEFAULT_REGION, SESSION_MS, NICKNAME_LIMIT, PROFILE_FROM,
   regionLabel, regionByCode, wirePhone, preparePhone, normalizeCode, retryDelay,
-  httpsAvatar, sessionStatus, acceptLogin, publicAccount, normalizeStatus,
+  cleanNickname, httpsAvatar, avatarPicture, sessionStatus, acceptLogin, mergeProfile, publicAccount, normalizeStatus,
   accountLabel, accountActionLabel, initialLoginDraft, reduceLogin,
 };

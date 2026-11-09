@@ -1,6 +1,6 @@
 'use strict';
 
-const { acceptLogin, preparePhone, publicAccount, retryDelay, sessionStatus } = require('./account-profile');
+const { acceptLogin, mergeProfile, preparePhone, publicAccount, retryDelay, sessionStatus } = require('./account-profile');
 
 const CODE_UNAVAILABLE = '验证码暂时无法发送，请稍后再试';
 const LOGIN_INCOMPLETE = '登录没有完成，请重试';
@@ -35,7 +35,7 @@ async function finishLogin(input, transport, now) {
   return acceptLogin(result, now);
 }
 
-function createAccountHandlers({ getAccount, saveAccount, now = () => Date.now(), sendTransport, loginTransport }) {
+function createAccountHandlers({ getAccount, saveAccount, now = () => Date.now(), sendTransport, loginTransport, profileTransport }) {
   const read = () => {
     const record = getAccount();
     const status = publicAccount(record, now());
@@ -50,6 +50,18 @@ function createAccountHandlers({ getAccount, saveAccount, now = () => Date.now()
       if (!result.ok) return { ok: false, error: result.error };
       saveAccount(result.record);
       return { ok: true, status: sessionStatus(result.record, now()) };
+    },
+    // Reads the app profile again with the session kept in memory. Without that session
+    // (for example after a restart) it leaves the saved name and picture as they are.
+    refresh: async () => {
+      const before = getAccount();
+      if (!publicAccount(before, now()).loggedIn || typeof profileTransport !== 'function') return read();
+      let profile = null;
+      try { profile = await profileTransport(); } catch { profile = null; }
+      const current = getAccount();
+      const next = mergeProfile(current, before.userId, profile, now());
+      if (next) saveAccount(next);
+      return read();
     },
     logout: async () => {
       saveAccount(null);

@@ -178,6 +178,7 @@ function saveAccount(record) {
       userId: typeof record.userId === 'string' ? record.userId : '',
       nickname: typeof record.nickname === 'string' ? record.nickname : '',
       avatarUrl: typeof record.avatarUrl === 'string' ? record.avatarUrl : '',
+      profileFrom: typeof record.profileFrom === 'string' ? record.profileFrom : '',
       loggedInAt: Number(record.loggedInAt) || 0,
     };
   }

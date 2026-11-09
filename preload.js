@@ -163,6 +163,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   accountStatus: () => ipcRenderer.invoke('account-status'),
   accountSendCode: (input) => ipcRenderer.invoke('account-send-code', input),
   accountLogin: (input) => ipcRenderer.invoke('account-login', input),
+  accountRefresh: () => ipcRenderer.invoke('account-refresh'),
   accountLogout: () => ipcRenderer.invoke('account-logout'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   onStorageError: (cb) => {
