@@ -3,6 +3,9 @@ const CHANGE_EVENT = 'hongguo:public-library-changed';
 
 export const validPublishedAt = value => typeof value === 'number' && Number.isFinite(value) && value > 0 && !Number.isNaN(new Date(value).getTime());
 const usableOnlineTime = value => value == null ? null : validPublishedAt(value) ? value : null;
+// The account a favorite was last confirmed in; null when it lives only on this computer.
+const cloudUser = value => typeof value === 'string' && /^\d{1,30}$/.test(value) ? value : null;
+const stored = item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, favorited_at: validPublishedAt(item.favorited_at) ? item.favorited_at : null, cover: item.cover || '', online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user) });
 
 export function readLocalLibrary() {
   try {
@@ -11,7 +14,7 @@ export function readLocalLibrary() {
     if (!Array.isArray(items) || items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || typeof item.favorite !== 'boolean' || (item.published_at !== null && !validPublishedAt(item.published_at)) || (item.favorited_at != null && !validPublishedAt(item.favorited_at)))) {
       throw new Error('保存的数据格式不正确');
     }
-    return { items: items.map(item => ({ ...item, online_time: usableOnlineTime(item.online_time) })), error: '' };
+    return { items: items.map(item => ({ ...item, online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user) })), error: '' };
   } catch (error) {
     return { items: [], error: `无法读取本机收藏与日历：${error.message}。原有数据未改动。` };
   }
@@ -35,11 +38,12 @@ export function saveLocalSeries({ id, title, published_at, favorite, cover, onli
     favorited_at: favoritedAt,
     cover: typeof cover === 'string' && /^https?:\/\//i.test(cover) ? cover : previous?.cover || '',
     online_time: validPublishedAt(online_time) ? online_time : online_time === null ? null : usableOnlineTime(previous?.online_time),
+    cloud_user: cloudUser(previous?.cloud_user),
   };
   const items = [...current.items.filter(item => item.id !== seriesId), next];
   try {
     // Persist public metadata and the heart-click time, never reviews.
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, favorited_at: validPublishedAt(item.favorited_at) ? item.favorited_at : null, cover: item.cover || '', online_time: usableOnlineTime(item.online_time) }))));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(stored)));
     window.dispatchEvent(new Event(CHANGE_EVENT));
     return { items, error: '' };
   } catch (error) {
@@ -57,6 +61,25 @@ export function removeLocalSeries(id) {
     return { items, error: '' };
   } catch (error) {
     return { ...current, error: `未能移除本机记录：${error.message}。原有记录未改动。` };
+  }
+}
+
+// Writes a whole list computed from the account (same checks as reading it back).
+export function replaceLocalLibrary(items) {
+  const current = readLocalLibrary();
+  if (current.error) return current;
+  try {
+    const next = items.map(stored);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    const check = readLocalLibrary();
+    if (check.error) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(current.items.map(stored)));
+      return { ...current, error: '手机收藏的资料不完整，没有写入这台电脑。' };
+    }
+    window.dispatchEvent(new Event(CHANGE_EVENT));
+    return check;
+  } catch (error) {
+    return { ...current, error: `未能保存到本机：${error.message}。请释放存储空间后重试。` };
   }
 }
 

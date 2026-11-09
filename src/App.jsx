@@ -12,6 +12,7 @@ import { getScriptPreference, setScriptPreference, subscribeScript } from './scr
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
 import ReleaseCalendar from './components/ReleaseCalendar';
+import useFavoriteSync from './components/useFavoriteSync';
 import AppUpdateNotice from './components/AppUpdateNotice';
 import useAccountSession from './components/useAccountSession';
 import { AccountAccess, AccountDialog, AccountStrip } from './components/AccountChrome';
@@ -154,6 +155,7 @@ export default function App() {
   }, [storageError]);
 
   const account = useAccountSession();
+  useFavoriteSync(account.status.loggedIn === true);
   const script = useSyncExternalStore(subscribeScript, getScriptPreference, getScriptPreference);
   const isMac = appInfo?.platform === 'darwin' || (!appInfo?.platform && /Mac/.test(navigator.platform));
   const currentPage = MENU.find((item) => item.id === page);

@@ -1,7 +1,6 @@
 'use strict';
 
-// The account's watch history (the phone app's 「历史」). When signed in this list is the source of
-// truth for which dramas appear and how many; this computer's own progress is only used when it is newer.
+// The account's watch history, merged both ways with this computer's records while signed in.
 
 const { compatibleCover } = require('./cover-url');
 
@@ -130,35 +129,53 @@ async function deleteEntry(request, entry, now = Date.now()) {
   return after;
 }
 
-// Account rows decide what is listed. A local row for the same drama adds this computer's extras
-// (update checks, sequels) and wins on progress only when it is newer. Local rows played while signed
-// in that the account has not confirmed yet are listed once, marked pending; older local-only rows stay
-// on this computer and come back after signing out.
-function mergeHistory(cloudRows, localRows, pending = new Set()) {
-  const local = new Map((localRows || []).map(row => [String(row.series_id), row]));
-  const merged = cloudRows.map(row => {
-    const mine = local.get(row.series_id);
-    if (!mine) return { ...row, sequels: [], hasUpdates: false, unreadEpisodes: 0, lastCheckedAt: 0, lastCheckError: '', synced: true };
-    const newer = Number(mine.updatedAt) > row.updatedAt;
-    return {
-      ...mine,
-      series_title: mine.series_title || row.series_title,
-      cover: mine.cover || row.cover,
-      total: Math.max(Number(mine.total) || 0, row.total),
-      vid_index: newer ? mine.vid_index : row.vid_index,
-      currentTime: newer ? mine.currentTime : row.currentTime,
-      updatedAt: Math.max(Number(mine.updatedAt) || 0, row.updatedAt),
-      completed: newer ? mine.completed === true : row.completed,
-      cloudVid: row.cloudVid, duration: row.duration, seasonIndex: row.seasonIndex, multiSeason: row.multiSeason,
-      synced: true,
-    };
-  });
-  const listed = new Set(merged.map(row => row.series_id));
-  for (const row of localRows || []) {
-    const id = String(row.series_id);
-    if (!listed.has(id) && pending.has(id)) merged.push({ ...row, synced: false });
+const HONGGUO_ID = /^\d{6,30}$/;
+const SAME_MS = 1000;
+
+// Two-way merge of this computer's records with the account's. Nothing is dropped because one side
+// lacks it: a record only here is sent up, a record only in the account is added here, and for a
+// drama on both sides the newer progress wins. The only removal is a drama confirmed in this account
+// before (cloudSynced) that the account no longer lists: it was deleted on the other side. An empty
+// account list is never read as "everything was deleted". Records of other sources stay local.
+function reconcileHistory({ playback, cloudRows, userId }) {
+  const next = { ...(playback || {}) };
+  const toUpload = [];
+  const removed = [];
+  const cloud = new Map(cloudRows.map(row => [row.series_id, row]));
+  for (const row of cloudRows) {
+    const mine = next[row.series_id];
+    const remote = { title: row.series_title, cover: row.cover || '', total: row.total };
+    const finished = row.completed ? { completedEpisode: row.vid_index } : {};
+    if (!mine || !(Number.isFinite(mine.updatedAt) && Number.isInteger(mine.vid_index) && mine.vid_index > 0)) {
+      next[row.series_id] = { ...(mine || {}), vid_index: row.vid_index, currentTime: row.currentTime, updatedAt: row.updatedAt, watched: true,
+        knownTotal: Math.max(Number(mine?.knownTotal) || 0, row.total), acknowledgedTotal: mine?.acknowledgedTotal ?? row.total,
+        ...finished, remote, cloudSynced: userId };
+      continue;
+    }
+    const merged = { ...mine, remote, cloudSynced: userId, knownTotal: Math.max(Number(mine.knownTotal) || 0, row.total) };
+    if (row.updatedAt > mine.updatedAt + SAME_MS) {
+      Object.assign(merged, { vid_index: row.vid_index, currentTime: row.currentTime, updatedAt: row.updatedAt, watched: true, ...finished });
+    } else if (mine.updatedAt > row.updatedAt + SAME_MS) {
+      toUpload.push(row.series_id);
+    }
+    next[row.series_id] = merged;
   }
-  return merged.sort((a, b) => b.updatedAt - a.updatedAt);
+  let kept = 0;
+  for (const [id, record] of Object.entries(next)) {
+    if (cloud.has(id) || !HONGGUO_ID.test(id) || !record || !Number.isInteger(record.vid_index) || record.vid_index < 1) continue;
+    if (record.cloudSynced === userId) {
+      if (!cloudRows.length) { kept += 1; continue; }
+      delete next[id];
+      removed.push(id);
+    } else if (!record.cloudSynced) {
+      toUpload.push(id);
+    }
+    // Confirmed in another account: stays here and is not sent to this one.
+  }
+  return {
+    playback: next, toUpload, removed,
+    notice: kept ? `手机历史是空的，这台电脑的 ${kept} 部记录先保留，没有删除` : '',
+  };
 }
 
-module.exports = { cloudRow, parsePage, fetchHistory, uploadEntry, deleteEntry, mergeHistory, updateBody, finished, LIST_PATH, UPDATE_PATH };
+module.exports = { cloudRow, parsePage, fetchHistory, uploadEntry, deleteEntry, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH };

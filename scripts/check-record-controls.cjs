@@ -16,7 +16,7 @@ function fixture() {
   const load = (file, imports = {}) => {
     const module = { exports: {} };
     const code = transformSync(fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), { loader: file.endsWith('.jsx') ? 'jsx' : 'js', format: 'cjs' }).code;
-    vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || {}, window, Event });
+    vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || {}, window, Event, setTimeout, clearTimeout, setInterval, clearInterval });
     return module.exports;
   };
   const mount = (file, imports = {}, props = {}) => {
@@ -30,7 +30,7 @@ function fixture() {
       useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(fn); } },
     };
     react.useLayoutEffect = react.useEffect;
-    const component = load(file, { ...imports, react }).default;
+    const component = load(file, { './useFavoriteSync': { useFavoriteSyncStatus: () => ({ mode: 'local' }) }, ...imports, react }).default;
     const render = () => { cursor = 0; tree = component(props); effects.splice(0).forEach(fn => fn()); };
     const nodes = () => { const result = []; const visit = n => { if (!n || typeof n !== 'object') return; result.push(n); n.children?.forEach(visit); }; visit(tree); return result; };
     render();
@@ -230,9 +230,9 @@ test('signed-in history: says it is the phone list, counts follow the account ro
   const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
   const text = () => ui.nodes().flatMap(n => n.children || []).filter(c => typeof c === 'string').join('|');
   const filter = label => ui.find(n => n.type === 'button' && n.children.join('') === label);
-  assert.ok(text().includes('已登录：与手机「历史」同一份。'));
+  assert.ok(text().includes('已登录：与手机「历史」双向同步。'));
   assert.ok(filter('全部 3') && filter('未看完 2') && filter('已看完 1'));
-  assert.ok(text().includes('正在同步到手机…'), 'a play not yet confirmed by the account is marked');
+  assert.ok(text().includes('等待同步到手机…'), 'a record not yet confirmed by the account is marked');
   await ui.find(n => n.props.className === 'history-resume').props.onClick(); await ui.flush();
   assert.deepEqual(resolved, ['7300000000000000001'], 'a phone-only drama loads its episodes first');
   assert.equal(JSON.stringify(played.at(-1)), JSON.stringify({ seriesId: '7300000000000000001', vidIndex: 5, resume: true }));
@@ -254,4 +254,53 @@ test('history falls back to this computer with the reason when the account canno
   assert.ok(text.includes('未同步：记录仅保存在这台电脑。'));
   assert.ok(text.includes('手机历史暂时读不到'));
   assert.ok(ui.find(n => n.type === 'button' && n.children.join('') === '全部 1'));
+});
+
+test('favorites with an account: merge once, follow phone removals, send local changes, keep not-yet-online here', async () => {
+  const h = fixture(), library = h.load('localLibrary.js'), plan = h.load('favoriteSync.mjs');
+  const U = '1234567890123456';
+  library.saveLocalSeries({ id: '7300000000000000001', title: '本机', favorite: true });
+  library.saveLocalSeries({ id: '7300000000000000005', title: '未上线', favorite: true, online_time: Date.now() + 86400000 });
+  let cloud = ['7300000000000000002'];
+  const sent = [];
+  h.window.electronAPI = {
+    cloudFavorites: async () => ({ success: true, mode: 'cloud', userId: U, rows: cloud.map(id => ({ id, favoritedAt: 1700000000000, title: `手机${id.slice(-1)}`, cover: '' })) }),
+    cloudFavoriteSet: async (id, on) => { sent.push([id, on]); cloud = on ? [...new Set([...cloud, id])] : cloud.filter(x => x !== id); return { success: true, rows: cloud.map(x => ({ id: x })) }; },
+  };
+  const refs = [], effects = [];
+  let refCursor = 0;
+  const react = {
+    useRef: initial => { const i = refCursor++; return refs[i] ||= { current: initial }; },
+    useEffect: fn => { effects.push(fn); },
+    useSyncExternalStore: (_s, get) => get(),
+  };
+  const hook = h.load('components/useFavoriteSync.js', { react, '../localLibrary': library, '../favoriteSync.mjs': plan });
+  const cleanups = [];
+  refCursor = 0; hook.default(true); effects.splice(0).forEach(fn => cleanups.push(fn()));
+  const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
+  try {
+  await settle();
+  const favs = () => [...library.readLocalLibrary().items].filter(i => i.favorite).map(i => i.id).sort();
+  assert.deepEqual(favs(), ['7300000000000000001', '7300000000000000002', '7300000000000000005']);
+  assert.deepEqual(sent, [['7300000000000000001', true]], 'only the playable local favorite goes up');
+  assert.deepEqual(cloud.sort(), ['7300000000000000001', '7300000000000000002']);
+  assert.equal(hook.favoriteSyncStatus().mode, 'cloud');
+  assert.equal(library.readLocalLibrary().items.find(i => i.id === '7300000000000000002').title, '手机2');
+  // Removed on the phone (seen on the next sync).
+  cloud = ['7300000000000000001'];
+  // Un-favorite here: recorded as a cancellation and sent.
+  library.saveLocalSeries({ id: '7300000000000000001', title: '本机', favorite: false });
+  await new Promise(r => setTimeout(r, 1700)); await settle();
+  assert.deepEqual(sent.at(-1), ['7300000000000000001', false]);
+  assert.ok(!cloud.includes('7300000000000000001'));
+  assert.ok(favs().includes('7300000000000000005'), 'not-yet-online stays');
+  assert.ok(!favs().includes('7300000000000000002'), 'the phone removal reached this computer');
+  // Account unreadable: nothing is cleared, the reason is shown.
+  h.window.electronAPI.cloudFavorites = async () => ({ success: true, mode: 'local', error: '手机收藏暂时读不到' });
+  library.saveLocalSeries({ id: '7300000000000000007', title: '新', favorite: true });
+  await new Promise(r => setTimeout(r, 1700)); await settle();
+  assert.equal(hook.favoriteSyncStatus().mode, 'local');
+  assert.match(hook.favoriteSyncStatus().error, /读不到/);
+  assert.ok(favs().includes('7300000000000000007'));
+  } finally { cleanups.forEach(fn => typeof fn === 'function' && fn()); }
 });

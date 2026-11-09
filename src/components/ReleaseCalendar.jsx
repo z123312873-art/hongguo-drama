@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { publicDateKey, readLocalLibrary, removeLocalSeries, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
+import { useFavoriteSyncStatus } from './useFavoriteSync';
 import './ReleaseCalendar.css';
 
 const WAITING_NOTICE = '您目前的预约收藏短剧，尚未上线，请耐心等候';
@@ -15,6 +16,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const [chosenMonth, setChosenMonth] = useState('');
   const [catalogCovers, setCatalogCovers] = useState(() => new Map());
   const [released, setReleased] = useState({});
+  const sync = useFavoriteSyncStatus();
   useEffect(() => subscribeLocalLibrary(setLibrary), []);
   useEffect(() => {
     if (!library.items.some(item => item.favorite && !item.cover) || !window.electronAPI?.getSeriesList) return;
@@ -47,6 +49,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
     }).catch(() => {});
     return () => { cancel = true; };
   }, [active, favorites]);
+  const inAccount = sync.mode === 'cloud' ? favorites.filter(item => item.cloud_user === sync.userId).length : 0;
   const months = [...new Set(favorites.filter(item => item.date).map(item => item.date.slice(0, 7)))].sort().reverse();
   const month = months.includes(chosenMonth) ? chosenMonth : months[0] || '';
   const monthItems = favorites.filter(item => item.date.startsWith(`${month}-`)).sort((a, b) => b.favorited_at - a.favorited_at || a.title.localeCompare(b.title, 'zh-CN'));
@@ -61,7 +64,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
       <div className="release-title"><strong>{item.title}</strong><span>{item.date ? `收藏于 ${item.date}` : '收藏日期未记录'}</span>{waiting && <em className="release-online">{onlineDateText(onlineAt)}</em>}</div>
       <div className="release-row-actions">
         <button type="button" className="btn btn-sm btn-outline" aria-label={`取消收藏《${item.title}》`} aria-pressed={true} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: false }))}>取消收藏</button>
-        <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title="仅移除本机收藏记录，不删除视频文件" onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
+        <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title={sync.mode === 'cloud' && item.cloud_user === sync.userId ? '同时从手机收藏移除，不删除视频文件' : '仅移除本机收藏记录，不删除视频文件'} onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
         <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => { if (waiting) { onUnavailable?.(WAITING_NOTICE); return; } onPlay?.({ seriesId: item.id, title: item.title }); }}>{opening === item.id ? '打开中…' : '播放'}</button>
       </div>
     </li>;
@@ -69,9 +72,12 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
 
   return <section className="release-calendar">
     <header><h2>收藏清单</h2><p className="page-description">只列出在海报上点过爱心的剧。日期是按下爱心的当天。</p></header>
+    <p className="page-description" role="status">{sync.mode === 'cloud' ? '已登录：可播放的收藏与手机收藏同一份；尚未上线的只留在这台电脑。' : '未同步：收藏只保存在这台电脑。'}</p>
+    {sync.error && <p className="release-error" role="status">{sync.error}</p>}
+    {sync.notice && <p className="page-description" role="status">{sync.notice}</p>}
     {library.error && <div className="release-error" role="alert"><p>{library.error}</p><button type="button" className="btn btn-sm" onClick={() => setLibrary(readLocalLibrary())}>重新读取</button></div>}
     <div className="release-toolbar">
-      <p className="release-coverage">收藏 {favorites.length} 部</p>
+      <p className="release-coverage">收藏 {favorites.length} 部{sync.mode === 'cloud' && favorites.length !== inAccount ? `（手机收藏 ${inAccount} 部，其余只在这台电脑）` : ''}</p>
       {months.length > 0 && <label className="release-month">月份<select value={month} onChange={event => setChosenMonth(event.target.value)}>{months.map(value => <option key={value} value={value}>{value.slice(0, 4)} 年 {Number(value.slice(5))} 月</option>)}</select></label>}
     </div>
     {!library.error && !favorites.length && <div className="release-empty"><h3>还没有收藏</h3><p>在「发现短剧」的海报右下角点爱心，这部剧就会出现在这里。</p></div>}

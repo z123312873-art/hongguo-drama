@@ -9,8 +9,15 @@ function isWatched(record) {
     && Number.isFinite(record.updatedAt) && Number.isInteger(record.vid_index) && record.vid_index > 0;
 }
 
+// A drama added from the account may not be in the local registry yet; its saved name and poster list it.
+function remoteSeries(series, playback) {
+  const known = new Set(series.map(item => String(item.series_id)));
+  return Object.entries(playback || {}).filter(([id, record]) => !known.has(id) && typeof record?.remote?.title === 'string' && record.remote.title)
+    .map(([id, record]) => ({ series_id: id, series_title: record.remote.title, cover: typeof record.remote.cover === 'string' ? record.remote.cover : '', total: Number(record.remote.total) || 0 }));
+}
+
 function listHistory(series, playback, showSequels = true) {
-  return series.filter(item => isWatched(playback[item.series_id])).map(item => {
+  return [...series, ...remoteSeries(series, playback)].filter(item => isWatched(playback[item.series_id])).map(item => {
     const record = playback[item.series_id];
     const sequels = showSequels && Array.isArray(record.sequels) ? record.sequels : [];
     const seen = new Set(record.seenSequelIds || []);
@@ -22,6 +29,7 @@ function listHistory(series, playback, showSequels = true) {
       unreadEpisodes: record.unreadEpisodes || 0, sequels,
       hasUpdates: record.unreadEpisodes > 0 || sequels.some(candidate => !seen.has(candidate.series_id)),
       lastCheckedAt: record.lastCheckedAt || 0, lastCheckError: record.lastCheckError || '',
+      ...(record.cloudSynced ? { cloudSynced: record.cloudSynced } : {}),
     };
   }).sort((a, b) => b.updatedAt - a.updatedAt);
 }

@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchSeries: (keyword, options) => ipcRenderer.invoke('search-series', keyword, options),
   findSeriesSequels: (seriesId, options) => ipcRenderer.invoke('find-series-sequels', seriesId, options),
   searchResolve: (seriesId) => ipcRenderer.invoke('search-resolve', seriesId),
+  cloudFavorites: () => ipcRenderer.invoke('cloud-favorites'),
+  cloudFavoriteSet: (seriesId, on) => ipcRenderer.invoke('cloud-favorite-set', seriesId, on),
   searchWindowShow: (visible, sourceUrl) => ipcRenderer.invoke('search-window-show', visible, sourceUrl),
   getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
   forgetSeries: (seriesId) => ipcRenderer.invoke('forget-series', seriesId),

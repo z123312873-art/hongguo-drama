@@ -113,14 +113,15 @@ export default function WatchHistory({ active = true, onNavigate }) {
 
   return <section className="history-container" aria-labelledby="history-title">
     <div className="history-header">
-      <div><h1 id="history-title">观看记录</h1><p>继续上次的故事。{sync.mode === 'cloud' ? '已登录：与手机「历史」同一份。' : '未同步：记录仅保存在这台电脑。'}</p></div>
+      <div><h1 id="history-title">观看记录</h1><p>继续上次的故事。{sync.mode === 'cloud' ? '已登录：与手机「历史」双向同步。' : '未同步：记录仅保存在这台电脑。'}</p></div>
       <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || loading || !!removing || !rows.length}>
         <RefreshCw size={15} className={checking ? 'spin' : ''} />{checking ? '正在检查更新…' : '检查更新'}
       </button>
     </div>
     {sync.mode === 'local' && sync.error && <p className="history-error" role="status">{sync.error}</p>}
     {sync.mode === 'cloud' && sync.error && <p className="history-hint" role="status">{sync.error}</p>}
-    <p className="history-hint">{sync.mode === 'cloud' ? '移除会同时从手机历史删除。登录前在这台电脑看的剧不会自动上传，登出后会再出现。' : ''}检查更新只包含这份列表里的剧。移除后不再检查该剧，已下载视频仍保留；再次播放会重新出现。不同剧号的新一季标为“疑似续作”。</p>
+    {sync.mode === 'cloud' && sync.notice && <p className="history-hint" role="status">{sync.notice}</p>}
+    <p className="history-hint">{sync.mode === 'cloud' ? '两边合并：只在这台电脑的会上传到手机，只在手机的会加进来，同一部保留较新的进度。移除会同时从手机历史删除。' : ''}检查更新只包含这份列表里的剧。移除后不再检查该剧，已下载视频仍保留；再次播放会重新出现。不同剧号的新一季标为“疑似续作”。</p>
     <div className="history-filter" role="group" aria-label="观看进度筛选">
       {[
         ['all', '全部', rows.length],
@@ -146,7 +147,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
           <span className="history-progress">看到第 {row.vid_index} 集 / 共 {row.total} 集 · {Math.floor((row.currentTime || 0) / 60)}:{String(Math.floor((row.currentTime || 0) % 60)).padStart(2, '0')}</span>
           <span className="history-time">最近观看 {new Date(row.updatedAt).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
           {row.unreadEpisodes > 0 && <span className="history-update">新增 {row.unreadEpisodes} 集</span>}
-          {sync.mode === 'cloud' && row.synced === false && <span className="history-time">正在同步到手机…</span>}
+          {sync.mode === 'cloud' && row.synced === false && <span className="history-time">等待同步到手机…</span>}
         </span>
         <span className="history-action"><Play size={15} />{opening === row.series_id ? '打开中…' : '继续观看'}</span>
       </button>
