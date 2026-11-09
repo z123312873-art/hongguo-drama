@@ -82,6 +82,60 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
   assert.equal(logged.calls[1].url.includes('/passport/mobile/sms_login/'), true);
   assert.equal(JSON.stringify(login).includes('header-token'), false);
 
+  // The session survives a restart only through snapshot/restore (main keeps it OS-encrypted).
+  const snap = logged.api.snapshot();
+  assert.equal(snap.userId, '1234567890123456');
+  assert.equal(snap.region, '+886');
+  assert.equal(snap.token, 'header-token');
+  assert.equal(snap.cookies.sessionid, 'abc');
+  assert.equal(logged.api.signedIn(), true);
+  assert.equal(logged.api.user(), '1234567890123456');
+  const later = client(() => ({ status: 200, text: '{}', headers: {} }), () => ({ status: 200, text: '{"code":0,"data":{"data_list":[]}}', headers: {} }));
+  assert.equal(later.api.signedIn(), false);
+  await assert.rejects(later.api.request('GET', '/reading/bookapi/read_history/list/v', {}), /NOT_SIGNED_IN/);
+  assert.equal(later.api.restore(snap), true);
+  assert.equal(later.api.signedIn(), true);
+  const listed = await later.api.request('GET', '/reading/bookapi/read_history/list/v', { offset: '0' });
+  assert.deepEqual(listed.data.data_list, []);
+  assert.equal(later.gets[0].headers['X-Tt-Token'], 'header-token');
+  assert.match(later.gets[0].headers.Cookie, /sessionid=abc/);
+  assert.match(later.gets[0].url, /offset=0/);
+  for (const broken of [null, {}, { ...snap, userId: 'x' }, { ...snap, region: '886' }, { ...snap, token: '', cookies: {} }, { ...snap, cookies: { 'a;b': 'c' }, token: '' }, { ...snap, token: 'a\nb', cookies: {} }]) {
+    const fresh = client(() => ({ status: 200, text: '{}', headers: {} }));
+    assert.equal(fresh.api.restore(broken), false);
+    assert.equal(fresh.api.signedIn(), false);
+  }
+  // A reply that is not a confirmed success is an error, never an empty list.
+  for (const [reply, pattern] of [
+    [{ status: 401, text: '', headers: {} }, /HTTP 401/],
+    [{ status: 200, text: 'oops', headers: {} }, /BAD_BODY/],
+    [{ status: 200, text: '{"code":100,"message":"expired"}', headers: {} }, /CODE 100/],
+    [{ status: 200, text: '{"message":"ok"}', headers: {} }, /CODE undefined/],
+  ]) {
+    const failing = client(() => ({ status: 200, text: '{}', headers: {} }), () => reply);
+    failing.api.restore(snap);
+    await assert.rejects(failing.api.request('GET', '/reading/bookapi/read_history/list/v', {}), pattern);
+  }
+  // International sign-ins: when the reading API refuses that signature, the full one is tried once and kept.
+  const switching = client(() => ({ status: 200, text: '{}', headers: {} }), (req) => (!req.headers['X-Medusa']
+    ? { status: 200, text: '{"code":100,"message":"sign"}', headers: {} }
+    : { status: 200, text: '{"code":0,"data":{"data_list":[]}}', headers: {} }));
+  switching.api.restore(snap);
+  const full = await switching.api.request('GET', '/reading/bookapi/read_history/list/v', {});
+  assert.equal(full.code, 0);
+  const tried = switching.gets.length;
+  await switching.api.request('GET', '/reading/bookapi/read_history/list/v', {});
+  assert.equal(switching.gets.length, tried + 1, 'the working signature is remembered');
+  const posting = client(() => ({ status: 200, text: '{"code":0,"data":{}}', headers: {} }));
+  posting.api.restore(snap);
+  await posting.api.request('POST', '/reading/bookapi/read_history/update/v', {}, '{"update_datas":[]}');
+  assert.equal(posting.calls[0].headers['Content-Type'], 'application/json; charset=utf-8');
+  assert.equal(posting.calls[0].body, '{"update_datas":[]}');
+  assert.equal(posting.calls[0].headers['X-Tt-Token'], 'header-token');
+  posting.api.reset();
+  assert.equal(posting.api.snapshot(), null);
+  assert.equal(posting.api.signedIn(), false);
+
   // The profile read fails or is slow: sign-in still succeeds, without the passport default name.
   for (const profileHandler of [
     () => ({ status: 500, text: '', headers: {} }),
@@ -130,9 +184,15 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
   // Profile fields: a picture from any of the three fields, never the passport default, http, or an overlong address.
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', expand_avatar_url: 'https://p6-novel.byteimg.com/b.jpeg' } }).avatarUrl, 'https://p6-novel.byteimg.com/b.jpeg');
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', basic_info: { user_avatar: 'https://p6-novel.byteimg.com/c.jpeg' } } }).avatarUrl, 'https://p6-novel.byteimg.com/c.jpeg');
-  assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: 'http://p6-novel.byteimg.com/c.jpeg' } }).avatarUrl, '');
+  assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: 'http://p6-novel.byteimg.com/c.jpeg' } }).avatarUrl, 'https://p6-novel.byteimg.com/c.jpeg', 'http on the image CDN is upgraded');
+  assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: 'http://example.com/c.jpeg' } }).avatarUrl, '', 'http elsewhere is dropped');
+  // A picture changed in the app: HEIC on a signed host, long signature, url_list object.
+  const signed = `https://p3-novel-sign.fqnovelpic.com/novel-avatar/0123456789abcdef~tplv-resize:400:0.heic?x-expires=1800000000&x-signature=${'s'.repeat(700)}`;
+  const custom = readProfile({ code: 0, data: { user_name: 'A', avatar_url: { url_list: [signed] } } });
+  assert.equal(custom.avatarUrl, signed, 'long signed addresses are kept');
+  assert.ok(custom.avatarCandidates.includes('https://p3-novel.byteimg.com/novel-avatar/0123456789abcdef~tplv-shrink:240:0.jpeg'), 'a JPEG rendition is tried after HEIC');
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: 'https://p9-passport.byteacctimg.com/mosaic-legacy/x.png' } }).avatarUrl, '');
-  assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: `https://p6-novel.byteimg.com/${'a'.repeat(500)}.jpeg` } }).avatarUrl, '');
+  assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: `https://p6-novel.byteimg.com/${'a'.repeat(2100)}.jpeg` } }).avatarUrl, '');
   assert.equal(readProfile({ code: 0, data: { user_name: 'x'.repeat(80) } }).nickname.length, 32);
   assert.equal(readProfile({ code: 0, data: { user_name: '😀'.repeat(40) } }).nickname, '😀'.repeat(32), 'emoji are not cut in half');
   assert.equal(readProfile({ code: 0, data: { user_name: 'A\nB\u200bC' } }).nickname, 'ABC');

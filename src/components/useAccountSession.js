@@ -6,7 +6,8 @@ async function refreshStatus() {
     const refresh = window.electronAPI?.accountRefresh;
     if (typeof refresh !== 'function') return null;
     const value = await refresh();
-    return value && typeof value === 'object' ? normalizeStatus(value) : null;
+    // Only a real answer counts; an empty or malformed reply must not sign the sidebar out.
+    return value && typeof value === 'object' && typeof value.loggedIn === 'boolean' ? normalizeStatus(value) : null;
   } catch {
     return null;
   }
@@ -34,7 +35,7 @@ export default function useAccountSession() {
   // The profile read can miss right after sign-in (slow or offline). Ask once more; when there is
   // no session left in memory the saved name and picture stay as they are.
   const completeProfile = async (current) => {
-    if (!current?.loggedIn || (current.nickname && current.avatarUrl)) return;
+    if (!current?.loggedIn || (current.nickname && current.avatarData)) return;
     const ticket = sessionRef.current;
     const next = await refreshStatus();
     if (!next || ticket !== sessionRef.current) return;

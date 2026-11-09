@@ -87,8 +87,15 @@ function cleanNickname(value) {
 // passport default name, so they show the generic signed-in label until the next sign-in.
 const PROFILE_FROM = 'user-info';
 
+// A picture the main process already downloaded and checked; it still draws after a signed address expires.
+const AVATAR_DATA = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[A-Za-z0-9+/]+={0,2}$/;
+const AVATAR_DATA_LIMIT = 700 * 1024;
+function avatarData(value) {
+  return typeof value === 'string' && value.length <= AVATAR_DATA_LIMIT && AVATAR_DATA.test(value) ? value : '';
+}
+
 function httpsAvatar(value) {
-  if (typeof value !== 'string' || !value || value.length > 500 || value.includes('mosaic-legacy')) return '';
+  if (typeof value !== 'string' || !value || value.length > 2048 || value.includes('mosaic-legacy')) return '';
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password) return '';
@@ -106,7 +113,7 @@ function sessionStatus(record, now) {
   if (loggedInAt > now + SKEW_MS) return { loggedIn: false };
   if (now - loggedInAt >= SESSION_MS) return { loggedIn: false, expired: true };
   const nickname = record.profileFrom === PROFILE_FROM ? cleanNickname(record.nickname) : '';
-  return { loggedIn: true, nickname, avatarUrl: httpsAvatar(record.avatarUrl) };
+  return { loggedIn: true, nickname, avatarUrl: httpsAvatar(record.avatarUrl), avatarData: avatarData(record.avatarData) };
 }
 
 function acceptLogin(payload, now) {
@@ -119,6 +126,7 @@ function acceptLogin(payload, now) {
       userId,
       nickname: fromProfile ? cleanNickname(payload?.nickname) : '',
       avatarUrl: httpsAvatar(payload?.avatarUrl),
+      avatarData: avatarData(payload?.avatarData),
       profileFrom: fromProfile ? PROFILE_FROM : '',
       loggedInAt: now,
     },
@@ -126,15 +134,28 @@ function acceptLogin(payload, now) {
 }
 
 // A later profile read only updates the same, still-valid account; a sign-out or another sign-in in between wins.
+// Signed picture addresses change on every read; the image itself is the path before the size template.
+function pictureKey(url) {
+  try {
+    const path = new URL(url).pathname;
+    const marker = path.indexOf('~');
+    return (marker > 0 ? path.slice(0, marker) : path).replace(/^\/large\//, '/');
+  } catch { return ''; }
+}
+
 function mergeProfile(record, userId, profile, now) {
   if (!profile || !sessionStatus(record, now).loggedIn || record.userId !== userId) return null;
   const nickname = cleanNickname(profile.nickname);
   const avatarUrl = httpsAvatar(profile.avatarUrl);
-  if (!nickname && !avatarUrl) return null;
+  const picture = avatarData(profile.avatarData);
+  if (!nickname && !avatarUrl && !picture) return null;
   return {
     ...record,
     nickname: nickname || (record.profileFrom === PROFILE_FROM ? cleanNickname(record.nickname) : ''),
     avatarUrl: avatarUrl || httpsAvatar(record.avatarUrl),
+    // Without a newly downloaded picture the older one stays only while it is the same image
+    // (a re-signed address of the same picture); a different picture must not show the old one.
+    avatarData: picture || (!avatarUrl || pictureKey(avatarUrl) === pictureKey(record.avatarUrl) ? avatarData(record.avatarData) : ''),
     profileFrom: nickname || record.profileFrom === PROFILE_FROM ? PROFILE_FROM : '',
   };
 }
@@ -142,20 +163,22 @@ function mergeProfile(record, userId, profile, now) {
 function publicAccount(record, now) {
   const status = sessionStatus(record, now);
   if (!status.loggedIn) return { loggedIn: false };
-  return { loggedIn: true, nickname: status.nickname, avatarUrl: status.avatarUrl };
+  return { loggedIn: true, nickname: status.nickname, avatarUrl: status.avatarUrl, avatarData: status.avatarData };
 }
 
 function normalizeStatus(value) {
   if (!value || value.loggedIn !== true) return { loggedIn: false };
   const nickname = cleanNickname(value.nickname);
-  return { loggedIn: true, nickname, avatarUrl: httpsAvatar(value.avatarUrl) };
+  return { loggedIn: true, nickname, avatarUrl: httpsAvatar(value.avatarUrl), avatarData: avatarData(value.avatarData) };
 }
 
 // The picture to draw, or '' for the default icon: signed out, no picture, or this picture failed to load.
-function avatarPicture(status, failedUrl) {
+// The picture to draw, or '' for the default icon. The downloaded copy comes first, then the address;
+// anything in failed (one address or a list) already failed to load in this window.
+function avatarPicture(status, failed) {
   if (!status?.loggedIn) return '';
-  const url = httpsAvatar(status.avatarUrl);
-  return url && url !== failedUrl ? url : '';
+  const skip = new Set((Array.isArray(failed) ? failed : [failed]).filter(Boolean));
+  return [avatarData(status.avatarData), httpsAvatar(status.avatarUrl)].find(value => value && !skip.has(value)) || '';
 }
 
 function accountLabel(status) {
@@ -225,6 +248,6 @@ function reduceLogin(state, action) {
 module.exports = {
   ACCOUNT_REGIONS, DEFAULT_REGION, SESSION_MS, NICKNAME_LIMIT, PROFILE_FROM,
   regionLabel, regionByCode, wirePhone, preparePhone, normalizeCode, retryDelay,
-  cleanNickname, httpsAvatar, avatarPicture, sessionStatus, acceptLogin, mergeProfile, publicAccount, normalizeStatus,
+  cleanNickname, httpsAvatar, avatarData, avatarPicture, sessionStatus, acceptLogin, mergeProfile, publicAccount, normalizeStatus,
   accountLabel, accountActionLabel, initialLoginDraft, reduceLogin,
 };

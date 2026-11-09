@@ -164,6 +164,19 @@ function saveLoginDevice(device) {
   flush();
 }
 
+// The account session, already encrypted by the OS keychain (Electron safeStorage). Plain text never lands here.
+function getLoginSession() {
+  const value = loadCache().loginSession;
+  return typeof value === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length <= 64 * 1024 ? value : '';
+}
+
+function saveLoginSession(value) {
+  const current = loadCache();
+  if (typeof value === 'string' && value && /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length <= 64 * 1024) current.loginSession = value;
+  else delete current.loginSession;
+  flush();
+}
+
 function getAccount() {
   const value = loadCache().account;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -179,6 +192,7 @@ function saveAccount(record) {
       nickname: typeof record.nickname === 'string' ? record.nickname : '',
       avatarUrl: typeof record.avatarUrl === 'string' ? record.avatarUrl : '',
       profileFrom: typeof record.profileFrom === 'string' ? record.profileFrom : '',
+      avatarData: typeof record.avatarData === 'string' && record.avatarData.length <= 700 * 1024 ? record.avatarData : '',
       loggedInAt: Number(record.loggedInAt) || 0,
     };
   }
@@ -201,5 +215,7 @@ module.exports = {
   getAccount,
   saveAccount,
   getLoginDevice,
+  getLoginSession,
+  saveLoginSession,
   saveLoginDevice,
 };

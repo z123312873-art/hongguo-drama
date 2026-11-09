@@ -75,7 +75,7 @@ assert.equal(reduceLogin({ ...initialLoginDraft(), step: 'code', retryAfter: 5 }
 const kept = acceptLogin({
   userId: '42', nickname: '甲', avatarUrl: 'https://example.com/a.jpg', phone: '912345678', code: '0740', profileFrom: PROFILE_FROM,
 }, NOW);
-assert.deepEqual(Object.keys(kept.record).sort(), ['avatarUrl', 'loggedInAt', 'nickname', 'profileFrom', 'userId']);
+assert.deepEqual(Object.keys(kept.record).sort(), ['avatarData', 'avatarUrl', 'loggedInAt', 'nickname', 'profileFrom', 'userId']);
 assert.equal(publicAccount(kept.record, NOW).nickname, '甲');
 // A name that did not come from the app profile (the passport default) is never shown.
 const passportOnly = acceptLogin({ userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://example.com/a.jpg' }, NOW);
@@ -84,7 +84,7 @@ assert.equal(publicAccount(passportOnly.record, NOW).nickname, '');
 assert.equal(accountLabel(publicAccount(passportOnly.record, NOW)), '已登录');
 // Sessions saved by the earlier 4.6 build kept screen_name; they keep the session and picture, not that name.
 const legacy = { userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', loggedInAt: NOW };
-assert.deepEqual(publicAccount(legacy, NOW), { loggedIn: true, nickname: '', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg' });
+assert.deepEqual(publicAccount(legacy, NOW), { loggedIn: true, nickname: '', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', avatarData: '' });
 // Names of any length or script: trimmed, invisible characters dropped, capped at 32 characters without splitting emoji.
 assert.equal(cleanNickname('  用户名34908929  '), '用户名34908929');
 assert.equal(cleanNickname('長'.repeat(40)).length, 32);
@@ -171,11 +171,11 @@ const refreshing = createAccountHandlers({
   profileTransport: async () => { duringRead(); if (profileReply instanceof Error) throw profileReply; return profileReply; },
 });
 const bare = await refreshing.login({ countryCode: '+886', phone: '912345678', code: '0740' });
-assert.deepEqual(bare.status, { loggedIn: true, nickname: '', avatarUrl: '' });
+assert.deepEqual(bare.status, { loggedIn: true, nickname: '', avatarUrl: '', avatarData: '' });
 profileReply = new Error('offline');
-assert.deepEqual(await refreshing.refresh(), { loggedIn: true, nickname: '', avatarUrl: '' });
+assert.deepEqual(await refreshing.refresh(), { loggedIn: true, nickname: '', avatarUrl: '', avatarData: '' });
 profileReply = { nickname: '用户名34908929', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg' };
-assert.deepEqual(await refreshing.refresh(), { loggedIn: true, nickname: '用户名34908929', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg' });
+assert.deepEqual(await refreshing.refresh(), { loggedIn: true, nickname: '用户名34908929', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', avatarData: '' });
 profileReply = null;
 assert.equal((await refreshing.refresh()).nickname, '用户名34908929', 'a failed read keeps the saved name');
 duringRead = () => { memory.record = null; };
