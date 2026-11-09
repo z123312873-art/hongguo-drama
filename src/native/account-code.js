@@ -1,12 +1,13 @@
 'use strict';
 
 const { HONGGUO_PROFILE, registerDevice } = require('./playback-device');
-const { wirePhone } = require('./account-profile');
+const { cleanNickname, wirePhone } = require('./account-profile');
 const { signFull, signInternational, encodeQuery } = require('./account-sign');
 
 const HOST = 'https://api5-normal-lq.fqnovel.com';
 const UNAVAILABLE = '验证码暂时无法发送，请稍后再试';
 const INCOMPLETE = '登录没有完成，请重试';
+const PROFILE_TIMEOUT_MS = 8000;
 
 function xorHex(value) {
   return Buffer.from(String(value)).map(byte => byte ^ 5).toString('hex');
@@ -55,7 +56,7 @@ function readId(value) {
 }
 
 function avatarUrl(value) {
-  if (typeof value !== 'string' || !value.startsWith('https://') || value.includes('mosaic-legacy')) return '';
+  if (typeof value !== 'string' || value.length > 500 || !value.startsWith('https://') || value.includes('mosaic-legacy')) return '';
   try {
     const url = new URL(value);
     if (url.username || url.password) return '';
@@ -96,14 +97,45 @@ async function defaultPost(url, options) {
   return { status: response.status, text: typeof response.data === 'string' ? response.data : '', headers: response.headers || {} };
 }
 
+async function defaultGet(url, options) {
+  const axios = require('axios');
+  const response = await axios({
+    ...require('./direct-connect').directAxiosOptions(),
+    url, method: 'GET', headers: options.headers,
+    timeout: PROFILE_TIMEOUT_MS, maxRedirects: 0, responseType: 'text', transformResponse: [data => data],
+    validateStatus: () => true, maxContentLength: 1024 * 1024,
+  });
+  return { status: response.status, text: typeof response.data === 'string' ? response.data : '', headers: response.headers || {} };
+}
+
+// The sign-in reply only carries the passport's default name and picture. The name and
+// picture people set in the app come from the reading profile, read with the same session.
+function readProfile(payload, userId = '') {
+  if (!payload || typeof payload !== 'object') return null;
+  if (payload.code !== undefined && String(payload.code) !== '0') return null;
+  const data = payloadData(payload);
+  const owner = readId(data.user_id_str) || readId(data.user_id);
+  if (userId && owner && owner !== userId) return null;
+  const nickname = cleanNickname(data.user_name);
+  const picture = [data.avatar_url, data.expand_avatar_url, data.basic_info?.user_avatar]
+    .map(avatarUrl)
+    .find(Boolean) || '';
+  if (!nickname && !picture) return null;
+  return { nickname, avatarUrl: picture };
+}
+
 function createCodeClient({
   post = defaultPost,
+  get = defaultGet,
   register = () => registerDevice(require('./app-source').requestJson),
   getDevice = () => null,
   saveDevice = () => {},
   now = () => Date.now(),
 } = {}) {
   const cookies = new Map();
+  let token = '';
+  let signedRegion = '';
+  let signedUser = '';
   const remember = (headers) => {
     for (const row of cookieList(headers)) {
       const part = row.split(';', 1)[0];
@@ -124,9 +156,9 @@ function createCodeClient({
     saveDevice(next);
     return next;
   };
-  const call = async (path, countryCode, body) => {
+  const call = async (path, countryCode, body, method = 'POST') => {
     const current = await device();
-    const bytes = Buffer.from(body);
+    const bytes = Buffer.from(body || '');
     const stamp = now();
     const signed = countryCode === '+86'
       ? signFull(queryFor(current), bytes, stamp, current.deviceId)
@@ -135,7 +167,6 @@ function createCodeClient({
       ...signed.headers,
       'User-Agent': HONGGUO_PROFILE.userAgent,
       Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-XS-From-Web': '0',
       'Sdk-Version': '2',
       'Passport-Sdk-Version': '5051452',
@@ -145,13 +176,28 @@ function createCodeClient({
       'X-Vc-Bdturing-Sdk-Version': '4.0.3.cn',
       Lc: '101',
     };
+    if (method === 'POST') headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+    if (method === 'GET' && token) headers['X-Tt-Token'] = token;
     if (cookies.size) headers.Cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
-    const response = await post(`${HOST}${path}?${signed.raw}`, { headers, body: bytes });
+    const url = `${HOST}${path}?${signed.raw}`;
+    const response = method === 'GET' ? await get(url, { headers }) : await post(url, { headers, body: bytes });
     remember(response?.headers);
     return response;
   };
+  const signedIn = () => Boolean(token || cookies.get('sessionid') || cookies.get('sessionid_ss'));
+  const profile = async () => {
+    if (!signedIn() || !signedRegion) return null;
+    try {
+      const response = await call('/reading/user/info/v1/', signedRegion, '', 'GET');
+      if (response?.status !== 200) return null;
+      return readProfile(parseBody(response.text), signedUser);
+    } catch {
+      return null;
+    }
+  };
   return {
-    reset() { cookies.clear(); },
+    reset() { cookies.clear(); token = ''; signedRegion = ''; signedUser = ''; },
+    profile,
     async send({ countryCode, phone } = {}) {
       const extra = { auto_read: '0', unbind_exist: '34', type: xorHex('24') };
       let response;
@@ -170,6 +216,9 @@ function createCodeClient({
       return { ok: true, retryAfter: Number.isInteger(retry) && retry >= 0 && retry <= 3600 ? retry : 60 };
     },
     async login({ countryCode, phone, code } = {}) {
+      token = '';
+      signedRegion = '';
+      signedUser = '';
       let response;
       try {
         response = await call('/passport/mobile/sms_login/', countryCode, await formBody(countryCode, phone, { code: xorHex(code) }));
@@ -180,13 +229,23 @@ function createCodeClient({
       const data = payloadData(payload);
       const userId = readId(data.user_id_str) || readId(data.user_id);
       const numeric = readId(data.user_id);
-      const token = headerValue(response.headers, 'x-tt-token');
+      const headerToken = headerValue(response.headers, 'x-tt-token');
       const session = cookies.get('sessionid') || cookies.get('sessionid_ss') || '';
-      if (!userId || (numeric && numeric !== userId) || (!token && !session)) return { ok: false, error: INCOMPLETE };
-      const nickname = [data.screen_name, data.name].find(value => typeof value === 'string' && value.trim()) || '';
-      return { ok: true, userId, nickname: nickname.trim().slice(0, 32), avatarUrl: avatarUrl(data.avatar_url) };
+      if (!userId || (numeric && numeric !== userId) || (!headerToken && !session)) return { ok: false, error: INCOMPLETE };
+      if (headerToken) token = headerToken;
+      signedRegion = countryCode;
+      signedUser = userId;
+      // screen_name is the passport default (用户 plus digits), not the name set in the app.
+      const read = await profile();
+      return {
+        ok: true,
+        userId,
+        nickname: read?.nickname || '',
+        avatarUrl: read?.avatarUrl || avatarUrl(data.avatar_url),
+        profileFrom: read ? 'user-info' : '',
+      };
     },
   };
 }
 
-module.exports = { createCodeClient, xorHex, parseBody };
+module.exports = { createCodeClient, xorHex, parseBody, readProfile, PROFILE_TIMEOUT_MS };

@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import {
   ACCOUNT_REGIONS, DEFAULT_REGION, SESSION_MS, acceptLogin, accountActionLabel, accountLabel, regionLabel,
   initialLoginDraft, normalizeCode, preparePhone, publicAccount, reduceLogin, sessionStatus,
+  cleanNickname, mergeProfile, normalizeStatus, PROFILE_FROM, avatarPicture,
 } from '../../accountProfile.mjs';
 import { createAccountHandlers, finishLogin, sendLoginCode } from '../../accountLogin.mjs';
 import { WAITING_DISMISS_MS, WAITING_NOTICE, isWaitingNotice, noticeAfterDelay, noticeAfterNavigate } from '../../waitingNotice.mjs';
@@ -72,9 +73,44 @@ assert.equal(draft.retryAfter, 0);
 assert.equal(reduceLogin({ ...initialLoginDraft(), step: 'code', retryAfter: 5 }, { type: 'send' }).busy, false);
 
 const kept = acceptLogin({
-  userId: '42', nickname: '甲', avatarUrl: 'https://example.com/a.jpg', phone: '912345678', code: '0740',
+  userId: '42', nickname: '甲', avatarUrl: 'https://example.com/a.jpg', phone: '912345678', code: '0740', profileFrom: PROFILE_FROM,
 }, NOW);
-assert.deepEqual(Object.keys(kept.record).sort(), ['avatarUrl', 'loggedInAt', 'nickname', 'userId']);
+assert.deepEqual(Object.keys(kept.record).sort(), ['avatarUrl', 'loggedInAt', 'nickname', 'profileFrom', 'userId']);
+assert.equal(publicAccount(kept.record, NOW).nickname, '甲');
+// A name that did not come from the app profile (the passport default) is never shown.
+const passportOnly = acceptLogin({ userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://example.com/a.jpg' }, NOW);
+assert.equal(passportOnly.record.nickname, '');
+assert.equal(publicAccount(passportOnly.record, NOW).nickname, '');
+assert.equal(accountLabel(publicAccount(passportOnly.record, NOW)), '已登录');
+// Sessions saved by the earlier 4.6 build kept screen_name; they keep the session and picture, not that name.
+const legacy = { userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', loggedInAt: NOW };
+assert.deepEqual(publicAccount(legacy, NOW), { loggedIn: true, nickname: '', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg' });
+// Names of any length or script: trimmed, invisible characters dropped, capped at 32 characters without splitting emoji.
+assert.equal(cleanNickname('  用户名34908929  '), '用户名34908929');
+assert.equal(cleanNickname('長'.repeat(40)).length, 32);
+assert.equal([...cleanNickname('🐻'.repeat(40))].length, 32);
+assert.equal(cleanNickname('a\u0000b\u202ec\n'), 'abc');
+assert.equal(cleanNickname(42), '');
+assert.equal(normalizeStatus({ loggedIn: true, nickname: '\u200b' }).nickname, '');
+// Avatar: the picture when there is one; the default icon when signed out, missing, unsafe, or failed to load.
+const pic = 'https://p6-novel.byteimg.com/large/novel-static/a.jpeg';
+assert.equal(avatarPicture({ loggedIn: true, avatarUrl: pic }, ''), pic);
+assert.equal(avatarPicture({ loggedIn: true, avatarUrl: pic }, pic), '');
+assert.equal(avatarPicture({ loggedIn: true, avatarUrl: `${pic}?v=2` }, pic), `${pic}?v=2`, 'a new picture is tried again');
+assert.equal(avatarPicture({ loggedIn: false, avatarUrl: pic }, ''), '');
+assert.equal(avatarPicture({ loggedIn: true, avatarUrl: '' }, ''), '');
+assert.equal(avatarPicture({ loggedIn: true, avatarUrl: 'javascript:alert(1)' }, ''), '');
+assert.equal(avatarPicture(undefined, ''), '');
+// A later profile read only fills in the same account that is still signed in.
+assert.equal(mergeProfile(legacy, '42', { nickname: '乙', avatarUrl: '' }, NOW).nickname, '乙');
+assert.equal(mergeProfile(legacy, '42', { nickname: '乙', avatarUrl: '' }, NOW).avatarUrl, legacy.avatarUrl);
+assert.equal(mergeProfile(legacy, '42', { nickname: '乙', avatarUrl: '' }, NOW).profileFrom, PROFILE_FROM);
+assert.equal(mergeProfile(legacy, '43', { nickname: '乙' }, NOW), null);
+assert.equal(mergeProfile(null, '42', { nickname: '乙' }, NOW), null);
+assert.equal(mergeProfile(legacy, '42', null, NOW), null);
+assert.equal(mergeProfile(legacy, '42', { nickname: '', avatarUrl: '' }, NOW), null);
+assert.equal(mergeProfile(legacy, '42', { nickname: '乙' }, NOW + SESSION_MS), null);
+assert.equal(mergeProfile(kept.record, '42', { nickname: '', avatarUrl: 'https://example.com/b.jpg' }, NOW).nickname, '甲');
 assert.equal(kept.record.phone, undefined);
 assert.equal(acceptLogin({ userId: '0', nickname: '甲' }, NOW).ok, false);
 assert.equal(acceptLogin({ nickname: '甲' }, NOW).ok, false);
@@ -122,6 +158,38 @@ clock = NOW + SESSION_MS;
 assert.deepEqual(await handlers.status(), { loggedIn: false });
 assert.equal(memory.record, null);
 
+// Refresh: fills in the profile when the session is still in memory; failures keep what is saved;
+// a sign-out or another account in the middle of the read wins.
+clock = NOW;
+let profileReply = null;
+let duringRead = () => {};
+const refreshing = createAccountHandlers({
+  getAccount: () => memory.record,
+  saveAccount: (record) => { memory.record = record; },
+  now: () => clock,
+  loginTransport: async () => ({ ok: true, userId: '42', nickname: '', avatarUrl: '', profileFrom: '' }),
+  profileTransport: async () => { duringRead(); if (profileReply instanceof Error) throw profileReply; return profileReply; },
+});
+const bare = await refreshing.login({ countryCode: '+886', phone: '912345678', code: '0740' });
+assert.deepEqual(bare.status, { loggedIn: true, nickname: '', avatarUrl: '' });
+profileReply = new Error('offline');
+assert.deepEqual(await refreshing.refresh(), { loggedIn: true, nickname: '', avatarUrl: '' });
+profileReply = { nickname: '用户名34908929', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg' };
+assert.deepEqual(await refreshing.refresh(), { loggedIn: true, nickname: '用户名34908929', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg' });
+profileReply = null;
+assert.equal((await refreshing.refresh()).nickname, '用户名34908929', 'a failed read keeps the saved name');
+duringRead = () => { memory.record = null; };
+profileReply = { nickname: '丙' };
+assert.deepEqual(await refreshing.refresh(), { loggedIn: false });
+assert.equal(memory.record, null, 'sign-out during the read is not undone');
+await refreshing.login({ countryCode: '+886', phone: '912345678', code: '0740' });
+duringRead = () => { memory.record = { ...memory.record, userId: '77' }; };
+await refreshing.refresh();
+assert.equal(memory.record.nickname, '', 'a read for the earlier account does not land on the next one');
+duringRead = () => {};
+memory.record = null;
+assert.deepEqual(await refreshing.refresh(), { loggedIn: false });
+
 const dir = mkdtempSync(join(tmpdir(), 'account-store-'));
 const file = join(dir, 'store.json');
 writeFileSync(file, '{}');
@@ -130,6 +198,7 @@ store.saveSettings({ download_quality: '720' });
 store.saveAccount({ ...kept.record, phone: '912345678', token: 'secret' });
 store.saveSettings({ download_quality: '1080' });
 assert.equal(store.getAccount().userId, '42');
+assert.equal(store.getAccount().profileFrom, PROFILE_FROM);
 assert.equal(store.getAccount().phone, undefined);
 assert.equal(store.getAccount().token, undefined);
 assert.equal(store.getSettings().download_quality, '1080');

@@ -3695,6 +3695,7 @@ function accountHandlers() {
     saveAccount: (record) => store.saveAccount(record),
     sendTransport: (input) => code.send(input),
     loginTransport: (input) => code.login(input),
+    profileTransport: () => code.profile(),
   });
 }
 
@@ -3711,6 +3712,14 @@ ipcMain.handle('account-send-code', async (_event, input) => {
 ipcMain.handle('account-login', async (_event, input) => {
   try { return await (await accountHandlers()).login(input); }
   catch { return { ok: false, error: '登录没有完成，请重试' }; }
+});
+
+ipcMain.handle('account-refresh', async () => {
+  try { return await (await accountHandlers()).refresh(); }
+  catch {
+    try { return await (await accountHandlers()).status(); }
+    catch { return { loggedIn: false }; }
+  }
 });
 
 ipcMain.handle('account-logout', async () => {

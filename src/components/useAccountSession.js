@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { initialLoginDraft, normalizeStatus, reduceLogin } from '../accountProfile.mjs';
 
+async function refreshStatus() {
+  try {
+    const refresh = window.electronAPI?.accountRefresh;
+    if (typeof refresh !== 'function') return null;
+    const value = await refresh();
+    return value && typeof value === 'object' ? normalizeStatus(value) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readStatus() {
   try {
     const value = await window.electronAPI?.accountStatus?.();
@@ -17,10 +28,27 @@ export default function useAccountSession() {
   const [draft, setDraft] = useState(initialLoginDraft);
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  // Every sign-in or sign-out bumps this, so a slow profile read cannot bring back an older account.
+  const sessionRef = useRef(0);
+
+  // The profile read can miss right after sign-in (slow or offline). Ask once more; when there is
+  // no session left in memory the saved name and picture stay as they are.
+  const completeProfile = async (current) => {
+    if (!current?.loggedIn || (current.nickname && current.avatarUrl)) return;
+    const ticket = sessionRef.current;
+    const next = await refreshStatus();
+    if (!next || ticket !== sessionRef.current) return;
+    setStatus(next);
+  };
 
   useEffect(() => {
     let cancel = false;
-    readStatus().then(next => { if (!cancel) setStatus(next); });
+    const ticket = sessionRef.current;
+    readStatus().then(next => {
+      if (cancel || ticket !== sessionRef.current) return;
+      setStatus(next);
+      completeProfile(next);
+    });
     return () => { cancel = true; };
   }, []);
 
@@ -82,13 +110,17 @@ export default function useAccountSession() {
       return next;
     });
     if (result?.ok) {
-      setStatus(normalizeStatus(result.status));
+      sessionRef.current += 1;
+      const next = normalizeStatus(result.status);
+      setStatus(next);
       setOpen(false);
       setConfirming(false);
+      completeProfile(next);
     }
   };
 
   const logout = async () => {
+    sessionRef.current += 1;
     try { await window.electronAPI?.accountLogout?.(); } catch { /* reread the saved state */ }
     setStatus(await readStatus());
     setConfirming(false);

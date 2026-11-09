@@ -1171,6 +1171,54 @@ async function mount(file, api, props = {}) {
     ui.unmount();
   });
 
+  await test('account row shows the profile name and picture, retries a missed profile once, and stays out after sign-out', async () => {
+    const pic = 'https://p6-novel.byteimg.com/large/novel-static/a.jpeg';
+    let refreshes = 0;
+    let refreshReply = { loggedIn: true, nickname: '用户名34908929', avatarUrl: pic };
+    let account = { loggedIn: false };
+    const ui = await mount('../App', {
+      getAppInfo: async () => ({ version: '4.6.0', appName: '红果短剧' }),
+      getWindowLayout: async () => 'landscape',
+      accountStatus: async () => account,
+      accountSendCode: async () => ({ ok: true, retryAfter: 0 }),
+      accountLogin: async () => { account = { loggedIn: true, nickname: '', avatarUrl: '' }; return { ok: true, status: account }; },
+      accountRefresh: async () => { refreshes += 1; if (refreshReply.loggedIn) account = refreshReply; return refreshReply; },
+      accountLogout: async () => { account = { loggedIn: false }; return account; },
+    });
+    await ui.flush();
+    assert.equal(refreshes, 0, 'signed out does not read a profile');
+    const signIn = async () => {
+      ui.button('红果立即登录').props.onClick(); ui.render();
+      ui.find(n => n.props['aria-label'] === '手机号').props.onChange({ target: { value: '912345678' } }); ui.render();
+      await ui.button('发送验证码').props.onClick(); await ui.flush();
+      ui.find(n => n.props['aria-label'] === '验证码').props.onChange({ target: { value: '0740' } }); ui.render();
+      ui.find(n => n.props['aria-label'] === '验证码').props.onKeyDown({ key: 'Enter', preventDefault() {} });
+      await ui.flush();
+    };
+    await signIn();
+    assert.equal(refreshes, 1, 'a sign-in without the profile asks once more');
+    const name = ui.find(n => n.props.className === 'account-name');
+    assert.equal([].concat(name.children).join(''), '用户名34908929');
+    assert.equal(name.props.title, '用户名34908929', 'the full name is in the tooltip');
+    assert.equal(name.props['data-script'], 'keep', 'the nickname is shown as set, not converted');
+    const strip = ui.find(n => n.props.className === 'account-strip');
+    assert.equal(strip.children[0].props.status.avatarUrl, pic);
+    ui.button('帐号登出').props.onClick(); ui.render();
+    await ui.button('退出').props.onClick(); await ui.flush();
+    const outName = ui.find(n => n.props.className === 'account-name');
+    assert.equal(outName.props['data-script'], undefined, 'built-in labels follow the script switch');
+    assert.ok(ui.nodes().some(n => n.props.className === 'account-strip is-out'));
+
+    // Profile still missing: the generic label stays, no loop of retries.
+    refreshReply = { loggedIn: true, nickname: '', avatarUrl: '' };
+    await signIn();
+    assert.equal(refreshes, 2);
+    assert.ok(ui.text().includes('已登录'));
+    await ui.flush();
+    assert.equal(refreshes, 2, 'one extra read per sign-in');
+    ui.unmount();
+  });
+
   await test('unreleased notice clears on its own and when changing page', async () => {
     let report;
     const waiting = '您目前的预约收藏短剧，尚未上线，请耐心等候';
