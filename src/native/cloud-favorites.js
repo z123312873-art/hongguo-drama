@@ -23,6 +23,15 @@ function stamp(value) {
   return ms > 946684800000 && ms < 4102444800000 ? Math.floor(ms) : 0;
 }
 
+// The account marks each favorite as a live-action or an AI drama; anything else stays uncategorized.
+function readCategory(raw) {
+  const kind = String(raw.video_category_type || '').toLowerCase();
+  if (kind === 'ai_video') return 'ai';
+  if (kind === 'comic_video' || kind === 'anime_video') return 'comic';
+  if (!kind && String(raw.content_type) === '1') return 'real';
+  return '';
+}
+
 function parseFavorites(payload) {
   const data = payload && typeof payload.data === 'object' && payload.data && !Array.isArray(payload.data) ? payload.data : null;
   if (!data || !Array.isArray(data.video_shelf_info)) throw new Error('手机收藏的回应格式不对');
@@ -34,7 +43,7 @@ function parseFavorites(payload) {
     if (!id) continue;
     const at = stamp(raw.collect_time) || stamp(raw.modify_time) || stamp(raw.create_time);
     const old = rows.get(id);
-    if (!old || at > old.favoritedAt) rows.set(id, { id, favoritedAt: at });
+    if (!old || at > old.favoritedAt) rows.set(id, { id, favoritedAt: at, category: readCategory(raw) || old?.category || '' });
   }
   return [...rows.values()].sort((a, b) => b.favoritedAt - a.favoritedAt);
 }

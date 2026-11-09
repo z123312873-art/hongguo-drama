@@ -79,3 +79,23 @@ test('caps the account changes sent in one pass', () => {
   const items = Array.from({ length: 30 }, (_, i) => item(String(7300000000000000100n + BigInt(i))));
   assert.equal(planFavorites({ items, cloud: [cloud('7300000000000000001')], userId: U, now: NOW }).toAdd.length, 20);
 });
+
+test('category: the account label fills new and existing favorites; a local guess fills only a gap', () => {
+  const plan = planFavorites({
+    items: [item('7300000000000000001', { category: 'real' }), item('7300000000000000002', { category: 'real' }), item('7300000000000000004', { category: 'comic' })],
+    cloud: [cloud('7300000000000000001', { category: '' }), cloud('7300000000000000002', { category: 'ai' }), cloud('7300000000000000003', { category: 'ai' })],
+    userId: U, now: NOW,
+  });
+  const kind = id => plan.items.find(i => i.id === id).category;
+  assert.equal(kind('7300000000000000001'), 'real', 'no account label keeps the local one');
+  assert.equal(kind('7300000000000000002'), 'ai', 'the account label wins');
+  assert.equal(kind('7300000000000000003'), 'ai', 'phone-only favorite brings its label');
+  assert.equal(kind('7300000000000000004'), 'comic', 'local-only favorite is untouched');
+  assert.equal(planFavorites({ items: [], cloud: [cloud('7300000000000000005', { category: 'weird' })], userId: U, now: NOW }).items[0].category, '');
+});
+
+test('an unchanged list with categories does not report a change again', () => {
+  const first = planFavorites({ items: [], cloud: [cloud('7300000000000000001', { category: 'ai' })], userId: U, now: NOW });
+  const again = planFavorites({ items: first.items, cloud: [cloud('7300000000000000001', { category: 'ai' })], userId: U, now: NOW });
+  assert.equal(again.changed, false);
+});

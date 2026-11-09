@@ -17,6 +17,7 @@ import { DEFAULT_BROWSE_CATEGORIES } from '../browseCategories.mjs';
 import { HERO_RESERVED_ROWS, heroLineup, readDiscoverShelf, writeDiscoverShelf } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
 import ComicBrowse from './ComicBrowse';
+import { categoryFromBrowse } from '../favoriteView.mjs';
 
 const COMIC_SOURCE_URL = 'https://hongguoduanju.com/category/comic';
 
@@ -741,6 +742,7 @@ function Browse({ onNavigate, active = true }) {
     const saved = saveLocalSeries({
       id, title: item.series_title, cover: typeof item.cover === 'string' ? item.cover : '',
       published_at: item.published_at, online_time: item.online_time, favorite: !favoriteIds.has(id),
+      category: source === 'hongguo' ? categoryFromBrowse(category) : '',
     });
     if (saved.error) showToast(saved.error, 'error');
     else setLibrary(saved);

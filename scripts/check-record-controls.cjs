@@ -30,7 +30,7 @@ function fixture() {
       useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(fn); } },
     };
     react.useLayoutEffect = react.useEffect;
-    const component = load(file, { './useFavoriteSync': { useFavoriteSyncStatus: () => ({ mode: 'local' }) }, ...imports, react }).default;
+    const component = load(file, { './useFavoriteSync': { useFavoriteSyncStatus: () => ({ mode: 'local' }) }, '../favoriteView.mjs': load('favoriteView.mjs'), ...imports, react }).default;
     const render = () => { cursor = 0; tree = component(props); effects.splice(0).forEach(fn => fn()); };
     const nodes = () => { const result = []; const visit = n => { if (!n || typeof n !== 'object') return; result.push(n); n.children?.forEach(visit); }; visit(tree); return result; };
     render();
@@ -197,6 +197,40 @@ test('calendar displays saved poster and removes only the selected entry', () =>
   const remove = ui.find(n => n.props['aria-label'] === '移除《甲》');
   assert.ok(remove); remove.props.onClick(); ui.render();
   assert.equal(JSON.stringify(library.readLocalLibrary().items.map(item => item.id)), '["b"]');
+});
+
+test('favorites page: one newest-first list, no month picker, filter buttons by state and category', () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  const realNow = Date.now;
+  try {
+    let clock = Date.parse('2025-01-10T12:00:00+08:00');
+    Date.now = () => clock;
+    library.saveLocalSeries({ id: 'a', title: '一月真人', favorite: true, category: 'real' });
+    clock = Date.parse('2025-06-10T12:00:00+08:00');
+    library.saveLocalSeries({ id: 'b', title: '六月AI', favorite: true, category: 'ai' });
+    clock = Date.parse('2026-03-10T12:00:00+08:00');
+    library.saveLocalSeries({ id: 'c', title: '等上线', favorite: true, online_time: Date.parse('2027-01-01T00:00:00+08:00') });
+    library.saveLocalSeries({ id: 'd', title: '不在清单', favorite: false });
+    library.saveLocalSeries({ id: 'b', title: '六月AI', favorite: true, category: 'bogus' });
+    assert.equal(library.readLocalLibrary().items.find(item => item.id === 'b').category, 'ai', 'an unknown label keeps the earlier category');
+  } finally { Date.now = realNow; }
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library });
+  const text = node => typeof node === 'string' || typeof node === 'number' ? String(node) : node?.children?.map(text).join('') || '';
+  assert.equal(ui.nodes().some(n => n.type === 'select'), false, 'no month dropdown');
+  const titles = () => ui.nodes().filter(n => n.props.className === 'release-row').map(n => text(n.children[1].children[0]));
+  assert.deepEqual(titles(), ['等上线', '六月AI', '一月真人']);
+  const filter = label => ui.nodes().find(n => n.type === 'button' && text(n) === label);
+  assert.ok(filter('全部 3')); assert.ok(filter('可播放 2')); assert.ok(filter('尚未上线 1')); assert.ok(filter('真人剧 1')); assert.ok(filter('AI 剧 1'));
+  assert.equal(filter('漫剧 0'), undefined, 'no button for a category nobody has');
+  filter('AI 剧 1').props.onClick(); ui.render();
+  assert.deepEqual(titles(), ['六月AI']);
+  assert.equal(filter('AI 剧 1').props['aria-pressed'], true);
+  filter('尚未上线 1').props.onClick(); ui.render();
+  assert.deepEqual(titles(), ['等上线']);
+  ui.find(n => n.props['aria-label'] === '移除《等上线》').props.onClick(); ui.render();
+  assert.ok(ui.nodes().some(n => text(n) === '这个筛选下没有收藏。'));
+  filter('全部 2').props.onClick(); ui.render();
+  assert.deepEqual(titles(), ['六月AI', '一月真人']);
 });
 
 test('legacy calendar uses local catalog posters without restoring removed rows', async () => {

@@ -1,11 +1,13 @@
 const STORAGE_KEY = 'hongguo:public-library:v1';
 const CHANGE_EVENT = 'hongguo:public-library-changed';
+const CATEGORIES = ['real', 'ai', 'comic'];
+const category = value => CATEGORIES.includes(value) ? value : '';
 
 export const validPublishedAt = value => typeof value === 'number' && Number.isFinite(value) && value > 0 && !Number.isNaN(new Date(value).getTime());
 const usableOnlineTime = value => value == null ? null : validPublishedAt(value) ? value : null;
 // The account a favorite was last confirmed in; null when it lives only on this computer.
 const cloudUser = value => typeof value === 'string' && /^\d{1,30}$/.test(value) ? value : null;
-const stored = item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, favorited_at: validPublishedAt(item.favorited_at) ? item.favorited_at : null, cover: item.cover || '', online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user) });
+const stored = item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, favorited_at: validPublishedAt(item.favorited_at) ? item.favorited_at : null, cover: item.cover || '', online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user), category: category(item.category) });
 
 export function readLocalLibrary() {
   try {
@@ -14,13 +16,13 @@ export function readLocalLibrary() {
     if (!Array.isArray(items) || items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || typeof item.favorite !== 'boolean' || (item.published_at !== null && !validPublishedAt(item.published_at)) || (item.favorited_at != null && !validPublishedAt(item.favorited_at)))) {
       throw new Error('保存的数据格式不正确');
     }
-    return { items: items.map(item => ({ ...item, online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user) })), error: '' };
+    return { items: items.map(item => ({ ...item, online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user), category: category(item.category) })), error: '' };
   } catch (error) {
     return { items: [], error: `无法读取本机收藏与日历：${error.message}。原有数据未改动。` };
   }
 }
 
-export function saveLocalSeries({ id, title, published_at, favorite, cover, online_time }) {
+export function saveLocalSeries({ id, title, published_at, favorite, cover, online_time, category: kind }) {
   const current = readLocalLibrary();
   if (current.error) return current;
   const seriesId = String(id || '').trim();
@@ -39,6 +41,7 @@ export function saveLocalSeries({ id, title, published_at, favorite, cover, onli
     cover: typeof cover === 'string' && /^https?:\/\//i.test(cover) ? cover : previous?.cover || '',
     online_time: validPublishedAt(online_time) ? online_time : online_time === null ? null : usableOnlineTime(previous?.online_time),
     cloud_user: cloudUser(previous?.cloud_user),
+    category: category(kind) || category(previous?.category),
   };
   const items = [...current.items.filter(item => item.id !== seriesId), next];
   try {
