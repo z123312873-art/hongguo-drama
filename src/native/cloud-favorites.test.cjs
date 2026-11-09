@@ -9,10 +9,21 @@ const list = rows => ({ code: 0, data: { video_shelf_info: rows } });
 
 test('parse: ids, seconds or milliseconds, duplicates, bad rows; a missing list is an error', () => {
   const rows = parseFavorites(list([{ series_id: A, collect_time: 1700000000 }, { series_id: B, collect_time: 1700000100000 }, { series_id: A, collect_time: 1600000000 }, { series_id: 'x' }, null, { book_id: 12 }]));
-  assert.deepEqual(rows, [{ id: B, favoritedAt: 1700000100000 }, { id: A, favoritedAt: 1700000000000 }]);
-  assert.deepEqual(parseFavorites(list([{ series_id: A }])), [{ id: A, favoritedAt: 0 }], 'an unknown time stays unknown');
+  assert.deepEqual(rows, [{ id: B, favoritedAt: 1700000100000, category: '' }, { id: A, favoritedAt: 1700000000000, category: '' }]);
+  assert.deepEqual(parseFavorites(list([{ series_id: A }])), [{ id: A, favoritedAt: 0, category: '' }], 'an unknown time stays unknown');
   assert.deepEqual(parseFavorites(list([])), [], 'an empty account is an empty list');
   for (const bad of [null, {}, { data: {} }, { data: { video_shelf_info: {} } }, { data: [] }]) assert.throws(() => parseFavorites(bad), /格式/);
+});
+
+test('parse: the account label becomes the category; unknown labels stay uncategorized', () => {
+  const C = '7690163276214176796', D = '7690163276214176798';
+  const rows = parseFavorites(list([
+    { series_id: A, collect_time: 1700000004, content_type: 1 },
+    { series_id: B, collect_time: 1700000003, content_type: 1004, video_category_type: 'ai_video' },
+    { series_id: C, collect_time: 1700000002, content_type: 1004, video_category_type: 'something_new' },
+    { series_id: D, collect_time: 1700000001, content_type: '1', video_category_type: 'AI_VIDEO' },
+  ]));
+  assert.deepEqual(rows.map(row => [row.id, row.category]), [[A, 'real'], [B, 'ai'], [C, ''], [D, 'ai']]);
 });
 
 test('fetch asks for the signed-in account', async () => {

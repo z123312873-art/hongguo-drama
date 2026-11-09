@@ -3,6 +3,8 @@
 // list never clears this computer.
 
 const MAX_CHANGES = 20;
+const CATEGORIES = ['real', 'ai', 'comic'];
+const kindOf = value => CATEGORIES.includes(value) ? value : '';
 
 export const waitingOnline = (item, now) => Number(item?.online_time) > now;
 const placeholderTitle = id => `短剧 ${String(id).slice(-6)}`;
@@ -20,14 +22,16 @@ export function planFavorites({ items, cloud, userId, cancels = [], now = Date.n
     const mine = byId.get(row.id);
     if (!mine) {
       byId.set(row.id, { id: row.id, title: row.title || placeholderTitle(row.id), published_at: null, favorite: true,
-        favorited_at: row.favoritedAt > 0 ? row.favoritedAt : now, cover: row.cover || '', online_time: null, cloud_user: userId });
+        favorited_at: row.favoritedAt > 0 ? row.favoritedAt : now, cover: row.cover || '', online_time: null, cloud_user: userId, category: kindOf(row.category) });
       changed = true;
       continue;
     }
     const next = { ...mine, favorite: true, cloud_user: userId,
       favorited_at: mine.favorite && mine.favorited_at > 0 ? mine.favorited_at : row.favoritedAt > 0 ? row.favoritedAt : now,
       title: mine.title && mine.title !== placeholderTitle(row.id) ? mine.title : row.title || mine.title,
-      cover: mine.cover || row.cover || '' };
+      cover: mine.cover || row.cover || '',
+      // The account's own label wins; a local guess only fills a gap.
+      category: kindOf(row.category) || kindOf(mine.category) };
     if (JSON.stringify(next) !== JSON.stringify(mine)) { byId.set(row.id, next); changed = true; }
   }
   const toAdd = [];
