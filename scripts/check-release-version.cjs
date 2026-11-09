@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { availableRelease } = require('../src/native/app-update');
+const { availableRelease, releaseSummary } = require('../src/native/app-update');
 
 const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6'];
 let checks = 0;
@@ -104,4 +104,31 @@ for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName,
   assert(artifact.includes(`-${publicVersion}-`), 'Download filenames must contain the two-part release version');
   assert(!artifact.includes('${version}'), 'Raw internal versions must not leak into download filenames');
 }
+function bulletsAfter(text, marker) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const start = lines.findIndex(line => line.includes(marker));
+  assert(start >= 0, marker);
+  const bullets = [];
+  for (const line of lines.slice(start + 1)) {
+    const trimmed = line.trim();
+    if (!trimmed) { if (bullets.length) break; continue; }
+    if (!trimmed.startsWith('- ')) break;
+    bullets.push(trimmed.slice(2));
+  }
+  return bullets;
+}
+const noteBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.6.md'), 'utf8'), '## 更新摘要');
+const readmeBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), '4.6 預發佈：');
+const preJob = workflow.slice(workflow.indexOf('publish-release-4-6-pre:'), workflow.indexOf('publish-release:'));
+const preHeredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(preJob);
+assert(preHeredoc, 'The 4.6 pre-release job must build its notes from a heredoc');
+const preBody = preHeredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+const preBullets = releaseSummary(preBody).items;
+assert.deepEqual(readmeBullets, noteBullets, 'README must copy the 4.6 summary');
+assert.deepEqual(preBullets, noteBullets, 'The 4.6 pre-release must publish the same summary');
+assert.equal(noteBullets.length, 7, 'The 4.6 summary keeps the finished items together');
+assert(noteBullets.every(item => Array.from(item).length <= 72), 'Each 4.6 summary line fits the update window');
+assert(noteBullets.some(item => item.includes('安裝檔裡的登入可以送出驗證碼')));
+assert(noteBullets.some(item => item.includes('側欄同一底色')));
+assert(noteBullets.some(item => item.includes('拿掉前面的中國')));
 console.log(`PASS ${checks} version pairs, equivalent versions, invalid versions and unpublished releases`);
