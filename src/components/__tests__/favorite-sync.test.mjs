@@ -99,3 +99,50 @@ test('an unchanged list with categories does not report a change again', () => {
   const again = planFavorites({ items: first.items, cloud: [cloud('7300000000000000001', { category: 'ai' })], userId: U, now: NOW });
   assert.equal(again.changed, false);
 });
+
+
+test('both sides have the favorite: a newer local favorite time wins', () => {
+  const id = '7300000000000000001';
+  const localAt = NOW - 1000, cloudAt = NOW - 9000;
+  const mine = item(id, { favorited_at: localAt, cloud_user: U, category: 'real' });
+  const plan = planFavorites({ items: [mine], cloud: [cloud(id, { favoritedAt: cloudAt })], userId: U, now: NOW });
+  assert.equal(plan.items[0].favorited_at, localAt);
+  assert.equal(plan.items[0].favorite, true);
+  assert.equal(plan.items[0].title, mine.title);
+  assert.deepEqual(plan.toAdd, [], 'already present in the account: no redundant add');
+  assert.deepEqual(plan.toCancel, []);
+  assert.equal(mine.favorited_at, localAt, 'the input is not mutated');
+});
+
+test('both sides have the favorite: a newer account time wins and stays stable', () => {
+  const id = '7300000000000000001';
+  const localAt = NOW - 9000, cloudAt = NOW - 1000;
+  const mine = item(id, { favorited_at: localAt, cloud_user: U });
+  const remote = cloud(id, { favoritedAt: cloudAt, category: 'ai' });
+  const plan = planFavorites({ items: [mine], cloud: [remote], userId: U, now: NOW });
+  assert.equal(plan.items[0].favorited_at, cloudAt);
+  assert.equal(plan.items[0].favorite, true);
+  assert.equal(plan.items[0].category, 'ai');
+  assert.equal(plan.changed, true);
+  assert.deepEqual(plan.toAdd, []);
+  assert.deepEqual(plan.toCancel, []);
+  assert.equal(mine.favorited_at, localAt);
+  const again = planFavorites({ items: plan.items, cloud: [remote], userId: U, now: NOW });
+  assert.equal(again.items[0].favorited_at, cloudAt);
+  assert.equal(again.changed, false);
+});
+
+test('favorite time: equal times stay stable; missing or invalid times cannot beat a known time', () => {
+  const id = '7300000000000000001', at = NOW - 1000;
+  for (const bad of [0, null, undefined, -1, NaN, Infinity]) {
+    const mine = item(id, { favorited_at: at, cloud_user: U });
+    const plan = planFavorites({ items: [mine], cloud: [cloud(id, { favoritedAt: bad })], userId: U, now: NOW });
+    assert.equal(plan.items[0].favorited_at, at);
+    const remote = planFavorites({ items: [item(id, { favorited_at: bad })], cloud: [cloud(id, { favoritedAt: at })], userId: U, now: NOW });
+    assert.equal(remote.items[0].favorited_at, at);
+  }
+  const known = planFavorites({ items: [], cloud: [cloud(id, { favoritedAt: at })], userId: U, now: NOW });
+  assert.equal(planFavorites({ items: known.items, cloud: [cloud(id, { favoritedAt: at })], userId: U, now: NOW }).changed, false);
+  const unknown = planFavorites({ items: [item(id, { favorited_at: null })], cloud: [cloud(id, { favoritedAt: 0 })], userId: U, now: NOW });
+  assert.equal(unknown.items[0].favorited_at, NOW);
+});
