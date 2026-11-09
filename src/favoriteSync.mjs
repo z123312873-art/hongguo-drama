@@ -7,6 +7,7 @@ const CATEGORIES = ['real', 'ai', 'comic'];
 const kindOf = value => CATEGORIES.includes(value) ? value : '';
 
 export const waitingOnline = (item, now) => Number(item?.online_time) > now;
+const favoriteTime = value => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 const placeholderTitle = id => `短剧 ${String(id).slice(-6)}`;
 
 // items: this computer's list. cloud: [{ id, favoritedAt, title, cover }]. cancels: ids the person
@@ -22,12 +23,13 @@ export function planFavorites({ items, cloud, userId, cancels = [], now = Date.n
     const mine = byId.get(row.id);
     if (!mine) {
       byId.set(row.id, { id: row.id, title: row.title || placeholderTitle(row.id), published_at: null, favorite: true,
-        favorited_at: row.favoritedAt > 0 ? row.favoritedAt : now, cover: row.cover || '', online_time: null, cloud_user: userId, category: kindOf(row.category) });
+        favorited_at: favoriteTime(row.favoritedAt) || now, cover: row.cover || '', online_time: null, cloud_user: userId, category: kindOf(row.category) });
       changed = true;
       continue;
     }
     const next = { ...mine, favorite: true, cloud_user: userId,
-      favorited_at: mine.favorite && mine.favorited_at > 0 ? mine.favorited_at : row.favoritedAt > 0 ? row.favoritedAt : now,
+      // Both sides already have the heart: keep the newer favorite time, not whichever list was read first.
+      favorited_at: Math.max(mine.favorite ? favoriteTime(mine.favorited_at) : 0, favoriteTime(row.favoritedAt)) || now,
       title: mine.title && mine.title !== placeholderTitle(row.id) ? mine.title : row.title || mine.title,
       cover: mine.cover || row.cover || '',
       // The account's own label wins; a local guess only fills a gap.
