@@ -370,8 +370,7 @@ jobs:
           blockmap="$setup.blockmap"
           latest="release/latest.yml"
           portable="release/hongguo-downloader-4.6-win-x64.zip"
-          source="release/ffmpeg-9.0.2-x264-b35605a-win-x64-corresponding-source.tar.gz"
-          for file in "$setup" "$blockmap" "$latest" "$portable" "$source"; do test -f "$file"; done
+          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
           grep -Fq "hongguo-downloader-4.6-win-x64-setup.exe" "$latest"
           grep -Eq '^version: 4\.6\.0$' "$latest"
           setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
@@ -393,7 +392,6 @@ jobs:
           便攜 ZIP：hongguo-downloader-4.6-win-x64.zip
           便攜 ZIP SHA256：$portable_sha
           對應提交：$GITHUB_SHA
-          對應來源：$(basename "$source")（同頁下載）
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
@@ -403,8 +401,8 @@ jobs:
           else
             gh release create "$tag" --target "$GITHUB_SHA" --prerelease --title "4.6 預發佈" --notes "$notes"
           fi
-          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" "$source" --clobber
-          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")" "$(basename "$source")")
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
+          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
           gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
             if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
               gh release delete-asset "$tag" "$name" --yes

@@ -19,11 +19,10 @@ test('Windows launchers retain active entrypoints and do not launch unmatched pa
   assert.match(launch, /win-unpacked/);
   assert.match(fs.readFileSync(path.join(root, '开发模式.bat'), 'latin1'), /call npm run dev/);
 });
-test('pre-release retains the complete corresponding-source archive beside the four application assets', () => {
+test('pre-release publishes only the four standard application assets', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/windows.yml'), 'utf8');
   const job = workflow.slice(workflow.indexOf('publish-release-4-6-pre:'), workflow.indexOf('publish-release:'));
-  assert.match(job, /source="release\/ffmpeg-9\.0\.2-x264-b35605a-win-x64-corresponding-source\.tar\.gz"/);
-  assert.match(job, /for file in "\$setup" "\$blockmap" "\$latest" "\$portable" "\$source"/);
-  assert.match(job, /gh release upload[^\n]+"\$source" --clobber/);
-  assert.match(job, /keep=\$\([^\n]+basename "\$source"/);
+  assert.match(job, /for file in "\$setup" "\$blockmap" "\$latest" "\$portable"; do/);
+  assert.match(job, /gh release upload "\$tag" "\$setup" "\$blockmap" "\$latest" "\$portable" --clobber/);
+  assert.doesNotMatch(job, /\$source/);
 });

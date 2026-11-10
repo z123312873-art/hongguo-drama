@@ -35,7 +35,7 @@ x264 为唯一外部编解码静态库（GPLv2-or-later）；整体构建为 GPL
 许可全文与来源说明见 `COPYING.GPLv3`、`COPYING.GPLv2`、`LICENSE.md`、`WINDOWS-X264-LICENSE.txt` 和 `WINDOWS-NOTICE.txt`。
 该精简构建提供软件 H.264 编码，不包含旧版 Gyan essentials 包及其额外库。
 
-Windows 同时内置 librempeg（固定版本 a0fafc5c42dbd7fce25b141c071277fb016a65c5），用于额外视频格式的兼容处理。整体构建为 GPLv3-or-later，不包含 AGPL 组件。许可与来源说明随应用保留于 `resources/bin/WINDOWS-LIBREMPEG-LICENSE.txt`、`WINDOWS-LIBREMPEG-LGPL.txt` 和 `WINDOWS-LIBREMPEG-NOTICE.txt`，完整对应源码随发行包提供。
+Windows 同时内置 librempeg（固定版本 a0fafc5c42dbd7fce25b141c071277fb016a65c5），用于额外视频格式的兼容处理。整体构建为 GPLv3-or-later，不包含 AGPL 组件。许可与来源说明随应用保留于 `resources/bin/WINDOWS-LIBREMPEG-LICENSE.txt`、`WINDOWS-LIBREMPEG-LGPL.txt` 和 `WINDOWS-LIBREMPEG-NOTICE.txt`。
 
 ---
 
