@@ -12,7 +12,7 @@ function bytevc2StreamArgs(contentKey) {
   return ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', 'pipe:0', '-map', '0:v:0', '-map', '0:a?',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-threads', '4',
     '-g', '48', '-keyint_min', '48', '-sc_threshold', '0', '-force_key_frames', 'expr:gte(t,n_forced*1)',
-    '-c:a', 'copy', '-movflags', FRAGMENTED, '-f', 'mp4', 'pipe:1'];
+    '-c:a', 'copy', '-movflags', FRAGMENTED, '-frag_duration', '250000', '-flush_packets', '1', '-f', 'mp4', 'pipe:1'];
 }
 
 function bytevc2FileArgs(contentKey, input, output) {

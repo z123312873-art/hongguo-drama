@@ -510,6 +510,10 @@ test('failed and incomplete folder replies preserve cache, but verified empty re
     assert.equal(x.mounted.hook.favoriteSyncStatus().foldersStale, false);
     assert.equal(x.mounted.hook.favoriteSyncStatus().folderBusy, false);
     assert.match(x.mounted.hook.favoriteSyncStatus().folderNotice, /共 0 個/);
+    const firstNotice = x.mounted.hook.favoriteSyncStatus().folderNoticeId;
+    assert.ok(x.mounted.hook.favoriteSyncStatus().folderNoticeUntil > Date.now());
+    await x.mounted.hook.refreshFavoriteFolders();
+    assert.ok(x.mounted.hook.favoriteSyncStatus().folderNoticeId > firstNotice, 'repeated identical results get a fresh dismissal lifetime');
     assert.equal(JSON.parse(x.h.storage.get('hongguo:favorite-folders:v1')).folders.length, 0);
     x.setFolders([]);
     x.mounted.render(false); await x.mounted.flush();
@@ -693,4 +697,28 @@ test('expanded create and reservation sections expose explicit collapse controls
     assert.equal(ui.find(n => n.type === 'details').props.open, false);
     assert.equal(library.readLocalLibrary().items.filter(item => item.favorite).length, 1);
   } finally { ui.unmount(); }
+});
+
+test('action notices auto-dismiss success and error, close manually and clear replaced timers', () => {
+  const timers = new Map(); let sequence = 0;
+  const h = fixture({ setTimeout: (fn, ms) => { const id = ++sequence; timers.set(id, { fn, ms }); return id; }, clearTimeout: id => timers.delete(id) });
+  const props = { message: '已新增收藏夾。' };
+  const ui = h.mount('components/ActionNotice.jsx', {}, props);
+  assert.ok(ui.find(node => node.props.role === 'status'));
+  assert.equal([...timers.values()][0].ms, 3200);
+  props.message = '已改名收藏夾。'; ui.render();
+  assert.equal(timers.size, 1);
+  [...timers.values()][0].fn(); ui.render();
+  assert.equal(ui.nodes().length, 0);
+  ui.unmount(); assert.equal(timers.size, 0);
+  const failure = h.mount('components/ActionNotice.jsx', {}, { message: '請重新整理後重試。', error: true });
+  assert.ok(failure.find(node => node.props.role === 'alert'));
+  assert.equal([...timers.values()][0].ms, 7000);
+  failure.find(node => node.props['aria-label'] === '關閉提示').props.onClick(); failure.render();
+  assert.equal(failure.nodes().length, 0); failure.unmount();
+  const expired = h.mount('components/ActionNotice.jsx', {}, { message: '先前的重整結果', expiresAt: Date.now() - 100 });
+  assert.equal(expired.nodes().length, 0); expired.unmount();
+  const css = fs.readFileSync(path.join(__dirname, '../src/components/ActionNotice.css'), 'utf8');
+  assert.match(css, /position: fixed/);
+  assert.match(css, /max-width: calc\(100vw - 40px\)/);
 });
