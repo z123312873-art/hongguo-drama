@@ -139,6 +139,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
     const next = remove ? removeLocalSeries(item.id) : saveLocalSeries({ id: item.id, title: item.title, favorite: false });
     setLibrary(next);
     if (!next.error) setLocalNotice(previous => ({ id: (previous?.id || 0) + 1, text: remove ? '已移除收藏紀錄，下載影片仍會保留。' : '已取消收藏，下載影片仍會保留。' }));
+    else setLocalNotice(null);
   };
   const row = item => {
     const onlineAt = Number(item.online_time);

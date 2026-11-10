@@ -722,3 +722,18 @@ test('action notices auto-dismiss success and error, close manually and clear re
   assert.match(css, /position: fixed/);
   assert.match(css, /max-width: calc\(100vw - 40px\)/);
 });
+
+test('a failed favorite removal never leaves an earlier success notice on screen', () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  library.saveLocalSeries({ id: 'a', title: '甲', favorite: true });
+  library.saveLocalSeries({ id: 'b', title: '乙', favorite: true });
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library });
+  ui.find(node => node.props['aria-label'] === '取消收藏《甲》').props.onClick(); ui.render();
+  assert.ok(ui.find(node => node.props.message === '已取消收藏，下載影片仍會保留。'));
+  h.window.localStorage.setItem = () => { throw new Error('儲存空間不足'); };
+  ui.find(node => node.props['aria-label'] === '移除《乙》').props.onClick(); ui.render();
+  assert.equal(ui.find(node => node.props.message === '已取消收藏，下載影片仍會保留。'), undefined);
+  assert.ok(ui.find(node => node.props.role === 'alert'));
+  assert.ok(library.readLocalLibrary().items.find(item => item.id === 'b')?.favorite);
+  ui.unmount();
+});
