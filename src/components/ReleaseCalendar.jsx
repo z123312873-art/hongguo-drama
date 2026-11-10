@@ -72,12 +72,13 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   useEffect(() => { if (chosenFolder && !folders.some(item => item.id === chosenFolder)) setChosenFolder(''); }, [chosenFolder, sync.folders]);
   const folderBusy = folderPending || sync.folderBusy;
   const folderOnline = window.navigator?.onLine !== false;
-  const folderReady = active && sync.mode === 'cloud' && Boolean(sync.userId) && folderOnline && !sync.foldersStale && !sync.foldersError && !folderBusy;
+  const createFolderReady = active && sync.mode === 'cloud' && Boolean(sync.userId) && folderOnline && !folderBusy;
+  const folderReady = createFolderReady && !sync.foldersStale && !sync.foldersError;
   const editableFolder = folderReady && Boolean(folder?.revision);
   const eligible = favorites.filter(item => /^\d{6,25}$/.test(item.id) && item.cloud_user === sync.userId && !isWaiting(item, Date.now(), released));
   const snapshot = target => ({ folderId: target.id, revision: target.revision });
   const runFolder = async input => {
-    if (!folderReady || pendingFolder.current) return;
+    if (!(input.operation === 'create' ? createFolderReady : folderReady) || pendingFolder.current) return;
     pendingFolder.current = true; setFolderPending(true); setFolderError('');
     const version = folderEpoch.current;
     try {
@@ -106,7 +107,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const submitName = async event => {
     event.preventDefault();
     try {
-      const name = folderRules.validateName(folderDialog.name, folders, folderDialog.folderId);
+      const name = folderRules.validateName(folderDialog.name, folderDialog.operation === 'create' && sync.foldersStale ? [] : folders, folderDialog.folderId);
       await runFolder({ ...folderDialog, name });
     } catch (error) { setFolderError(error.message); }
   };
@@ -162,7 +163,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
         {folders.map(item => <option key={item.id} value={item.id}>{item.name}（{item.itemIds.length}）</option>)}
       </select>
       <button type="button" className="btn btn-sm btn-outline" aria-label="重新整理收藏夾" disabled={!active || !sync.userId || folderBusy || !folderOnline} onClick={async () => { setFolderError(''); const result = await refreshFavoriteFolders(); if (!result?.success) setFolderError('收藏夾暫時無法讀取，已保留原有資料。'); }}><RefreshCw size={14} />重新整理</button>
-      <button type="button" className="btn btn-sm" aria-label="新增收藏夾" disabled={!folderReady} onClick={() => openName('create')}><Plus size={14} />新增收藏夾</button>
+      <button type="button" className="btn btn-sm" aria-label="新增收藏夾" disabled={!createFolderReady} onClick={() => openName('create')}><Plus size={14} />新增收藏夾</button>
       {folder && <>
         <button type="button" className="btn btn-sm btn-outline" aria-label="重新命名收藏夾" disabled={!editableFolder} onClick={() => openName('rename')}>改名</button>
         <button type="button" className="btn btn-sm btn-outline" aria-label="刪除收藏夾" disabled={!editableFolder} onClick={requestDelete}><Trash2 size={14} />刪除收藏夾</button>

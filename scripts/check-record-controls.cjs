@@ -582,7 +582,7 @@ test('the folder editor validates names and implements all five actions with sep
     assert.equal(sync.folders.length, 0);
   } finally { ui.unmount(); }
 });
-test('folder UI disables editing while logged out, offline, stale or busy, and clears old-account dialogs', async () => {
+test('folder UI blocks logged-out, offline or busy actions, keeps stale edits protected and clears old-account dialogs', async () => {
   const h = fixture(), sync = { mode: 'local' }, library = h.load('localLibrary.js');
   const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useFavoriteSync': { useFavoriteSyncStatus: () => sync } }); await ui.flush();
   const create = () => ui.find(n => n.props['aria-label'] === '新增收藏夾');
@@ -590,7 +590,7 @@ test('folder UI disables editing while logged out, offline, stale or busy, and c
     assert.equal(create().props.disabled, true);
     Object.assign(sync, { mode: 'cloud', userId: '1000000000000001', folders: [] }); ui.render(); await ui.flush();
     h.window.navigator = { onLine: false }; ui.render(); assert.equal(create().props.disabled, true);
-    h.window.navigator.onLine = true; sync.foldersStale = true; ui.render(); assert.equal(create().props.disabled, true);
+    h.window.navigator.onLine = true; sync.foldersStale = true; ui.render(); assert.equal(create().props.disabled, false, 'creation still performs a fresh server preflight and must remain available after mobile deleted all folders');
     sync.foldersStale = false; sync.folderBusy = true; ui.render(); assert.equal(create().props.disabled, true);
     sync.folderBusy = false; ui.render(); create().props.onClick(); ui.render();
     assert.ok(ui.find(n => n.props.id === 'folder-name-input'));
@@ -615,5 +615,26 @@ test('reservation polling promotes a confirmed release without changing favorite
     answer = 'error'; await [...timers.values()].find(timer => timer.ms === 60000).fn(); await ui.flush();
     assert.equal(reserved(), undefined, 'an unknown response cannot undo a confirmed release');
     props.active = false; ui.render(); assert.equal(timers.size, 0);
+  } finally { ui.unmount(); }
+});
+
+test('a stale cached folder cannot block safe creation or be silently renamed or deleted', async () => {
+  const h = fixture(), library = h.load('localLibrary.js'), writes = [];
+  const sync = { mode: 'cloud', userId: '1000000000000001', foldersStale: true, foldersError: '手機回傳空清單', folders: [{ id: '7300000000000000101', name: '已移除的夾', revision: 'old', itemIds: [] }] };
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useFavoriteSync': {
+    useFavoriteSyncStatus: () => sync,
+    changeFavoriteFolder: async input => { writes.push(input); return { success: true }; },
+  } });
+  try {
+    await ui.flush();
+    ui.find(n => n.props.id === 'favorite-folder').props.onChange({ target: { value: sync.folders[0].id } }); ui.render();
+    assert.equal(ui.find(n => n.props['aria-label'] === '重新命名收藏夾').props.disabled, true);
+    assert.equal(ui.find(n => n.props['aria-label'] === '刪除收藏夾').props.disabled, true);
+    const create = ui.find(n => n.props['aria-label'] === '新增收藏夾'); assert.equal(create.props.disabled, false);
+    create.props.onClick(); ui.render();
+    ui.find(n => n.props.id === 'folder-name-input').props.onChange({ target: { value: '已移除的夾' } }); ui.render();
+    await ui.find(n => n.type === 'form').props.onSubmit({ preventDefault() {} }); await ui.flush();
+    assert.equal(writes.length, 1); assert.equal(writes[0].operation, 'create');
+    assert.equal(sync.folders.length, 1, 'a cached snapshot is not cleared by opening or submitting the editor');
   } finally { ui.unmount(); }
 });
