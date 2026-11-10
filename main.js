@@ -3555,9 +3555,10 @@ async function loadCloudHistory(force = false) {
   if (!force && cloudHistory.rows && Date.now() - cloudHistory.fetchedAt < CLOUD_HISTORY_TTL) return cloudHistory;
   if (cloudHistory.pending) return cloudHistory.pending;
   const state = cloudHistory;
-  state.pending = cloudHistoryApi.fetchHistory(cloudRequest()).then(rows => {
+  let summary;
+  state.pending = cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }).then(rows => {
     if (cloudHistory !== state) return cloudHistory;
-    Object.assign(state, { rows, fetchedAt: Date.now(), error: '' });
+    Object.assign(state, { rows, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), error: '' });
     persistAccountSession();
     return state;
   }, error => {
@@ -3587,7 +3588,7 @@ async function syncCloudHistory(force = false) {
   if (historySync) return historySync;
   historySync = (async () => {
     const state = await loadCloudHistory(force);
-    if (!state?.rows) return state;
+    if (!state?.rows || state.error) return state;
     if (!force && state.mergedAt === state.fetchedAt) return state;
     const userId = state.userId;
     const plan = cloudHistoryApi.reconcileHistory({ playback: store.getPlayback(), cloudRows: state.rows, userId });
@@ -3603,7 +3604,9 @@ async function syncCloudHistory(force = false) {
     }
     if (sent.length) {
       try {
-        const rows = await cloudHistoryApi.fetchHistory(cloudRequest());
+        let summary;
+        const rows = await cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } });
+        state.reportedTotal = summary?.reportedTotal ?? null;
         if (cloudHistory === state) Object.assign(state, { rows, fetchedAt: Date.now() });
         const listed = new Set(rows.map(row => row.series_id));
         const map = store.getPlayback();
@@ -3611,7 +3614,8 @@ async function syncCloudHistory(force = false) {
         store.savePlayback(map);
       } catch (error) { failures.push(error.message); }
     }
-    Object.assign(state, { mergedAt: state.fetchedAt, notice: plan.notice,
+    const countNotice = state.reportedTotal > state.rows.length ? `帐号历史回报 ${state.reportedTotal} 部，完整清单实际返回 ${state.rows.length} 部；筛选数量按已返回的记录计算，不会补造或清除记录。` : '';
+    Object.assign(state, { mergedAt: state.fetchedAt, notice: [countNotice, plan.notice].filter(Boolean).join('；'),
       uploadError: failures.length ? `有 ${failures.length} 部没有同步到手机，稍后会再试（${failures[0]}）` : '' });
     return state;
   })().finally(() => { historySync = null; });
@@ -3664,12 +3668,13 @@ async function removeWatchHistoryEverywhere(seriesId, { missingOk = false } = {}
   const map = store.getPlayback();
   if (userId) {
     const state = await loadCloudHistory(true);
-    if (!state?.rows) return { success: false, error: `手机历史暂时读不到，没有移除（${state?.error || '请稍后重试'}）` };
+    if (!state?.rows || state.error) return { success: false, error: `手机历史暂时读不到，没有移除（${state?.error || '请稍后重试'}）` };
     const row = state.rows.find(item => item.series_id === sid);
     if (row) {
       try {
-        const after = await cloudHistoryApi.deleteEntry(cloudRequest(), row);
-        if (cloudHistory === state) Object.assign(state, { rows: after, fetchedAt: Date.now(), error: '' });
+        let summary;
+        const after = await cloudHistoryApi.deleteEntry(cloudRequest(), row, Date.now(), { onSummary: value => { summary = value; } });
+        if (cloudHistory === state) Object.assign(state, { rows: after, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), error: '' });
       } catch (error) {
         if (error.rows && cloudHistory === state) Object.assign(state, { rows: error.rows, fetchedAt: Date.now() });
         return { success: false, error: error.code === 'CLOUD_DELETE_UNCONFIRMED' ? error.message : `从手机历史移除失败：${error.message || '请稍后重试'}` };

@@ -221,7 +221,10 @@ test('favorites page: one newest-first list, no month picker, filter buttons by 
   assert.deepEqual(titles(), ['等上线', '六月AI', '一月真人']);
   const filter = label => ui.nodes().find(n => n.type === 'button' && text(n) === label);
   assert.ok(filter('全部 3')); assert.ok(filter('可播放 2')); assert.ok(filter('尚未上线 1')); assert.ok(filter('真人剧 1')); assert.ok(filter('AI 剧 1'));
-  assert.equal(filter('漫剧 0'), undefined, 'no button for a category nobody has');
+  assert.ok(filter('漫剧 0'), 'the comic filter stays visible even with no categorized rows');
+  filter('漫剧 0').props.onClick(); ui.render();
+  assert.deepEqual(titles(), []);
+  assert.ok(ui.nodes().some(n => text(n) === '这个筛选下没有收藏。'));
   filter('AI 剧 1').props.onClick(); ui.render();
   assert.deepEqual(titles(), ['六月AI']);
   assert.equal(filter('AI 剧 1').props['aria-pressed'], true);

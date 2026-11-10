@@ -23,12 +23,13 @@ function stamp(value) {
   return ms > 946684800000 && ms < 4102444800000 ? Math.floor(ms) : 0;
 }
 
-// The account marks each favorite as a live-action or an AI drama; anything else stays uncategorized.
+// Explicit category labels take precedence. Animated entries without an AI label are comic dramas.
 function readCategory(raw) {
   const kind = String(raw.video_category_type || '').toLowerCase();
   if (kind === 'ai_video') return 'ai';
   if (kind === 'comic_video' || kind === 'anime_video') return 'comic';
   if (!kind && String(raw.content_type) === '1') return 'real';
+  if (!kind && String(raw.content_type) === '1004') return 'comic';
   return '';
 }
 

@@ -25,12 +25,10 @@ function flag(value) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
-// Finished means: the last episode, played to (nearly) its end. Without a duration the last episode
-// alone does not count, so an unknown never inflates 已看完.
-function finished(index, total, positionSec, durationSec) {
-  if (!(total > 0) || index < total) return false;
-  if (!(durationSec > 0)) return false;
-  return positionSec >= durationSec - Math.max(1.5, durationSec * 0.03);
+// Account history records the current episode and the series length. Its duration is not the
+// current episode's duration, so it cannot be used as a playback-ended threshold here.
+function finished(index, total) {
+  return Number.isInteger(index) && Number.isInteger(total) && total > 0 && index >= total;
 }
 
 function cloudRow(raw) {
@@ -62,16 +60,19 @@ function parsePage(payload) {
 
 // Reads every page. A repeated page or a page cap means the list is incomplete, which is an error,
 // not a shorter list: a partial list must never delete or hide anything.
-async function fetchHistory(request, { maxPages = MAX_PAGES } = {}) {
+async function fetchHistory(request, { maxPages = MAX_PAGES, onSummary } = {}) {
   const rows = new Map();
   const seen = new Set();
   let offset = 0;
+  let reportedTotal = null;
   for (let page = 0; page < maxPages; page += 1) {
     const payload = await request('GET', LIST_PATH, {
       limit: '0', offset: String(offset), book_type: '2', full_field: 'false', query_soft_deleted: 'false',
       last_min_read_timestamp_ms: '0', is_first_load: offset === 0 ? 'true' : 'false',
     });
     const { rows: list, hasMore, nextOffset } = parsePage(payload);
+    const total = number(payload.data.total);
+    if (Number.isInteger(total) && total >= 0) reportedTotal = Math.max(reportedTotal ?? 0, total);
     if (list.length) {
       const fingerprint = JSON.stringify(list.map(item => [item?.book_id_str ?? item?.book_id, item?.read_timestamp_ms]));
       if (seen.has(fingerprint)) throw new Error('手机历史分页重复，请稍后重试');
@@ -83,7 +84,10 @@ async function fetchHistory(request, { maxPages = MAX_PAGES } = {}) {
       const old = rows.get(row.series_id);
       if (!old || row.updatedAt > old.updatedAt) rows.set(row.series_id, row);
     }
-    if (!hasMore) return [...rows.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    if (!hasMore) {
+      onSummary?.({ reportedTotal, returnedCount: rows.size });
+      return [...rows.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    }
     if (!list.length) throw new Error('手机历史没有读完，请稍后重试');
     offset = nextOffset > offset ? nextOffset : offset + PAGE_STRIDE;
   }
@@ -103,7 +107,7 @@ function updateBody(entry, now, deleted) {
     book_id: asId(entry.series_id), book_type: 2, vid_index: entry.vid_index, chapter_index: 0,
     current_play_position: ms(entry.currentTime), player_accumulate_total_time: ms(entry.currentTime),
     read_timestamp_ms: stamp, update_timestamp_ms: now, is_delete: deleted, use_soft_delete: false,
-    is_interactive_game: false, is_listen_mode: false, is_multi_season: entry.multiSeason === true,
+    is_interactive_game: false, is_listen_mode: false, is_multi_season: entry.multiSeason === true ? 1 : 0,
     season_index: Number(entry.seasonIndex) || 0, duration: ms(entry.duration), episode_cnt: Number(entry.total) || 0,
   };
   if (readId(entry.cloudVid)) row.vid = asId(entry.cloudVid);
@@ -116,10 +120,10 @@ async function uploadEntry(request, entry, now = Date.now()) {
 }
 
 // Deletes on the account, then reads the list again: only a row that is really gone counts as deleted.
-async function deleteEntry(request, entry, now = Date.now()) {
+async function deleteEntry(request, entry, now = Date.now(), options = {}) {
   if (!readId(entry?.series_id)) throw new Error('这部剧无法从手机历史移除');
   await request('POST', UPDATE_PATH, {}, updateBody(entry, now, true));
-  const after = await fetchHistory(request);
+  const after = await fetchHistory(request, options);
   if (after.some(row => row.series_id === entry.series_id)) {
     const error = new Error('手机历史没有确认移除，请稍后再试');
     error.code = 'CLOUD_DELETE_UNCONFIRMED';
@@ -155,8 +159,13 @@ function reconcileHistory({ playback, cloudRows, userId }) {
     const merged = { ...mine, remote, cloudSynced: userId, knownTotal: Math.max(Number(mine.knownTotal) || 0, row.total) };
     if (row.updatedAt > mine.updatedAt + SAME_MS) {
       Object.assign(merged, { vid_index: row.vid_index, currentTime: row.currentTime, updatedAt: row.updatedAt, watched: true, ...finished });
+      if (!row.completed) delete merged.completedEpisode;
     } else if (mine.updatedAt > row.updatedAt + SAME_MS) {
       toUpload.push(row.series_id);
+    } else if (row.vid_index === mine.vid_index) {
+      // A refreshed account snapshot also repairs completion metadata saved by an older version.
+      if (row.completed) merged.completedEpisode = row.vid_index;
+      else delete merged.completedEpisode;
     }
     next[row.series_id] = merged;
   }
