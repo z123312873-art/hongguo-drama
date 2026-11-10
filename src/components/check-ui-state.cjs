@@ -906,7 +906,7 @@ async function mount(file, api, props = {}) {
     await ui.flush(); const locked = ui.find(n => n.props['aria-label'] === '第 2 集'); assert.equal(locked.props.disabled, true);
     const beforeLocked = requested.length;
     locked.props.onClick(); await ui.flush(); assert.equal(requested.length, beforeLocked, 'handler must also guard locked');
-    assert.ok(requested.some(p => p.prefetch && p.vidIndex === 3), 'locked episode is skipped and the next playable episode is prepared');
+    assert.equal(requested.some(p => p.prefetch), false, 'next-episode work must not compete with startup');
     ui.find(n => n.type === 'video').props.onEnded(); await ui.flush(); assert.equal(requested.at(-1).vidIndex, 3);
     await ui.button('下载未完成集').props.onClick(); assert.deepEqual(downloaded, [1, 3]); ui.unmount();
   });

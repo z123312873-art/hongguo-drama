@@ -738,6 +738,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     setDecodeFailed(false);
     setMediaBuffering(false);
     setSawPicture(true);
+    if (element.videoWidth > 0) queueNextPrefetchRef.current(currentIndex);
     const idx = currentIndex;
     const version = mediaVersion.current;
     clearTimeout(decodeTimer.current);
@@ -797,7 +798,6 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         setOnlineProgress(null);
         refreshOnlineCacheInfo();
         if (res.notice) showToast(res.notice);
-        queueNextPrefetchRef.current(vidIndex);
       };
       // A finished prefetch swaps the source in this same update, so the next episode does not drop to the preparing screen.
       if (ready) { usePrepared(ready); return; }

@@ -4,6 +4,7 @@ import { useFavoriteSyncStatus, changeFavoriteFolder, refreshFavoriteFolders } f
 import { favoriteView, isWaiting } from '../favoriteView.mjs';
 import folderRules from '../native/folder-rules';
 import { RefreshCw, Shield, Folder, FolderPlus, Plus, Trash2 } from './icons';
+import ActionNotice from './ActionNotice';
 import './ReleaseCalendar.css';
 
 const WAITING_NOTICE = '您目前的预约收藏短剧，尚未上线，请耐心等候';
@@ -23,7 +24,10 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const sync = useFavoriteSyncStatus();
   const [folderDialog, setFolderDialog] = useState(null);
   const [folderConfirm, setFolderConfirm] = useState(null);
-  const [folderError, setFolderError] = useState('');
+  const [folderFailure, setFolderFailure] = useState({ text: '', id: 0 });
+  const folderError = folderFailure.text;
+  const setFolderError = text => setFolderFailure(previous => ({ text, id: previous.id + 1 }));
+  const [localNotice, setLocalNotice] = useState(null);
   const [folderPending, setFolderPending] = useState(false);
   const [reservedExpanded, setReservedExpanded] = useState(false);
   const pendingFolder = useRef(false);
@@ -68,8 +72,8 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const inAccount = sync.mode === 'cloud' ? favorites.filter(item => item.cloud_user === sync.userId).length : 0;
   const folders = Array.isArray(sync.folders) ? sync.folders : [];
   const folder = folders.find(item => item.id === chosenFolder);
-  useEffect(() => { setChosenFolder(''); setFolderDialog(null); setFolderConfirm(null); setFolderError(''); folderEpoch.current++; }, [sync.userId]);
-  useEffect(() => { if (!active) { setFolderDialog(null); setFolderConfirm(null); folderEpoch.current++; } }, [active]);
+  useEffect(() => { setChosenFolder(''); setFolderDialog(null); setFolderConfirm(null); setFolderError(''); setLocalNotice(null); folderEpoch.current++; }, [sync.userId]);
+  useEffect(() => { if (!active) { setFolderDialog(null); setFolderConfirm(null); setFolderError(''); setLocalNotice(null); folderEpoch.current++; } }, [active]);
   useEffect(() => { if (chosenFolder && !folders.some(item => item.id === chosenFolder)) setChosenFolder(''); }, [chosenFolder, sync.folders]);
   const folderBusy = folderPending || sync.folderBusy;
   const folderOnline = window.navigator?.onLine !== false;
@@ -81,6 +85,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const snapshot = target => ({ folderId: target.id, revision: target.revision });
   const runFolder = async input => {
     if (!(input.operation === 'create' ? createFolderReady : folderReady) || pendingFolder.current) return;
+    setLocalNotice(null);
     pendingFolder.current = true; setFolderPending(true); setFolderError('');
     const version = folderEpoch.current;
     try {
@@ -129,6 +134,13 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const view = favoriteView(favorites, { filter: chosenFilter, now: Date.now(), released, folderIds: folder?.itemIds });
   const waitingRows = view.filter === 'all' ? view.rows.filter(item => isWaiting(item, Date.now(), released)) : [];
   const visibleRows = waitingRows.length ? view.rows.filter(item => !isWaiting(item, Date.now(), released)) : view.rows;
+  const updateFavorite = (item, remove = false) => {
+    setFolderError('');
+    const next = remove ? removeLocalSeries(item.id) : saveLocalSeries({ id: item.id, title: item.title, favorite: false });
+    setLibrary(next);
+    if (!next.error) setLocalNotice(previous => ({ id: (previous?.id || 0) + 1, text: remove ? '已移除收藏紀錄，下載影片仍會保留。' : '已取消收藏，下載影片仍會保留。' }));
+    else setLocalNotice(null);
+  };
   const row = item => {
     const onlineAt = Number(item.online_time);
     const waiting = isWaiting(item, Date.now(), released);
@@ -138,8 +150,8 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
       <div className="release-row-actions">
         <button type="button" className="btn btn-sm btn-outline" aria-label={`將《${item.title}》加入收藏夾`} disabled={!folderReady || !eligible.some(entry => entry.id === item.id) || !folders.some(target => target.revision && !target.itemIds.includes(item.id))} onClick={() => openAdd(item)}><FolderPlus size={14} />加入收藏夾</button>
         {folder && <button type="button" className="btn btn-sm btn-outline" aria-label={`將《${item.title}》移出收藏夾`} disabled={!editableFolder} onClick={() => requestRemove(item)}>移出收藏夾</button>}
-        <button type="button" className="btn btn-sm btn-outline" aria-label={`取消收藏《${item.title}》`} aria-pressed={true} onClick={() => setLibrary(saveLocalSeries({ id: item.id, title: item.title, favorite: false }))}>取消收藏</button>
-        <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title={sync.mode === 'cloud' && item.cloud_user === sync.userId ? '同时从手机收藏移除，不删除视频文件' : '仅移除本机收藏记录，不删除视频文件'} onClick={() => setLibrary(removeLocalSeries(item.id))}>移除</button>
+        <button type="button" className="btn btn-sm btn-outline" aria-label={`取消收藏《${item.title}》`} aria-pressed={true} onClick={() => updateFavorite(item)}>取消收藏</button>
+        <button type="button" className="btn btn-sm btn-outline" aria-label={`移除《${item.title}》`} title={sync.mode === 'cloud' && item.cloud_user === sync.userId ? '同时从手机收藏移除，不删除视频文件' : '仅移除本机收藏记录，不删除视频文件'} onClick={() => updateFavorite(item, true)}>移除</button>
         <button type="button" className="btn btn-sm" disabled={!onPlay || !!opening || !active} aria-label={`播放《${item.title}》`} onClick={() => { if (waiting) { onUnavailable?.(WAITING_NOTICE); return; } onPlay?.({ seriesId: item.id, title: item.title }); }}>{opening === item.id ? '打开中…' : '播放'}</button>
       </div>
     </li>;
@@ -164,7 +176,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
         <option value="">全部收藏</option>
         {folders.map(item => <option key={item.id} value={item.id}>{item.name}（{item.itemIds.length}）</option>)}
       </select>
-      <button type="button" className="btn btn-sm btn-outline" aria-label="重新整理收藏夾" disabled={!active || !sync.userId || folderBusy || !folderOnline} onClick={async () => { const version = folderEpoch.current; setFolderError(''); const result = await refreshFavoriteFolders(); if (mounted.current && version === folderEpoch.current && !result?.success) setFolderError('收藏夾暫時無法讀取，已保留原有資料。'); }}><RefreshCw size={14} className={folderBusy ? 'folder-refresh-spin' : ''} />{folderBusy ? '整理中…' : '重新整理'}</button>
+      <button type="button" className="btn btn-sm btn-outline" aria-label="重新整理收藏夾" disabled={!active || !sync.userId || folderBusy || !folderOnline} onClick={async () => { const version = folderEpoch.current; setLocalNotice(null); setFolderError(''); const result = await refreshFavoriteFolders(); if (mounted.current && version === folderEpoch.current && !result?.success) setFolderError('收藏夾暫時無法讀取，已保留原有資料。'); }}><RefreshCw size={14} className={folderBusy ? 'folder-refresh-spin' : ''} />{folderBusy ? '整理中…' : '重新整理'}</button>
       <button type="button" className="btn btn-sm" aria-label="新增收藏夾" aria-expanded={folderDialog?.operation === 'create'} aria-controls="favorite-folder-editor" disabled={!createFolderReady} onClick={() => folderDialog?.operation === 'create' ? setFolderDialog(null) : openName('create')}><Plus size={14} />{folderDialog?.operation === 'create' ? '收起新增表單' : '新增收藏夾'}</button>
       {folder && <>
         <button type="button" className="btn btn-sm btn-outline" aria-label="重新命名收藏夾" disabled={!editableFolder} onClick={() => openName('rename')}>改名</button>
@@ -173,8 +185,12 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
       </>}
       <small>{!folderOnline ? '目前離線，收藏夾不會變更；連線後請重新整理。' : sync.mode !== 'cloud' ? '登入並完成同步後，可編輯手機收藏夾。' : '與手機雙向同步；移出或刪除收藏夾不會取消收藏，也不刪影片。'}</small>
     </div>
-    {sync.folderNotice && <p className="folder-notice" role="status">{sync.folderNotice}</p>}
-    {folderError && <p className="release-error" role="alert">{folderError}</p>}
+    {active && (folderError || localNotice || sync.folderNotice && !sync.folderBusy) && <ActionNotice
+      key={folderError ? `error-${folderFailure.id}` : localNotice ? `local-${localNotice.id}` : `folder-${sync.folderNoticeId}`}
+      message={folderError || localNotice?.text || sync.folderNotice}
+      error={Boolean(folderError)}
+      expiresAt={!folderError && !localNotice ? sync.folderNoticeUntil : undefined}
+    />}
     {folderDialog && ['create', 'rename'].includes(folderDialog.operation) && <form id="favorite-folder-editor" className="folder-editor" aria-label={folderDialog.operation === 'create' ? '新增收藏夾名稱' : '修改收藏夾名稱'} onSubmit={submitName}>
       <label htmlFor="folder-name-input">收藏夾名稱</label>
       <input id="folder-name-input" value={folderDialog.name} maxLength={folderRules.MAX_NAME_LENGTH} disabled={!editorReady} autoFocus onChange={event => setFolderDialog({ ...folderDialog, name: event.target.value })} />

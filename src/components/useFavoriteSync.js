@@ -75,7 +75,7 @@ export async function refreshFavoriteFolders() {
     if (version !== folderVersion || userId !== current.userId) return { success: false, error: ACCOUNT_ERROR };
     if (!result?.success || String(result.userId) !== userId || !Array.isArray(result.folders)) throw new Error('UNCONFIRMED');
     const folders = cachedFolders(userId, result.folders);
-    publish({ ...current, folders, foldersStale: false, foldersError: '', folderNotice: `收藏夾已重新整理，共 ${folders.length} 個。` });
+    publish({ ...current, folders, foldersStale: false, foldersError: '', folderNoticeId: version, folderNoticeUntil: Date.now() + 3200, folderNotice: `收藏夾已重新整理，共 ${folders.length} 個。` });
     return { success: true, folders };
   } catch {
     if (version === folderVersion && userId === current.userId) publish({ ...current, foldersError: FOLDER_ERROR, foldersStale: true, folderNotice: '' });
@@ -100,7 +100,7 @@ export async function changeFavoriteFolder(input) {
     if (!result?.success || String(result.userId) !== userId || !Array.isArray(result.folders)) return { success: false, uncertain: result?.uncertain === true, error: folderFailure(result) };
     const folders = cachedFolders(userId, result.folders);
     const notice = { create: '收藏夾已新增並同步到手機。', rename: '收藏夾已改名並同步到手機。', delete: '收藏夾已刪除，手機收藏與影片不受影響。', add: '已加入收藏夾並同步到手機。', remove: '已從收藏夾移除，仍保留在全部收藏。' }[input.operation];
-    publish({ ...current, folders, foldersError: '', foldersStale: false, folderNotice: notice || '', folderBusy: false });
+    publish({ ...current, folders, foldersError: '', foldersStale: false, folderNoticeId: version, folderNoticeUntil: Date.now() + 3200, folderNotice: notice || '', folderBusy: false });
     return { success: true, folderId: result.folderId, deletedId: result.deletedId || '' };
   } catch {
     return { success: false, uncertain: true, error: FOLDER_ERROR };
@@ -180,7 +180,7 @@ export default function useFavoriteSync(loggedIn) {
       const confirmedFolders = freshFolders && !result.foldersError && Array.isArray(result.folders);
       const folders = confirmedFolders ? cachedFolders(userId, result.folders) : (current.userId === userId ? current.folders || [] : cachedFolders(userId));
       const foldersStale = freshFolders ? !confirmedFolders : current.foldersStale;
-      publish({ mode: 'cloud', userId, syncedAt: Date.now(), folders, foldersStale, foldersError: freshFolders ? result.foldersError || (foldersStale ? FOLDER_ERROR : '') : current.foldersError, folderBusy: Boolean(folderAction || folderRefresh), folderNotice: current.userId === userId ? current.folderNotice : '', notice: deferredNotice || plan.notice, error: errors.length ? SYNC_ERROR : '' });
+      publish({ mode: 'cloud', userId, syncedAt: Date.now(), folders, foldersStale, foldersError: freshFolders ? result.foldersError || (foldersStale ? FOLDER_ERROR : '') : current.foldersError, folderBusy: Boolean(folderAction || folderRefresh), folderNoticeId: current.userId === userId ? current.folderNoticeId : 0, folderNoticeUntil: current.userId === userId ? current.folderNoticeUntil : 0, folderNotice: current.userId === userId ? current.folderNotice : '', notice: deferredNotice || plan.notice, error: errors.length ? SYNC_ERROR : '' });
     } catch (error) {
       if (valid()) publish({ mode: 'local', userId: user.current, folders: cachedFolders(user.current), error: SYNC_ERROR });
     } finally {

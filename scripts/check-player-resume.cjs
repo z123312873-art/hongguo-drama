@@ -135,6 +135,17 @@ module.exports = { mount };
 if (require.main === module) (async () => {
   let failures = 0;
   const test = async (name, fn) => { if (process.argv[2] && !name.includes(process.argv[2])) return; try { await fn(); console.log(`PASS ${name}`); } catch (e) { failures++; console.error(`FAIL ${name}: ${e.stack}`); } };
+  await test('prefetch waits for actual playback and still skips locked episodes', async () => {
+    const ui = mount({ episodeCount: 3, lockedIndexes: [2], props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } });
+    await ui.flush();
+    assert.equal(ui.prepares.some(row => row.prefetch), false);
+    ui.metadata(); await ui.flush();
+    assert.equal(ui.prepares.filter(row => row.prefetch).length, 1);
+    assert.equal(ui.prepares.find(row => row.prefetch).vidIndex, 3);
+    ui.find(node => node.type === 'video').props.onPlaying({ currentTarget: ui.media }); await ui.flush();
+    assert.equal(ui.prepares.filter(row => row.prefetch).length, 1);
+    ui.unmount();
+  });
   await test('download finalize events preserve progress and terminal errors offer a separate download retry', async () => {
     let onProgress, retried, failed = false;
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, apiOverrides: {
@@ -204,7 +215,7 @@ if (require.main === module) (async () => {
     const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } } }); await ui.flush();
     ui.error(4); await ui.flush();
     assert.equal(ui.prepares.filter(p => p.force).length, 1, 'unavailable source reconnects once');
-    assert.ok(ui.prepares.some(p => p.prefetch), 'the following episode is prepared while this one plays');
+    assert.equal(ui.prepares.some(p => p.prefetch), false, 'an unplayable source must not start next-episode work');
     ui.error(4); await ui.flush();
     assert.equal(ui.prepares.filter(p => p.force).length, 1, 'reconnect must remain bounded');
     assert.equal(ui.transcodes.length, 0, 'unavailable source is not proof of codec failure');
