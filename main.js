@@ -809,9 +809,16 @@ async function executeHongguoDownload(task) {
   const source = axios.CancelToken.source();
   task.cancelSource = source;
   let tmpPath, writer;
+  const updatePhase = (phase, data = {}) => {
+    task.phase = phase;
+    task.phaseSeconds = Number.isFinite(data.seconds) ? Math.max(0, data.seconds) : 0;
+    task.phaseBytes = Number.isFinite(data.bytes) ? Math.max(0, data.bytes) : 0;
+    sendToRenderer('download-progress', { id, progress: task.progress, phase, phaseSeconds: task.phaseSeconds, phaseBytes: task.phaseBytes });
+  };
   try {
     task.status = 'downloading'; task.cancelled = false; task.progress = 0; delete task.retryAt;
     delete task.qualityNotice; delete task.actualQuality;
+    updatePhase('downloading');
     sendToRenderer('download-progress', { id, progress: 0, receivedBytes: 0, totalBytes: 0, qualityNotice: '', actualQuality: null });
     const settings = getCurrentSettings();
     // Old and retried tasks retain their original policy, independent of new defaults.
@@ -871,6 +878,7 @@ async function executeHongguoDownload(task) {
       source.token.throwIfRequested();
       notifyQuality(Math.min(Number(playInfo.width), Number(playInfo.height)));
       task.progress = 0; task.receivedBytes = 0; task.totalBytes = 0;
+      updatePhase('downloading');
       sendToRenderer('download-progress', { id, progress: 0, receivedBytes: 0, totalBytes: 0 });
       if (playInfo.format === 'hls') {
         await prepareHlsFile(playInfo,tmpPath,{cancelToken:source.token,onProgress:received => { task.receivedBytes = received; sendToRenderer('download-progress',{id,progress:0,receivedBytes:received,totalBytes:0}); }});
@@ -901,7 +909,10 @@ async function executeHongguoDownload(task) {
       if (playInfo.contentKey) {
         const decodedPath = tmpPath + '.decoded';
         try {
-          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token, codec: playInfo.codec, transcode: playInfo.transcode });
+          const phase = playInfo.codec === 'bytevc2' || playInfo.transcode === 'bytevc2' ? 'transcoding' : 'finalizing';
+          updatePhase(phase);
+          await decryptContentKeyFile(tmpPath, decodedPath, playInfo.contentKey, { cancelToken: source.token, codec: playInfo.codec, transcode: playInfo.transcode, onProgress: data => updatePhase(phase, data) });
+          updatePhase('verifying');
           task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           if (allowLowerQuality) notifyQuality(Number.parseInt(task.actualQuality, 10));
           source.token.throwIfRequested();
@@ -914,7 +925,9 @@ async function executeHongguoDownload(task) {
         // Decrypt to another temporary file; never expose partial data as a completed MP4.
         const decodedPath = tmpPath + '.decoded';
         try {
+          updatePhase('finalizing');
           await decryptInWorker({ srcPath: tmpPath, dstPath: decodedPath, key }, { cancelToken: source.token });
+          updatePhase('verifying');
           task.actualQuality = await verifyDownloadQuality(decodedPath, acceptedQuality);
           if (allowLowerQuality) notifyQuality(Number.parseInt(task.actualQuality, 10));
           source.token.throwIfRequested();
@@ -923,6 +936,7 @@ async function executeHongguoDownload(task) {
         finally { try { fs.unlinkSync(decodedPath); } catch (_) {} }
         fs.unlinkSync(tmpPath);
       } else {
+        updatePhase('verifying');
         task.actualQuality = await verifyDownloadQuality(tmpPath, acceptedQuality);
         if (allowLowerQuality) notifyQuality(Number.parseInt(task.actualQuality, 10));
         source.token.throwIfRequested();
@@ -2139,6 +2153,9 @@ ipcMain.handle('get-series-episodes', async (event, seriesId) => {
           error: t?.error || '',
           retryAt: t?.retryAt || null,
           actualQuality: t?.actualQuality || null,
+          phase: status === 'downloading' ? t?.phase || 'downloading' : '',
+          phaseSeconds: t?.phaseSeconds || 0,
+          phaseBytes: t?.phaseBytes || 0,
           status,
           progress,
           fileSize,
@@ -2782,7 +2799,7 @@ function startContentKeyStream(playInfo, signal, capture = null) {
 }
 
 /** App CENC uses native FFmpeg for both senc and saiz/saio layouts. Never log key/args. */
-async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode, profile } = {}) {
+async function decryptContentKeyFile(input, output, contentKey, { signal, cancelToken, codec, transcode, profile, onProgress, timeoutMs, idleTimeoutMs } = {}) {
   if (typeof contentKey !== 'string' || !/^[a-f\d]{32}$/i.test(contentKey)) throw new Error('片源解密密钥格式无效');
   if (signal?.aborted) throw new Error('已取消媒体解密');
   cancelToken?.throwIfRequested();
@@ -2797,37 +2814,13 @@ async function decryptContentKeyFile(input, output, contentKey, { signal, cancel
       : require('./src/native/transcode-args').bytevc2FileArgs(contentKey, input, output))
     : ['-y', '-hide_banner', '-loglevel', 'error', '-decryption_key', contentKey, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output];
   try {
-    await new Promise((resolve, reject) => {
-      const { spawn } = require('child_process');
-      const child = spawn(executable, args,
-      { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-      if (profile === 'prefetch' && child.pid) {
-        try { require('os').setPriority(child.pid, 10); } catch (_) { /* 播放中的那一集仍用一般優先順序。 */ }
-      }
-      let cancelled = false, killTimer;
-      const abort = () => {
-        if (cancelled) return;
-        cancelled = true; child.kill('SIGTERM');
-        killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
-      };
-      const cleanup = () => {
-        clearTimeout(killTimer);
-        signal?.removeEventListener('abort', abort);
-        cancelToken?.unsubscribe(abort);
-      };
-      // Discard native diagnostics: they may contain private input paths or key material.
-      child.stderr.on('data', () => {});
-      signal?.addEventListener('abort', abort, { once: true });
-      cancelToken?.subscribe(abort);
-      if (signal?.aborted || cancelToken?.reason) abort();
-      child.once('error', () => { cleanup(); reject(new Error('无法启动内置 FFmpeg')); });
-      child.once('close', code => {
-        cleanup();
-        if (cancelled) reject(new Error('已取消媒体解密'));
-        else if (code !== 0) reject(new Error(`媒体解密失败（FFmpeg 退出码 ${code}），请重新获取片源后重试`));
-        else resolve();
-      });
-    });
+    const { spawn } = require('child_process');
+    const child = spawn(executable, ['-progress', 'pipe:1', '-nostats', ...args],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (profile === 'prefetch' && child.pid) {
+      try { require('os').setPriority(child.pid, 10); } catch (_) {}
+    }
+    await require('./src/native/media-finalize').waitForMediaProcess(child, { signal, cancelToken, onProgress, timeoutMs, idleTimeoutMs });
     if (signal?.aborted) throw new Error('已取消媒体解密');
     cancelToken?.throwIfRequested();
     if ((await fsp.stat(output)).size === 0) throw new Error('媒体解密没有生成可用文件');

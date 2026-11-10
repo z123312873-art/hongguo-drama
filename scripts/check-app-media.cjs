@@ -27,7 +27,7 @@ function load(url, mode = 'ok', key = contentKey) {
   const childProcess = { spawn: (file, args) => {
     assert.equal(file, '/bundled/ffmpeg');
     assert.equal(args[args.indexOf('-decryption_key') + 1], contentKey);
-    assert.ok(args.includes('copy'), 'remux without lossy transcode');
+    assert.ok(args.includes('copy') || args.includes('libx264'), 'copy compatible media or transcode a newer codec');
     const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new EventEmitter();
     child.kill = () => { child.killed = true; child.stdout.end(); setImmediate(() => child.emit('close', null, 'SIGTERM')); return true; };
     children.push(child);
@@ -42,7 +42,7 @@ function load(url, mode = 'ok', key = contentKey) {
       return child;
     }
     decrypting.push(child);
-    if (mode === 'wait') fs.writeFileSync(output, 'partial');
+    if (mode === 'wait' || mode === 'stall-first' && decrypting.length === 1) fs.writeFileSync(output, 'partial');
     else if (mode === 'slow-decrypt') {
       const finish = releaseDecrypt;
       releaseDecrypt = () => { finish(); if (child.killed) return; fs.writeFileSync(output, clearBytes); child.emit('close', 0); };
@@ -53,14 +53,14 @@ function load(url, mode = 'ok', key = contentKey) {
     });
     return child;
   } };
-  const context = vm.createContext({ require: n => n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === 'child_process' || n === 'node:child_process' ? childProcess : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root: dir }) } : req(n), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
+  const context = vm.createContext({ require: n => n === './src/native/media-finalize' && mode === 'stall-first' ? { waitForMediaProcess: (child, options) => req(n).waitForMediaProcess(child, { ...options, idleTimeoutMs: 20, timeoutMs: 200, killAfterMs: 10 }) } : n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === 'child_process' || n === 'node:child_process' ? childProcess : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root: dir }) } : req(n), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   require('./fixtures/trusted-ipc.cjs')(context, handlers);
   // These transport/decryption fixtures are synthetic; real media validity is checked separately.
   context.probeVideoInfo = async () => ({ w: 1080, h: 1920, duration: 12, codec: 'h264' });
   context.resolveFfmpeg = () => '/fixture/ffprobe';
   context.resolveFfmpeg = () => '/bundled/ffmpeg'; context.registerStreamProtocol();
-  return { dir, handlers, protocols, children, context, decrypting: () => decrypting, finishDecrypt: () => releaseDecrypt() };
+  return { dir, handlers, protocols, children, context, native, decrypting: () => decrypting, finishDecrypt: () => releaseDecrypt() };
 }
 (async () => {
   let hits = 0;
@@ -164,6 +164,36 @@ function load(url, mode = 'ok', key = contentKey) {
     await h.context.executeHongguoDownload(task);
     assert.equal(task.status, 'completed'); assert.deepEqual(fs.readFileSync(task.savePath), clearBytes);
     assert.deepEqual(fs.readdirSync(h.dir), ['final.mp4']);
+  });
+  await check('stalled native download uses an available compatible source without publishing a partial file', async () => {
+    const h = load(url, 'stall-first'), events = [];
+    h.context.resolveLibrempeg = () => '/bundled/ffmpeg';
+    h.context.sendToRenderer = (channel, data) => events.push({ channel, ...data });
+    h.native.fetchPlayUrlSingle = async () => ({ url, contentKey, codec: 'bytevc2', transcode: 'bytevc2', width: 1080, height: 1920, variants: [{ url: url + '?compatible', contentKey, codec: 'h264', width: 1080, height: 1920 }] });
+    const task = { id: 'fallback', type: 'hongguo', filename: 'fallback.mp4', customDir: h.dir, downloadQuality: '1080p', hongguoInfo: { vid: '12345' } };
+    await h.context.executeHongguoDownload(task);
+    assert.equal(task.status, 'completed'); assert.equal(task.progress, 100);
+    assert.equal(h.children[0].killed, true); assert.equal(h.children.length, 2);
+    assert.ok(events.some(event => event.phase === 'transcoding'));
+    assert.ok(events.some(event => event.phase === 'finalizing'));
+    assert.deepEqual(fs.readdirSync(h.dir), ['fallback.mp4']);
+    assert.deepEqual(fs.readFileSync(task.savePath), clearBytes);
+  });
+  await check('native timeout is visible, cleans partial files and a manual queue retry can finish', async () => {
+    const h = load(url, 'stall-first'), events = [];
+    h.context.sendToRenderer = (channel, data) => events.push({ channel, ...data });
+    const task = { id: 'retry-finalize', type: 'hongguo', filename: 'retry.mp4', customDir: h.dir, downloadQuality: 'auto', hongguoInfo: { vid: 'strict' } };
+    await h.context.executeHongguoDownload(task);
+    assert.equal(task.status, 'failed'); assert.match(task.error, /超时.*重试/);
+    assert.ok(!task.error.includes(contentKey)); assert.equal(task.retryAt, undefined);
+    assert.deepEqual(fs.readdirSync(h.dir), []);
+    assert.ok(!events.some(event => event.channel === 'download-completed'));
+    h.context.fixtureTask = task; vm.runInContext('downloadTasks.push(fixtureTask)', h.context); delete h.context.fixtureTask;
+    assert.equal((await h.handlers['retry-task']({}, task.id)).success, true);
+    await until(() => task.status === 'completed', 'retry should complete the same task');
+    assert.equal(task.progress, 100); assert.equal(task.error, undefined);
+    assert.deepEqual(fs.readFileSync(task.savePath), clearBytes);
+    assert.deepEqual(fs.readdirSync(h.dir), ['retry.mp4']);
   });
   await check('cancel during native decryption kills child and removes partial output', async () => {
     const h = load(url, 'wait'); const prepared = await h.handlers['prepare-online-play']({}, { vid: 'cancel', requestId: 'cancel' });

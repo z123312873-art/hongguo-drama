@@ -39,3 +39,7 @@
 .release-reserved { margin-top: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary); }
 .release-reserved summary { cursor: pointer; font-weight: 600; }
 .release-reserved > p { color: var(--text-muted); margin: 10px 0; }
+
+.folder-refresh-spin { animation: folder-refresh-turn 0.8s linear infinite; }
+@keyframes folder-refresh-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .folder-refresh-spin { animation: none; } }
