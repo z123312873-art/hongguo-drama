@@ -42,12 +42,11 @@ const newestFirst = (a, b) => {
   return right - left || String(a.title).localeCompare(String(b.title), 'zh-CN') || String(a.id).localeCompare(String(b.id));
 };
 
-// Category buttons appear only when some favorite has that category, so no button leads to an empty
-// list by construction. A chosen category that disappears falls back to all.
+// Keep the same filters visible even when a category is empty or the account has not loaded yet.
 export function favoriteView(items, { filter = 'all', now = Date.now(), released = {} } = {}) {
   const favorites = (Array.isArray(items) ? items : []).filter(item => item && item.favorite);
   const counts = Object.fromEntries(FILTERS.map(({ id }) => [id, favorites.filter(item => matches(item, id, now, released)).length]));
-  const filters = FILTERS.filter(({ id }) => !FAVORITE_CATEGORIES.includes(id) || counts[id] > 0).map(row => ({ ...row, count: counts[row.id] }));
+  const filters = FILTERS.map(row => ({ ...row, count: counts[row.id] }));
   const chosen = filters.some(row => row.id === filter) ? filter : 'all';
   return { filter: chosen, filters, rows: favorites.filter(item => matches(item, chosen, now, released)).sort(newestFirst), total: favorites.length };
 }

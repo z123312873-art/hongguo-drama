@@ -50,7 +50,7 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
         if (!cloud.favIgnore) cloud.favorites = change.video_shelf_operate_type === 0 ? [...new Set([...cloud.favorites, change.book_id])] : cloud.favorites.filter(id => id !== change.book_id);
         return { code: 0, data: {} };
       }
-      if (method === 'GET') return { code: 0, data: { data_list: cloud.rows, has_more: false } };
+      if (method === 'GET') return { code: 0, data: { data_list: cloud.rows, has_more: false, total: cloud.reportedTotal } };
       const update = JSON.parse(body.replace(/:(\d{16,})/g, ':"$1"')).update_datas[0];
       const id = String(update.book_id);
       cloud.rows = cloud.rows.filter(item => item.book_id_str !== id || (update.is_delete && cloud.ignoreDelete) || (!update.is_delete && cloud.dropUploads));
@@ -236,5 +236,44 @@ test('favorites: signed out stays local; signed in lists the account with names;
     const failed = await h.call('cloud-favorites');
     assert.equal(failed.mode, 'local');
     assert.match(failed.error, /HTTP 500/);
+  } finally { h.cleanup(); }
+});
+
+
+test('a failed refresh never reconciles a stale snapshot or permits account deletion', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    const extra = '7300000000000000998';
+    h.playback()[extra] = { watched: true, vid_index: 2, currentTime: 1, updatedAt: Date.now(), cloudSynced: '1000000000000001', remote: { title: '刚同步的记录', total: 10 } };
+    const progress = () => JSON.stringify(Object.entries(h.playback()).map(([id, r]) => [id, r.vid_index, r.currentTime, r.updatedAt, r.completedEpisode]));
+    const before = progress();
+    h.cloud.fail = 'HTTP 503';
+    await h.call('refresh-watch-history');
+    assert.equal(progress(), before, 'the cached older list cannot delete a newer synced record after a failed request');
+    assert.equal((await h.call('remove-watch-history', ONE)).success, false);
+    assert.ok(h.playback()[extra]);
+  } finally { h.cleanup(); }
+});
+
+test('reported account total is disclosed separately; visible tab counts use actual records', async () => {
+  const h = load({ server: { reportedTotal: 14 } });
+  try {
+    const result = await h.call('get-watch-history');
+    assert.equal(result.results.length, 3);
+    assert.match(result.sync.notice, /14.*3/);
+  } finally { h.cleanup(); }
+});
+
+test('existing same-time synced history repairs its completed tab without inventing newer progress', async () => {
+  const h = load({ server: { rows: [row(TWO, { vid_index: 10, current_play_position: 0, duration: 12000000, read_timestamp_ms: 2500 })] } });
+  try {
+    h.playback()[TWO] = { watched: true, vid_index: 10, currentTime: 0, updatedAt: 2500, cloudSynced: '1000000000000001', remote: { title: '剧2', total: 10 } };
+    const result = await h.call('get-watch-history');
+    assert.equal(result.results.find(r => r.series_id === TWO).completed, true);
+    assert.equal(h.playback()[TWO].completedEpisode, 10);
+    assert.equal(h.playback()[TWO].currentTime, 0);
+    assert.equal(h.playback()[TWO].updatedAt, 2500);
+    assert.equal(result.results.filter(r => r.completed).length, 1);
   } finally { h.cleanup(); }
 });

@@ -65,3 +65,12 @@ test('set is confirmed by reading the list again', async () => {
   await assert.rejects(setFavorite(stuck.request, '1', 'hema:1', true), /无法同步/);
   assert.equal(stuck.calls.filter(c => c.method === 'POST').length, 2, 'an invalid id sends nothing');
 });
+
+
+test('animated favorites without an AI marker are comic; absent and unknown types stay uncategorized', () => {
+  assert.equal(parseFavorites(list([{series_id: A, content_type: 1004}]))[0].category, 'comic');
+  assert.equal(parseFavorites(list([{series_id: A, content_type: '1004'}]))[0].category, 'comic');
+  assert.equal(parseFavorites(list([{series_id: A, content_type: 1004, video_category_type: 'ai_video'}]))[0].category, 'ai');
+  for (const content_type of [undefined, 0, 9999]) assert.equal(parseFavorites(list([{series_id: A, content_type}]))[0].category, '');
+  assert.equal(parseFavorites(list([{series_id: A, content_type: 1004, video_category_type: 'future_kind'}]))[0].category, '');
+});

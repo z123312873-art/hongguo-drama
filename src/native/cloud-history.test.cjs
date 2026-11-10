@@ -41,13 +41,13 @@ test('rows: seconds, cover, deleted and malformed entries', () => {
   assert.equal(cloudRow(raw('7300000000000000001', { vid_index: 90, episode_cnt: 80 })).total, 90, 'never shows more watched than total');
 });
 
-test('finished: last episode near its end only; unknown duration or total never counts', () => {
-  assert.equal(finished(80, 80, 89, 90), true);
-  assert.equal(finished(80, 80, 60, 90), false);
-  assert.equal(finished(79, 80, 90, 90), false);
-  assert.equal(finished(80, 80, 90, 0), false);
-  assert.equal(finished(80, 0, 90, 90), false);
-  assert.equal(cloudRow(raw('7300000000000000001', { vid_index: 80, current_play_position: 89000 })).completed, true);
+test('finished: account classification uses the last episode, not series duration', () => {
+  assert.equal(finished(80, 80), true);
+  assert.equal(finished(79, 80), false);
+  for (const [index, total] of [[80, 0], [0, 80], [NaN, 80], [80, Infinity], [1.5, 2]]) assert.equal(finished(index, total), false);
+  assert.equal(cloudRow(raw('7300000000000000001', { vid_index: 80, current_play_position: 0, duration: 9000000 })).completed, true);
+  assert.equal(cloudRow(raw('7300000000000000001', { vid_index: 80, duration: 0 })).completed, true);
+  assert.equal(cloudRow(raw('7300000000000000001', { vid_index: 79, current_play_position: 9000000, duration: 9000000 })).completed, false);
 });
 
 test('fetch: walks every page with next_offset, newest row per drama, sorted newest first', async () => {
@@ -87,6 +87,8 @@ test('update body keeps 19-digit ids exact as JSON numbers', () => {
   assert.match(body, /"vid":7400000000000000999/);
   assert.match(body, /"current_play_position":61200/);
   assert.match(body, /"is_delete":false/);
+  assert.match(body, /"is_multi_season":0/);
+  assert.match(updateBody({ series_id: '7300000000000000123', vid_index: 1, multiSeason: true }, 1000, false), /"is_multi_season":1/);
   assert.doesNotMatch(body, /\\u0000|"7300000000000000123"/);
   const removed = updateBody({ series_id: '7300000000000000123', vid_index: 4 }, 1_700_000_100_000, true);
   assert.match(removed, /"is_delete":true/);
@@ -104,7 +106,9 @@ test('upload validates before sending', async () => {
 
 test('delete is confirmed by reading the list again', async () => {
   const gone = server([page([raw('7300000000000000002')])]);
-  const after = await deleteEntry(gone.request, { series_id: '7300000000000000001', vid_index: 3 });
+  let summary;
+  const after = await deleteEntry(gone.request, { series_id: '7300000000000000001', vid_index: 3 }, Date.now(), { onSummary: value => { summary = value; } });
+  assert.equal(summary.returnedCount, after.length);
   assert.deepEqual(after.map(r => r.series_id), ['7300000000000000002']);
   assert.equal(gone.calls[0].path, UPDATE_PATH);
   const stays = server([page([raw('7300000000000000001')])]);
@@ -175,4 +179,36 @@ test('records that are not watched yet are left alone', () => {
   const plan = reconcileHistory({ playback: { '7300000000000000001': { lastCheckedAt: 1 } }, cloudRows: [row('7300000000000000002')], userId: U });
   assert.deepEqual(plan.toUpload, []);
   assert.deepEqual(plan.playback['7300000000000000001'], { lastCheckedAt: 1 });
+});
+
+
+test('refresh repairs completion saved before the classification update, even at the same timestamp', () => {
+  const id = '7300000000000000001';
+  const remote = row(id, { vid_index: 80, current_play_position: 0, duration: 9000000 });
+  const plan = reconcileHistory({ playback: { [id]: local({ vid_index: 80, updatedAt: remote.updatedAt, cloudSynced: U }) }, cloudRows: [remote], userId: U });
+  assert.equal(plan.playback[id].completedEpisode, 80);
+  assert.deepEqual(plan.toUpload, []);
+});
+
+test('a newer incomplete account progress clears stale completion; a newer local progress still wins', () => {
+  const id = '7300000000000000001';
+  const remote = row(id, { vid_index: 2, read_timestamp_ms: 9000 });
+  const plan = reconcileHistory({ playback: { [id]: local({ completedEpisode: 80, updatedAt: 1000 }) }, cloudRows: [remote], userId: U });
+  assert.equal(plan.playback[id].completedEpisode, undefined);
+  const localNewer = reconcileHistory({ playback: { [id]: local({ vid_index: 80, completedEpisode: 80, updatedAt: 20000 }) }, cloudRows: [remote], userId: U });
+  assert.equal(localNewer.playback[id].completedEpisode, 80);
+  assert.deepEqual(localNewer.toUpload, [id]);
+});
+
+
+test('account summary is separate from actual unique rows; totals never create phantom history', async () => {
+  let summary;
+  const payload = page([raw('7300000000000000001'), raw('7300000000000000002')]);
+  payload.data.total = 15;
+  const rows = await fetchHistory(server([payload]).request, { onSummary: value => { summary = value; } });
+  assert.equal(rows.length, 2);
+  assert.deepEqual(summary, { reportedTotal: 15, returnedCount: 2 });
+  let called = false;
+  await assert.rejects(fetchHistory(server([page([], true)]).request, { onSummary: () => { called = true; } }));
+  assert.equal(called, false, 'a partial or failed read never becomes a complete snapshot');
 });

@@ -30,14 +30,14 @@ test('playable and not-yet-online split; online by date but unconfirmed still wa
   assert.equal(isWaiting({ id: '9', online_time: 'x' }, NOW), false);
 });
 
-test('category buttons only for categories present; counts match; vanished category falls back to all', () => {
+test('all category buttons remain visible, including an empty comic filter', () => {
   const items = [fav('1', { category: 'real' }), fav('2', { category: 'ai' }), fav('3', { category: 'ai' }), fav('4', { category: 'bogus' })];
   const view = favoriteView(items, { filter: 'ai', now: NOW });
-  assert.deepEqual(view.filters.map(f => [f.id, f.count]), [['all', 4], ['playable', 4], ['waiting', 0], ['real', 1], ['ai', 2]]);
+  assert.deepEqual(view.filters.map(f => [f.id, f.count]), [['all', 4], ['playable', 4], ['waiting', 0], ['real', 1], ['ai', 2], ['comic', 0]]);
   assert.deepEqual(view.rows.map(r => r.id), ['2', '3']);
   const gone = favoriteView(items, { filter: 'comic', now: NOW });
-  assert.equal(gone.filter, 'all');
-  assert.equal(gone.rows.length, 4);
+  assert.equal(gone.filter, 'comic');
+  assert.equal(gone.rows.length, 0);
   assert.equal(favoriteView(items, { filter: 'nonsense', now: NOW }).filter, 'all');
 });
 
@@ -46,7 +46,7 @@ test('empty and bad input', () => {
     const view = favoriteView(input, { now: NOW });
     assert.deepEqual(view.rows, []);
     assert.equal(view.total, 0);
-    assert.deepEqual(view.filters.map(f => f.id), ['all', 'playable', 'waiting']);
+    assert.deepEqual(view.filters.map(f => f.id), ['all', 'playable', 'waiting', 'real', 'ai', 'comic']);
   }
 });
 
