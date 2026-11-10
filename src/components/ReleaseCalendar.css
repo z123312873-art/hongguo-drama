@@ -22,3 +22,8 @@
 .release-error { color: var(--danger); margin-top: 16px; line-height: 1.7; overflow-wrap: anywhere; }
 .release-error .btn { margin-top: 8px; }
 @media (max-width: 650px) { .release-row { flex-wrap: wrap; gap: 10px; } .release-row-actions { margin-left: auto; } }
+
+.release-folders { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+.release-folders label { display: inline-flex; align-items: center; gap: 6px; }
+.release-folders select { max-width: 100%; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; background: var(--bg-secondary); color: var(--text-primary); }
+.release-folders small { width: 100%; color: var(--text-secondary); }

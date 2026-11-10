@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { publicDateKey, readLocalLibrary, removeLocalSeries, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
 import { useFavoriteSyncStatus } from './useFavoriteSync';
 import { favoriteView, isWaiting } from '../favoriteView.mjs';
+import { RefreshCw, Shield, Folder } from './icons';
 import './ReleaseCalendar.css';
 
 const WAITING_NOTICE = '您目前的预约收藏短剧，尚未上线，请耐心等候';
@@ -15,6 +16,7 @@ function onlineDateText(timestamp) {
 export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', active = true }) {
   const [library, setLibrary] = useState(readLocalLibrary);
   const [chosenFilter, setChosenFilter] = useState('all');
+  const [chosenFolder, setChosenFolder] = useState('');
   const [catalogCovers, setCatalogCovers] = useState(() => new Map());
   const [released, setReleased] = useState({});
   const sync = useFavoriteSyncStatus();
@@ -51,7 +53,10 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
     return () => { cancel = true; };
   }, [active, favorites]);
   const inAccount = sync.mode === 'cloud' ? favorites.filter(item => item.cloud_user === sync.userId).length : 0;
-  const view = favoriteView(favorites, { filter: chosenFilter, now: Date.now(), released });
+  const folders = Array.isArray(sync.folders) ? sync.folders : [];
+  const folder = folders.find(item => item.id === chosenFolder);
+  useEffect(() => { setChosenFolder(''); }, [sync.userId]);
+  const view = favoriteView(favorites, { filter: chosenFilter, now: Date.now(), released, folderIds: folder?.itemIds });
   const row = item => {
     const onlineAt = Number(item.online_time);
     const waiting = isWaiting(item, Date.now(), released);
@@ -68,13 +73,25 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
 
   return <section className="release-calendar">
     <header><h2>收藏清单</h2><p className="page-description">只列出在海报上点过爱心的剧，最近收藏的在前。日期是按下爱心的当天。</p></header>
-    <p className="page-description" role="status">{sync.mode === 'cloud' ? '已登录：可播放的收藏与手机收藏同一份；尚未上线的只留在这台电脑。' : '未同步：收藏只保存在这台电脑。'}</p>
-    {sync.error && <p className="release-error" role="status">{sync.error}</p>}
-    {sync.notice && <p className="page-description" role="status">{sync.notice}</p>}
+    <div className="record-summary" aria-label="收藏同步說明">
+      <div><RefreshCw size={18} /><p><strong>{sync.mode === 'cloud' ? '手機收藏自動合併' : '收藏保存在這臺電腦'}</strong><span>{sync.mode === 'cloud' ? '可播放的收藏會同步；尚未上線或暫時無法加入帳號的，先留在本機。' : '登入後，可播放的收藏會與手機合併。'}</span></p></div>
+      <div><Shield size={18} /><p><strong>取消收藏，不刪影片</strong><span>{sync.mode === 'cloud' ? '已同步的收藏，取消時也會從手機移除。' : '下載的影片不受影響。'}</span></p></div>
+      {sync.notice && <div role="status"><Folder size={18} /><p>{sync.notice}</p></div>}
+    </div>
+    {sync.error && <p className="release-error" role="status">手機收藏暫時無法同步，這臺電腦的收藏仍會保留。請稍後重試。</p>}
+    {sync.foldersError && <p className="page-description" role="status">收藏夾暫時無法讀取，仍可查看全部收藏。</p>}
     {library.error && <div className="release-error" role="alert"><p>{library.error}</p><button type="button" className="btn btn-sm" onClick={() => setLibrary(readLocalLibrary())}>重新读取</button></div>}
     <div className="release-toolbar">
       <p className="release-coverage">收藏 {favorites.length} 部{sync.mode === 'cloud' && favorites.length !== inAccount ? `（手机收藏 ${inAccount} 部，其余只在这台电脑）` : ''}</p>
     </div>
+    {folders.length > 0 && <div className="release-folders">
+      <label htmlFor="favorite-folder"><Folder size={16} />收藏夾</label>
+      <select id="favorite-folder" value={folder?.id || ''} onChange={event => setChosenFolder(event.target.value)}>
+        <option value="">全部收藏</option>
+        {folders.map(item => <option key={item.id} value={item.id}>{item.name}（{favorites.filter(entry => item.itemIds.includes(entry.id)).length}）</option>)}
+      </select>
+      <small>可查看手機收藏夾；新增、改名、刪除及移動請在手機操作。</small>
+    </div>}
     {favorites.length > 0 && <div className="release-filter" role="group" aria-label="筛选收藏">{view.filters.map(option => <button key={option.id} type="button" aria-pressed={view.filter === option.id} onClick={() => setChosenFilter(option.id)}>{option.label} {option.count}</button>)}</div>}
     {!library.error && !favorites.length && <div className="release-empty"><h3>还没有收藏</h3><p>在「发现短剧」的海报右下角点爱心，这部剧就会出现在这里。</p></div>}
     {favorites.length > 0 && !view.rows.length && <p className="page-description" role="status">这个筛选下没有收藏。</p>}

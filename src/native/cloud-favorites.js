@@ -77,4 +77,8 @@ async function setFavorite(request, userId, id, on, now = Date.now()) {
   return after;
 }
 
-module.exports = { parseFavorites, fetchFavorites, setFavorite, updateBody, readId, LIST_PATH, UPDATE_PATH };
+function unavailable(error) {
+  return String(error?.code || '') === '101109' || /^CODE 101109$/.test(String(error?.message || ''));
+}
+
+module.exports = { unavailable, parseFavorites, fetchFavorites, setFavorite, updateBody, readId, LIST_PATH, UPDATE_PATH };

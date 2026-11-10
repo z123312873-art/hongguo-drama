@@ -78,10 +78,11 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
   `, context);
   return { fetch: context.module.exports.fetchAppPlayUrl, calls, signedDeviceIds };
 }
-function loadApp(axios) {
+function loadApp(axios, { videoTab = false } = {}) {
   const context = { Buffer, URL, AbortSignal, module: { exports: {} },
     require: name => {
-      if (name === 'axios') return axios;
+      if (name === 'axios') return config => !videoTab && String(config.url).includes('/reading/bookapi/video_tab/')
+        ? Promise.resolve({ status: 200, headers: {}, data: JSON.stringify({ code: 1 }) }) : axios(config);
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
@@ -120,6 +121,44 @@ const appRows = videoList => fixture({ videoList, encrypted: false }).fetch('11'
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
 const checks = [
+  ['registered video-tab GETs carry the exact per-lookup anonymous identity and never account credentials', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    device.resetPlaybackDevice();
+    let registered = 0;
+    const ids = [];
+    const media = mediaUrl('registered');
+    try {
+      const app = loadApp(async config => {
+        if (String(config.url).includes('device_register')) {
+          registered += 1;
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: String(1000000000000000 + registered), install_id_str: String(2000000000000000 + registered), code: 0 }) };
+        }
+        const query = new URL(config.url).searchParams;
+        assert.ok(String(config.url).includes('/reading/bookapi/video_tab/'));
+        assert.equal(config.method, 'GET');
+        const id = query.get('device_id');
+        assert.ok(/^100000000000000[123]$/.test(id));
+        assert.equal(query.get('iid'), id.replace(/^1/, '2'));
+        assert.equal(query.get('video_id'), '11');
+        assert.equal(query.get('version_code'), '73532');
+        assert.equal(config.headers['Cookie'], undefined);
+        assert.equal(config.headers['X-Tt-Token'], undefined);
+        assert.equal(query.get('user_id'), null);
+        for (const name of ['x-gorgon', 'x-medusa', 'x-helios']) assert.ok(config.headers[name]);
+        ids.push(id);
+        return { status: 200, headers: {}, data: JSON.stringify({ code: 0, data: { video_model_data: { '11': { video_model: JSON.stringify({ video_list: [{ main_url: media, codec_type: 'h264', vwidth: 1080, vheight: 1920 }] }) } } } }) };
+      }, { videoTab: true });
+      await app.fetchAppPlayUrl('11', { quality: '1080p' });
+      const results = await Promise.all([app.fetchAppPlayUrl('11'), app.fetchAppPlayUrl('11')]);
+      assert.ok(results.every(result => result.url === media));
+      assert.equal(new Set(ids).size, 3);
+      assert.equal(registered, 3);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
+
   ['sequential and concurrent lookups isolate request identities and signed device fields', async () => {
     const f = fixture();
     await f.fetch('11');
@@ -134,7 +173,7 @@ const checks = [
       assert.equal(new Set(ids).size, requests.length, `${field} must not be reused across lookups`);
       if (field === 'device_id') assert.deepEqual(f.signedDeviceIds.filter(id => ids.includes(id)), ids, 'playback URL and signed device fields must match');
     }
-    assert.equal(f.calls.length, 26, 'each lookup tries the catalog model, then the registered model and its media');
+    assert.equal(f.calls.length, 11, 'unregistered lookups never send catalog requests with synthetic identities');
   }],
   ['App H264 takes priority over higher-resolution HEVC', async () => {
     const result = await appRows({ hd: { main_url: mediaUrl('hevc'), codec_type: 'hevc', quality_desc: '1080P' },
@@ -218,24 +257,24 @@ const checks = [
     assert.equal(result.contentKey, keyHex);
     assert.equal(result.codec, 'h264');
     assert.equal(result.quality, '720P');
-    assert.equal(calls.length, 5);
+    assert.equal(calls.length, 2);
   }],
   ['no wrong-episode fallback', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'app-source.js')), 'app source missing');
     const { fetch, calls } = fixture({ wrongVid: true });
     await assert.rejects(fetch('11'));
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 1);
   }],
   ['URL boundary and redirect validation', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'app-source.js')), 'app source missing');
     for (const fallback of ['http://vod.snssdk.com/info', 'https://127.0.0.1/info', 'https://vod.snssdk.com.attacker.test/info', 'https://user:pass@vod.snssdk.com/info']) {
       const { fetch, calls } = fixture({ fallback });
       await assert.rejects(fetch('11'));
-      assert.equal(calls.length, 4);
+      assert.equal(calls.length, 1);
     }
     const { fetch, calls } = fixture({ redirect: 'https://127.0.0.1/private' });
     await assert.rejects(fetch('11'));
-    assert.equal(calls.length, 5);
+    assert.equal(calls.length, 2);
     await assert.rejects(fixture({ media: 'https://127.0.0.1/video' }).fetch('11'));
   }],
   ['an empty answer from an unregistered device takes a fresh device and then plays, a second empty answer stops', async () => {

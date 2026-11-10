@@ -212,3 +212,12 @@ test('account summary is separate from actual unique rows; totals never create p
   await assert.rejects(fetchHistory(server([page([], true)]).request, { onSummary: () => { called = true; } }));
   assert.equal(called, false, 'a partial or failed read never becomes a complete snapshot');
 });
+
+test('account progress merge preserves local playback identifiers, source, quality and catalog fields', () => {
+  const id = '7300000000000000001';
+  const local = { watched: true, vid_index: 1, currentTime: 2, updatedAt: 1000, vid: '7300000000000000017', series_id: id, source: 'hongguo', quality: '1080p', episodes: [{ vid: '7300000000000000017', vid_index: 1 }] };
+  const cloud = { series_id: id, series_title: 'Cloud', vid_index: 17, currentTime: 3, updatedAt: 10000, total: 150, cloudVid: '7300000000000000099', completed: false };
+  const result = reconcileHistory({ playback: { [id]: local }, cloudRows: [cloud], userId: '123456' }).playback[id];
+  for (const key of ['vid', 'series_id', 'source', 'quality', 'episodes']) assert.deepEqual(result[key], local[key]);
+  assert.equal(result.vid_index, 17); assert.equal(result.currentTime, 3);
+});

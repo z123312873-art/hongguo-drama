@@ -126,6 +126,19 @@ function fixture({ prepare, transcode, enqueue, quality = '720p', initial = 'mis
     assert.ok(f.ui.button('重新连接片源'));
     f.ui.unmount();
   });
+  for (const sources of [
+    [{ source: 'web', code: 'PREVIEW_ONLY' }, { source: 'app', code: 'EMPTY_RESPONSE' }, { source: 'api', code: 'INVALID_RESPONSE' }],
+    [{ source: 'app', code: 'DEVICE_REGISTRATION_FAILED' }, { source: 'web', code: 'HTTP_404' }],
+    [{ source: 'app', code: 'MISSING_MODEL' }],
+  ]) await test('exhausted mixed sources do not silently fall into a doomed automatic download', async () => {
+    const f = fixture({ prepare: async () => ({ success: false, code: 'SOURCE_UNAVAILABLE', error: '暫時無法取得本集片源，請稍後重試。', sources }) });
+    await f.ui.flush();
+    assert.equal(f.downloads.length, 0);
+    assert.equal(f.ui.button('取消等待'), undefined);
+    assert.ok(f.ui.button('重试本集'));
+    assert.ok(f.ui.button('重新连接片源'));
+    f.ui.unmount();
+  });
   await test('known bad local media is not selected again after online fallback fails', async () => {
     const f = fixture({ initial: 'completed', enqueue: async () => ({ success: false, error: '已有文件保留' }) });
     await f.ui.flush(); f.ui.metadata(); f.ui.media.currentTime = 18; f.ui.error(2); await f.ui.flush();

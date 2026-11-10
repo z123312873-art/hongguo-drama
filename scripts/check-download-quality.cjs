@@ -109,7 +109,7 @@ const checks = [
     const f = routeFixture();
     for (const vid of ['11', 'hema:11', 'xifan:11']) {
       const result = await f.fetchPlayUrlSingle(vid, '1', { quality: '4k' });
-      assert.equal(result.url, null); assert.match(result.error, /清晰度/);
+      assert.equal(result.url, null); assert.match(result.error, /清晰度|畫質/);
     }
     assert.equal(f.calls.length, 0);
   }],
@@ -129,7 +129,7 @@ const checks = [
   ['explicit App failure returns no URL and never silently falls back to web', async () => {
     const f = routeFixture(true);
     const result = await f.fetchPlayUrlSingle('11', '1', { quality: '1080p' });
-    assert.equal(result.url, null); assert.match(result.error, /清晰度/); assert.deepEqual(f.calls, ['1080p']);
+    assert.equal(result.url, null); assert.match(result.error, /清晰度|畫質/); assert.deepEqual(f.calls, ['1080p']);
   }],
   ['third-party source keeps its authorized URL for later local resolution check', async () => {
     const f = routeFixture();

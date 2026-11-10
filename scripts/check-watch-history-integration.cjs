@@ -14,7 +14,7 @@ const store = req('./src/store');
 store.init(dataFile);
 const sid = '1000001';
 const series = (total = 3) => ({ series_id: sid, series_title: '春日来信', total,
-  episodes: Array.from({ length: total }, (_, i) => ({ vid: `video${i + 1}`, vid_index: i + 1 })) });
+  episodes: Array.from({ length: total }, (_, i) => ({ vid: String(2000001 + i), vid_index: i + 1 })) });
 const sequel = { series_id: '1000002', series_title: '春日来信第二季' };
 const clone = value => JSON.parse(JSON.stringify(value));
 const app = new EventEmitter();

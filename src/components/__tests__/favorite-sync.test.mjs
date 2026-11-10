@@ -56,7 +56,7 @@ test('cancellations: pending ones are sent and not re-added; favorited again mea
   assert.deepEqual(again.toCancel, []);
   assert.deepEqual(again.cancels, []);
   const done = planFavorites({ items, cloud: [], userId: U, cancels: ['7300000000000000001'], now: NOW });
-  assert.deepEqual(done.cancels, [], 'already gone from the account');
+  assert.deepEqual(done.cancels, ['7300000000000000001'], 'an empty response cannot confirm removal');
 });
 
 test('new cancellations only for confirmed favorites of this account', () => {
@@ -145,4 +145,10 @@ test('favorite time: equal times stay stable; missing or invalid times cannot be
   assert.equal(planFavorites({ items: known.items, cloud: [cloud(id, { favoritedAt: at })], userId: U, now: NOW }).changed, false);
   const unknown = planFavorites({ items: [item(id, { favorited_at: null })], cloud: [cloud(id, { favoritedAt: 0 })], userId: U, now: NOW });
   assert.equal(unknown.items[0].favorited_at, NOW);
+});
+
+test('empty account responses do not discard explicit pending cancellations', () => {
+  const result = planFavorites({ items: [], cloud: [], userId: '123456', cancels: ['7300000000000000001'] });
+  assert.deepEqual(result.toCancel, []);
+  assert.deepEqual(result.cancels, ['7300000000000000001']);
 });
