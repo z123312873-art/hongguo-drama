@@ -5,6 +5,8 @@ const { transformSync } = require('esbuild');
 
 const root = path.join(__dirname, '../src');
 const entries = {
+  './components/usePlaybackNotice': 'components/usePlaybackNotice.js',
+  './usePlaybackNotice': 'components/usePlaybackNotice.js',
   './components/useAccountSession': 'components/useAccountSession.js',
   './components/AccountChrome': 'components/AccountChrome.jsx',
   './waitingNotice.mjs': 'waitingNotice.mjs',

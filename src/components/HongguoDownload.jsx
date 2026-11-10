@@ -1,3 +1,4 @@
+import usePlaybackNotice from './usePlaybackNotice';
 import React, { useState, useRef, useEffect } from 'react';
 import './HongguoDownload.css';
 import { Film, Download, CheckSquare, Square, RefreshCw, Folder, Link2, Search, Play } from './icons';
@@ -10,6 +11,7 @@ import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../loc
 
 function HongguoDownload({ onNavigate, active = true }) {
   const { sources: mediaSources, revision: sourceRevision } = useMediaSources();
+  const { notice: playbackNotice, showNotice: showPlaybackNotice } = usePlaybackNotice();
   const [tab, setTab] = useState('search'); // 'search' | 'input'
   const [inputUrl, setInputUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -198,9 +200,9 @@ function HongguoDownload({ onNavigate, active = true }) {
     setErrorMsg('');
     try {
       const res = await window.electronAPI.playSeries({ seriesId: seriesData.series_id, vidIndex: firstPlayable.vid_index });
-      if (!res?.success && request === resolveRequest.current) setErrorMsg(res?.error || '打开播放器失败，请重试');
+      if (!res?.success && request === resolveRequest.current) showPlaybackNotice(res?.error || '打开播放器失败，请重试');
     } catch (error) {
-      if (request === resolveRequest.current) setErrorMsg('打开播放器失败: ' + error.message);
+      if (request === resolveRequest.current) showPlaybackNotice('打开播放器失败: ' + error.message);
     } finally {
       playPending.current = false;
       setOpeningPlayer(false);
@@ -238,6 +240,7 @@ function HongguoDownload({ onNavigate, active = true }) {
 
   return (
     <div className="hongguo-container">
+      {playbackNotice && <div key={playbackNotice.id} className="record-toast playback-toast" role="status" aria-live="polite">{playbackNotice.text}</div>}
       {/* 头部 Banner 区 */}
       <div className="hongguo-hero">
         <div className="hero-icon">

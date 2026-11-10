@@ -12,7 +12,8 @@ test('folders retain exact ids and empty folders; only drama membership is selec
     calls.push({ method, path, body });
     return reply({ folders: [folder(), folder({ folder_id: B, folder_name: 'Empty', item_count: 0, items: undefined })], folder_count: 2 });
   });
-  assert.deepEqual(rows, [{ id: F, name: 'TEST', itemIds: [A] }, { id: B, name: 'Empty', itemIds: [] }]);
+  assert.ok(rows.every(row => /^[a-f0-9]{64}$/.test(row.revision)));
+  assert.deepEqual(rows.map(({ id, name, itemIds }) => ({ id, name, itemIds })), [{ id: F, name: 'TEST', itemIds: [A] }, { id: B, name: 'Empty', itemIds: [] }]);
   assert.equal(calls[0].path, LIST_PATH);
   assert.deepEqual(calls[0].body, { offset: 0, count: 50, preview_items_limit: 50, target_id: '', has_detail: true });
   assert.deepEqual(folderItems([item(A), { item_id: B, book_type: 1 }]), [A]);
@@ -28,7 +29,7 @@ test('folders and details paginate completely, with lossless folder request ids'
     const offset = JSON.parse(body).offset;
     return reply({ folder_id: F, folder_name: 'Renamed', item_count: 2, items: [item(offset ? B : A)], has_more: offset === 0 });
   });
-  assert.deepEqual(rows[0], { id: F, name: 'Renamed', itemIds: [A, B] });
+  assert.deepEqual({ id: rows[0].id, name: rows[0].name, itemIds: rows[0].itemIds }, { id: F, name: 'Renamed', itemIds: [A, B] });
   assert.equal(calls.length, 4);
 });
 

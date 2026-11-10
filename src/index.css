@@ -213,3 +213,5 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 .record-toast svg { flex: 0 0 auto; }
 @keyframes record-toast-feedback { 0% { opacity: 0; } 6%, 18%, 30%, 87% { opacity: 1; } 12%, 24% { opacity: .72; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .record-toast { animation: none; } }
+
+.playback-toast { animation-duration: 2.8s; background: #344a62; pointer-events: auto; }

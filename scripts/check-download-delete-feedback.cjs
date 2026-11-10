@@ -13,7 +13,7 @@ for (const success of [true, false]) test(`delete-all reports running merges ski
     await player.flush(); player.button('切换短剧').props.onClick(); await player.flush();
     player.button('删除全部已下载').props.onClick(); await player.flush();
     await player.button('全部删除').props.onClick(); await player.flush();
-    const toast = player.find(node => node.props.className === 'dm-toast dm-toast-success')?.children.join('');
+    const toast = player.find(node => node.props.className === 'record-toast playback-toast')?.children.join('');
     assert.match(toast, /1 部剧正在合并，已跳过/);
     assert.match(toast, /已删除 0 个文件/);
     if (!success) assert.match(toast, /文件占用/);

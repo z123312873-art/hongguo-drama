@@ -86,3 +86,27 @@ test('a date before today leaves the wall even when the episode check fails', ()
   assert.equal(confirmedOffline(new Error('获取分集失败：官网数据源（加载超时或连接中断），备用接口（ECONNRESET）')), false);
   assert.equal(confirmedOffline(new Error('备用接口分集列表为空')), true);
 });
+
+test('negative and unknown answers expire in five minutes without expiring a confirmed release', async () => {
+  let clock = taipei('2026-11-10T12:00:00+08:00'), ready = false;
+  const calls = [];
+  const probe = createReleaseProbe({ now: () => clock, lookup: async id => {
+    calls.push(id);
+    if (!ready && id === 'unknown') throw new Error('offline');
+    return ready || id === 'confirmed';
+  } });
+  assert.equal(await probe.ask('waiting'), false);
+  assert.equal(await probe.ask('unknown'), 'error');
+  assert.equal(await probe.ask('confirmed'), true);
+  clock += 299999;
+  assert.equal(await probe.ask('waiting'), false);
+  assert.equal(await probe.ask('unknown'), 'error');
+  assert.equal(calls.length, 3);
+  ready = true; clock += 1;
+  assert.equal(probe.known('waiting'), undefined);
+  assert.equal(probe.known('unknown'), undefined);
+  assert.equal(await probe.ask('waiting'), true);
+  assert.equal(await probe.ask('unknown'), true);
+  assert.equal(await probe.ask('confirmed'), true);
+  assert.equal(calls.length, 5);
+});

@@ -214,7 +214,7 @@ assert.equal(store.getAccount(), null);
 assert.equal(store.getSettings().download_quality, '720');
 
 assert.match(readFileSync(new URL('../ReleaseCalendar.jsx', import.meta.url), 'utf8'), new RegExp(WAITING_NOTICE));
-assert.equal(WAITING_DISMISS_MS, 2000);
+assert.equal(WAITING_DISMISS_MS, 2800);
 assert.equal(isWaitingNotice(WAITING_NOTICE), true);
 assert.equal(noticeAfterNavigate(WAITING_NOTICE), '');
 assert.equal(noticeAfterDelay(WAITING_NOTICE), '');

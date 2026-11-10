@@ -158,8 +158,13 @@ function createCodeClient({
     saveDevice(next);
     return next;
   };
-  const call = async (path, countryCode, body, method = 'POST', extraQuery = {}, contentType = 'application/x-www-form-urlencoded; charset=UTF-8') => {
+  const call = async (path, countryCode, body, method = 'POST', extraQuery = {}, contentType = 'application/x-www-form-urlencoded; charset=UTF-8', scope = null) => {
+    const checkScope = () => {
+      if (scope && (scope.generation !== generation || scope.userId !== signedUser)) throw new Error('ACCOUNT_CHANGED');
+    };
+    checkScope();
     const current = await device();
+    checkScope();
     const bytes = Buffer.from(body || '');
     const stamp = now();
     const query = { ...queryFor(current), ...extraQuery };
@@ -185,6 +190,7 @@ function createCodeClient({
     if (cookies.size) headers.Cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
     const url = `${HOST}${path}?${signed.raw}`;
     const response = method === 'GET' ? await get(url, { headers }) : await post(url, { headers, body: bytes });
+    checkScope();
     remember(response?.headers);
     return response;
   };
@@ -204,8 +210,9 @@ function createCodeClient({
   // Try the sign-in's own signature first; if the reply is refused, try the other one once and keep
   // whichever worked for later calls.
   let readingSign = '';
-  const requestOnce = async (signAs, method, path, query, body) => {
-    const response = await call(path, signAs, body, method, query, 'application/json; charset=utf-8');
+  let generation = 0;
+  const requestOnce = async (signAs, method, path, query, body, scope) => {
+    const response = await call(path, signAs, body, method, query, 'application/json; charset=utf-8', scope);
     if (response?.status !== 200) throw new Error(`HTTP ${response?.status || 0}`);
     const payload = parseBody(response.text);
     if (!payload || typeof payload !== 'object') throw new Error('BAD_BODY');
@@ -214,25 +221,30 @@ function createCodeClient({
     if (nested && nested !== '0') throw Object.assign(new Error(`CODE ${nested}`), { code: String(nested) });
     return payload;
   };
-  const request = async (method, path, query = {}, json = undefined) => {
+  const request = async (method, path, query = {}, json = undefined, options = {}) => {
     if (!signedIn() || !signedRegion) throw new Error('NOT_SIGNED_IN');
+    if (options.expectedUserId !== undefined && String(options.expectedUserId) !== signedUser) throw new Error('ACCOUNT_CHANGED');
+    const scope = { generation, userId: signedUser };
     const body = json === undefined ? '' : (typeof json === 'string' ? json : JSON.stringify(json));
     const first = readingSign || signedRegion;
     try {
-      const payload = await requestOnce(first, method, path, query, body);
+      const payload = await requestOnce(first, method, path, query, body, scope);
+      if (scope.generation !== generation || scope.userId !== signedUser) throw new Error('ACCOUNT_CHANGED');
       readingSign = first;
       return payload;
     } catch (error) {
+      if (options.retry === false || scope.generation !== generation || scope.userId !== signedUser) throw error;
       const other = first === '+86' ? signedRegion : '+86';
       if (other === first || error.message === 'NOT_SIGNED_IN') throw error;
       let payload;
-      try { payload = await requestOnce(other, method, path, query, body); } catch { throw error; }
+      try { payload = await requestOnce(other, method, path, query, body, scope); } catch { throw error; }
+      if (scope.generation !== generation || scope.userId !== signedUser) throw new Error('ACCOUNT_CHANGED');
       readingSign = other;
       return payload;
     }
   };
   return {
-    reset() { cookies.clear(); token = ''; signedRegion = ''; signedUser = ''; readingSign = ''; },
+    reset() { generation++; cookies.clear(); token = ''; signedRegion = ''; signedUser = ''; readingSign = ''; },
     profile,
     request,
     signedIn: () => Boolean(signedIn() && signedRegion && signedUser),
@@ -250,6 +262,7 @@ function createCodeClient({
       const pairs = Object.entries(saved).filter(([name, value]) => /^[\w.-]{1,64}$/.test(name) && typeof value === 'string' && value && value.length <= 4096 && !/[;\r\n]/.test(value));
       const savedToken = typeof session.token === 'string' && session.token.length <= 4096 && !/[\r\n]/.test(session.token) ? session.token : '';
       if (!userId || !region || (!savedToken && !pairs.some(([name]) => name === 'sessionid' || name === 'sessionid_ss'))) return false;
+      generation++;
       cookies.clear();
       for (const [name, value] of pairs) cookies.set(name, value);
       token = savedToken;
@@ -276,6 +289,7 @@ function createCodeClient({
       return { ok: true, retryAfter: Number.isInteger(retry) && retry >= 0 && retry <= 3600 ? retry : 60 };
     },
     async login({ countryCode, phone, code } = {}) {
+      generation++;
       token = '';
       readingSign = '';
       signedRegion = '';

@@ -43,7 +43,7 @@ const { mount } = require('./check-player-resume.cjs');
   const failed = mount({ apiOverrides: { saveSettings: async () => ({ success: false, error: 'disk full' }) } });
   await failed.flush(); await failed.button('兼容模式').props.onClick(); await failed.flush();
   assert.equal(failed.button('兼容模式').props['aria-pressed'], true, 'failed save must not show the new state');
-  assert.ok(failed.find(n => n.props.className?.includes('dm-toast'))); failed.unmount();
+  assert.ok(failed.find(n => n.props.className?.includes('playback-toast'))); failed.unmount();
   for (const local of [false, true]) for (const autoNext of [false, true]) {
     const cleaned = [];
     const playing = mount({ local, settings: { auto_delete_watched: true },
@@ -98,7 +98,7 @@ const { mount } = require('./check-player-resume.cjs');
   await ranges.button('下载后5集').props.onClick(); await ranges.flush();
   assert.deepEqual(queued.map(args => args[1]), [9, 12, 13], 'next five excludes current, locked and completed, without extending the range');
   const text = n => typeof n === 'string' || typeof n === 'number' ? String(n) : n?.children?.map(text).join('') || '';
-  assert.match(text(ranges.find(n => n.props.className === 'dm-toast dm-toast-success')), /2 集提交成功，1 集失败/);
+  assert.match(text(ranges.find(n => n.props.className === 'record-toast playback-toast')), /2 集提交成功，1 集失败/);
   queued.length = 0;
   await ranges.button('下载后10集').props.onClick(); await ranges.flush();
   assert.deepEqual(queued.map(args => args[1]), [9, 12, 13, 14, 15, 16, 17, 18]);

@@ -302,6 +302,7 @@ async function mount(file, api, props = {}) {
     const ui = await mount('Browse', {
       getSeriesList: async () => [],
       browseCategories: async () => [{ slug: 'real-drama', label: '真人剧' }, { slug: 'comic', label: '漫画' }],
+      browseGenres: async () => ({ success: true, genres: [{ slug: 'romance', label: '爱情', count: 1 }] }),
       browseList: async request => {
         if (request.category === 'comic') comicCalls++;
         realCalls++;
@@ -320,7 +321,7 @@ async function mount(file, api, props = {}) {
       assert.ok(ui.text().includes('仍显示上次片单'));
       assert.equal(ui.find(n => n.props.className === 'browse-error-state'), undefined, 'cached cards must not be pushed below a full empty-state error');
       assert.ok(ui.text().includes('共 48 部'), 'total must remain from the cached list');
-      assert.ok(ui.button('爱情'), 'genres must remain from the cached list');
+      assert.ok(ui.button('爱情'), 'confirmed source tags remain available independently of a list refresh');
       assert.ok(ui.nodes().some(n => n.type === 'button' && n.children.includes(2)), 'pagination must remain available');
       const callsAfterRefresh = realCalls;
       ui.button('漫画').props.onClick(); await ui.flush();
@@ -333,6 +334,27 @@ async function mount(file, api, props = {}) {
       assert.equal(cards().length, 1, 'returning must restore the retained cache');
       assert.equal(realCalls, callsAfterRefresh, 'empty refresh must not delete a still-fresh cache');
       assert.ok(ui.nodes().every(n => !(typeof n.type === 'function' && n.type.name === 'ComicBrowse')), 'the comic view leaves with its category');
+    } finally { ui.unmount(); }
+  });
+  await test('category tags are source-specific, query the source and refresh without page-local filtering', async () => {
+    const queries = [], tagQueries = [];
+    const labels = { 'real-drama': ['古装', 'source-costume'], 'ai-drama': ['科幻', 'source-scifi'] };
+    const ui = await mount('Browse', {
+      getSeriesList: async () => [],
+      browseCategories: async () => [{ slug: 'real-drama', label: '真人剧' }, { slug: 'ai-drama', label: 'AI剧' }],
+      browseGenres: async query => { tagQueries.push(query); const [label, slug] = labels[query.category] || []; return { success: true, genres: label ? [{ label, slug, count: 2 }] : [] }; },
+      browseList: async query => { queries.push(query); return { success: true, results: [{ series_id: `${query.category}-${query.genre}-${query.page}`, series_title: query.genre ? '来源筛选结果' : '分类结果', tags: ['其他'] }], page: query.page, totalPages: 2, total: 2 }; },
+    });
+    try {
+      await ui.flush();
+      assert.ok(ui.button('古装')); assert.equal(ui.button('科幻'), undefined);
+      ui.button('AI剧').props.onClick(); await ui.flush();
+      assert.ok(ui.button('科幻')); assert.equal(ui.button('古装'), undefined);
+      ui.button('科幻').props.onClick(); await ui.flush();
+      assert.ok(queries.some(query => query.category === 'ai-drama' && query.genre === 'source-scifi'));
+      assert.ok(ui.text().includes('来源筛选结果'), 'source results do not need to repeat the selector on their poster');
+      ui.button('刷新片单').props.onClick(); await ui.flush();
+      assert.ok(tagQueries.some(query => query.category === 'ai-drama' && query.forceRefresh === true));
     } finally { ui.unmount(); }
   });
   await test('browse card shows the source 新剧 tag between the rank and the score, only when the source marked it', async () => {
@@ -601,11 +623,11 @@ async function mount(file, api, props = {}) {
       assert.deepEqual(calls.sort(), [1, 2], 'each site page is requested once');
     } finally { ui.unmount(); }
   });
-  await test('comic view: tag chips filter, two at most, and an empty result offers a way back', async () => {
+  await test('comic view: actual source tag labels replace the selection and absent tags are hidden', async () => {
     const card = (n, tags) => ({ series_id: String(7000000 + n), series_title: `漫画${n}`, tags, cover: '' });
     const ui = await mount('ComicBrowse', {
       comicSnapshot: async () => ({ success: true, snapshot: null }),
-      browseList: async () => ({ success: true, results: [card(1, ['都市']), card(2, ['古风']), card(3, ['古风', '穿越']), card(4, ['现言甜宠'])], page: 1, totalPages: 1, total: 4 }),
+      browseList: async () => ({ success: true, results: [card(1, ['都市']), card(2, ['古风']), card(3, ['古风', '穿越']), card(4, ['现言甜宠', '穿越'])], page: 1, totalPages: 1, total: 4 }),
       comicExtras: async () => ({ success: true, items: [] }),
     });
     const cards = () => ui.nodes().filter(n => n.props.className === 'browse-card').map(n => n.props.title);
@@ -614,8 +636,8 @@ async function mount(file, api, props = {}) {
       assert.deepEqual(cards(), ['漫画1', '漫画2', '漫画3', '漫画4']);
       ui.button('古风').props.onClick(); await ui.flush();
       assert.deepEqual(cards(), ['漫画2', '漫画3']);
-      ui.button('穿越重生').props.onClick(); await ui.flush();
-      assert.deepEqual(cards(), ['漫画3'], 'two chips mean both');
+      ui.button('穿越').props.onClick(); await ui.flush();
+      assert.deepEqual(cards(), ['漫画3', '漫画4'], 'a source tag replaces the previous selection');
       assert.equal(ui.button('悬疑灵异'), undefined, 'a chip with no comic never leads to a blank page');
       ui.button('全部').props.onClick(); await ui.flush();
       assert.equal(cards().length, 4);
@@ -1238,9 +1260,9 @@ async function mount(file, api, props = {}) {
     ui.button('发现短剧').props.onClick(); ui.render();
     assert.ok(ui.text().includes(disk));
     report({ error: waiting }); ui.render();
-    ui.advanceTimers(2000); ui.render();
+    ui.advanceTimers(2800); ui.render();
     assert.equal(ui.text().includes(waiting), false);
-    assert.ok(ui.text().includes(disk) === false);
+    assert.ok(ui.text().includes(disk), 'a playback toast never clears a real storage failure');
     ui.unmount();
   });
   process.exitCode = failures ? 1 : 0;

@@ -275,7 +275,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const showToast = useCallback((text) => {
     setToast(text);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3000);
+    toastTimer.current = setTimeout(() => setToast(null), 2800);
   }, []);
 
   const changePlaybackRate = useCallback((value, notify = true) => {
@@ -2035,7 +2035,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} cover={detail?.cover || ''} />
         )}
       </div>
-      {toast && <div className="dm-toast dm-toast-success" onClick={() => setToast(null)}>{toast}</div>}
+      {toast && <div key={toast} className="record-toast playback-toast" role="status" aria-live="polite" onClick={() => setToast(null)}>{toast}</div>}
 
       {/* 合并格式选择 */}
       {mergeAsk && (

@@ -68,15 +68,19 @@ function dueReleaseIds(items, now = Date.now()) {
 
 function createReleaseProbe({ lookup, now = () => Date.now() }) {
   let cache = createReleaseCache(now());
-  const inflight = new Map();
+  const inflight = new Map(), checked = new Map();
+  const cached = (id, moment) => {
+    const value = readRelease(cache, id, moment);
+    return value === true || moment - (checked.get(String(id)) ?? -Infinity) < 300000 ? value : undefined;
+  };
   return {
     known(id) {
-      return readRelease(cache, id, now());
+      return cached(id, now());
     },
     ask(id) {
       const moment = now();
       if (cache.day !== taipeiDay(moment)) cache = createReleaseCache(moment);
-      const known = readRelease(cache, id, moment);
+      const known = cached(id, moment);
       if (known !== undefined) return Promise.resolve(known);
       const key = String(id);
       if (!inflight.has(key)) {
@@ -85,10 +89,12 @@ function createReleaseProbe({ lookup, now = () => Date.now() }) {
           .then(playable => {
             const state = playable === true ? true : playable === 'error' ? 'error' : false;
             cache = rememberRelease(cache, key, state, now());
+            checked.set(key, now());
             return state;
           })
           .catch(() => {
             cache = rememberRelease(cache, key, 'error', now());
+            checked.set(key, now());
             return 'error';
           })
           .finally(() => inflight.delete(key));

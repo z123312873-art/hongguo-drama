@@ -1,10 +1,10 @@
+import { sourceTagCounts, sourceMatchesTags, chooseSourceTag } from '../comicTags.mjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Film, RefreshCw, X, Play, Check } from './icons';
 import CoverImage from './CoverImage';
 import ComicReader from './ComicReader';
 import useDialogKeyboard from './useDialogKeyboard';
 import { loadComicCatalog } from '../comicCatalog.mjs';
-import { COMIC_CHIPS, comicChipCounts, comicMatchesChips, toggleComicChips } from '../comicTags.mjs';
 import { clampPage, comicPageSize, episodeGroups, groupIndexOf, pageCount, pagerNumbers, readerImageWidth, skeletonCount } from '../comicLayout.mjs';
 import { firstPictureUrls } from '../comicPreload.mjs';
 import { markRead, readProgress } from '../comicProgress.mjs';
@@ -104,8 +104,9 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
     return () => { clearTimeout(timer); window.removeEventListener('resize', onResize); };
   }, [reservedRows]);
 
-  const filtered = useMemo(() => catalog.items.filter(card => comicMatchesChips(card, chips)), [catalog.items, chips]);
-  const counts = useMemo(() => comicChipCounts(catalog.items), [catalog.items]);
+  const filtered = useMemo(() => catalog.items.filter(card => sourceMatchesTags(card, chips)), [catalog.items, chips]);
+  const counts = useMemo(() => sourceTagCounts(catalog.items), [catalog.items]);
+  useEffect(() => { setChips(previous => previous.every(label => counts.has(label)) ? previous : []); }, [counts]);
   const size = layout.pageSize || 24;
   // The pager counts only the posters that are here, so it never shows pages that have nothing on them yet.
   // Empty cells fill the end of the last page while more titles are on their way.
@@ -117,9 +118,9 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
     loaded: filtered.length, page: currentPage, pageSize: size, expectedTotal: catalog.expectedTotal,
     pending: catalog.pending && !chips.length,
   });
-  const chipList = COMIC_CHIPS.filter(chip => counts.get(chip.label) > 0 || chips.includes(chip.label));
+  const chipList = [...counts.keys()].map(label => ({ label }));
 
-  const chooseChip = (label) => { setChips(toggleComicChips(chips, label)); setPage(1); };
+  const chooseChip = (label) => { setChips(chooseSourceTag(chips, label, counts)); setPage(1); };
   const goto = (next) => {
     const target = clampPage(next, knownTotal, size);
     if (target === currentPage) return;
@@ -214,7 +215,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
   return (
     <div className="comic-browse">
       <div className="comic-toolbar">
-        <div className="browse-genres" role="group" aria-label="漫画标签筛选，可左右滑动，最多同时选择两个">
+        <div className="browse-genres" role="group" aria-label="漫画标签筛选，可左右滑动，每次選擇一個">
           <button type="button" className={`genre-chip ${chips.length === 0 ? 'active' : ''}`} aria-pressed={chips.length === 0} onClick={() => chooseChip('全部')}>全部</button>
           {chipList.map(chip => (
             <button type="button" key={chip.label} className={`genre-chip ${chips.includes(chip.label) ? 'active' : ''}`} aria-pressed={chips.includes(chip.label)} onClick={() => chooseChip(chip.label)}>{chip.label}</button>

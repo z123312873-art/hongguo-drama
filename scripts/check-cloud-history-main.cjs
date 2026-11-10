@@ -40,8 +40,9 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
     restore: session => { restored = session; return true; },
     signedIn: () => !!restored, user: () => restored?.userId || '',
     snapshot: () => restored, reset: () => { restored = null; },
-    request: async (method, apiPath, query, body) => {
-      cloud.requests.push({ method, apiPath, query, body });
+    request: async (method, apiPath, query, body, options) => {
+      cloud.requests.push({ method, apiPath, query, body, options });
+      if (cloud.folderHandler && apiPath.includes('bookshelf_folder')) return cloud.folderHandler(method, apiPath, query, body, options);
       if (cloud.fail) throw new Error(cloud.fail);
       if (apiPath.includes('bookshelf_folder')) return cloud.folderResponse || { code: 0, data: { folders: [], folder_count: 0, has_more: false } };
       if (apiPath.includes('bookshelf')) {
@@ -386,4 +387,37 @@ test('wrong-series or imprecise catalog data never replaces saved playback metad
       assert.equal((await h.call('search-resolve', ONE)).success, false);
     } finally { h.cleanup(); }
   }
+});
+
+test('folder IPC binds reads and mutations to the session and refuses logged-out or stale-account callers', async () => {
+  for (const account of [false, true]) {
+    const h = load({ account });
+    try {
+      const userId = account ? '2000000000000002' : '1000000000000001';
+      assert.equal((await h.call('cloud-folder-list', userId)).success, false);
+      assert.equal((await h.call('cloud-folder-change', { userId, operation: 'create', name: '桌面夾' })).success, false);
+      assert.equal(h.cloud.requests.length, 0);
+    } finally { h.cleanup(); }
+  }
+});
+test('folder IPC verifies a new folder, forwards dynamic identity and disables mutation retries', async () => {
+  const U = '1000000000000001', F = '7300000000000000101'; let folders = [];
+  const h = load({ server: { folderHandler: async (_method, apiPath, _query, body) => {
+    if (apiPath.includes('/update/')) {
+      const op = JSON.parse(body).operate_data[0];
+      assert.equal(op.folder_id, 0); assert.equal(op.operate_type, 1);
+      folders = [{ folder_id: F, folder_name: op.folder_name, is_publish: false, item_count: 0, items: [] }];
+      return { code: 0, data: {} };
+    }
+    return { code: 0, data: { folders, folder_count: folders.length, has_more: false } };
+  } } });
+  try {
+    const result = await h.call('cloud-folder-change', { userId: U, operation: 'create', name: '桌面夾' });
+    assert.equal(result.success, true); assert.equal(result.userId, U); assert.equal(result.folderId, F);
+    assert.equal(h.cloud.requests.filter(row => row.apiPath.includes('/update/')).length, 1);
+    for (const row of h.cloud.requests) {
+      assert.equal(row.options.expectedUserId, U);
+      assert.equal(row.options.retry, !row.apiPath.includes('/update/'));
+    }
+  } finally { h.cleanup(); }
 });

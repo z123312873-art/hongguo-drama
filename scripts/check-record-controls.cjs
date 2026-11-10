@@ -16,7 +16,7 @@ function fixture(timers = {}) {
   const load = (file, imports = {}) => {
     const module = { exports: {} };
     const code = transformSync(fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), { loader: file.endsWith('.jsx') ? 'jsx' : 'js', format: 'cjs' }).code;
-    vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || {}, window, Event, setTimeout, clearTimeout, setInterval, clearInterval, ...timers });
+    vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || {}, window, Event, setTimeout, clearTimeout, setInterval: (...args) => { const timer = setInterval(...args); timer.unref(); return timer; }, clearInterval, ...timers });
     return module.exports;
   };
   const mount = (file, imports = {}, props = {}) => {
@@ -26,11 +26,11 @@ function fixture(timers = {}) {
       createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) }),
       useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
       useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
-      useMemo: fn => { cursor++; return fn(); },
+      useMemo: (fn, deps) => { const i = cursor++; if (!slots[i] || !deps || deps.some((value, index) => !Object.is(value, slots[i].deps[index]))) slots[i] = { deps, value: fn() }; return slots[i].value; },
       useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(() => { cleanups.get(i)?.(); const cleanup = fn(); if (typeof cleanup === 'function') cleanups.set(i, cleanup); }); } },
     };
     react.useLayoutEffect = react.useEffect;
-    const component = load(file, { './useFavoriteSync': { useFavoriteSyncStatus: () => ({ mode: 'local' }) }, '../favoriteView.mjs': load('favoriteView.mjs'), ...imports, react }).default;
+    const component = load(file, { './usePlaybackNotice': load('components/usePlaybackNotice.js', { react, '../waitingNotice.mjs': load('waitingNotice.mjs') }).default, '../native/folder-rules': require('../src/native/folder-rules'), './useFavoriteSync': { useFavoriteSyncStatus: () => ({ mode: 'local' }) }, '../favoriteView.mjs': load('favoriteView.mjs'), ...imports, react }).default;
     const render = () => { cursor = 0; tree = component(props); effects.splice(0).forEach(fn => fn()); };
     const nodes = () => { const result = []; const visit = n => { if (!n || typeof n !== 'object') return; result.push(n); n.children?.forEach(visit); }; visit(tree); return result; };
     render();
@@ -216,9 +216,12 @@ test('favorites page: one newest-first list, no month picker, filter buttons by 
   } finally { Date.now = realNow; }
   const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library });
   const text = node => typeof node === 'string' || typeof node === 'number' ? String(node) : node?.children?.map(text).join('') || '';
-  assert.equal(ui.nodes().some(n => n.type === 'select'), false, 'no month dropdown');
+  assert.equal(ui.nodes().some(n => n.type === 'select' && n.props.id !== 'favorite-folder'), false, 'no month dropdown');
   const titles = () => ui.nodes().filter(n => n.props.className === 'release-row').map(n => text(n.children[1].children[0]));
-  assert.deepEqual(titles(), ['等上线', '六月AI', '一月真人']);
+  assert.deepEqual(titles(), ['六月AI', '一月真人', '等上线']);
+  const reserved = ui.find(n => n.type === 'details' && n.props.className === 'release-reserved');
+  assert.ok(reserved); assert.notEqual(reserved.props.open, true, 'reservations start collapsed');
+  assert.ok(text(reserved).includes('等上线'));
   const filter = label => ui.nodes().find(n => n.type === 'button' && text(n) === label);
   assert.ok(filter('全部 3')); assert.ok(filter('可播放 2')); assert.ok(filter('尚未上线 1')); assert.ok(filter('真人剧 1')); assert.ok(filter('AI 剧 1'));
   assert.ok(filter('漫剧 0'), 'the comic filter stays visible even with no categorized rows');
@@ -461,4 +464,156 @@ test('unfavorite during an in-flight first upload is queued for confirmed accoun
     assert.equal(library.readLocalLibrary().items.find(item => item.id === A).favorite, false);
     assert.deepEqual(cloud, []);
   } finally { mounted.unmount(); }
+});
+
+function folderSyncFixture() {
+  let interval;
+  const h = fixture({ setTimeout: () => 1, clearTimeout() {}, setInterval: fn => { interval = fn; return 1; }, clearInterval() {} });
+  const library = h.load('localLibrary.js'), U = '1000000000000001', F = '7300000000000000101', A = '7300000000000000201';
+  let folders = [{ id: F, name: '測試夾', revision: 'fixture-r1', itemCount: 1, itemIds: [A] }];
+  const calls = [];
+  h.window.electronAPI = {
+    cloudFavorites: async () => ({ success: true, mode: 'cloud', userId: U, rows: [{ id: A }], folders }),
+    cloudFolderList: async userId => ({ success: true, userId, folders }),
+    cloudFolderChange: async input => { calls.push(input); return { success: true, userId: U, folders }; },
+  };
+  const mounted = mountSync(h, library);
+  return { h, library, U, F, A, calls, mounted, start: async () => { mounted.render(true); await mounted.flush(); }, setFolders: value => { folders = value; }, tick: () => interval() };
+}
+test('folder actions bind to the current session, refuse logged-out and offline writes, and never queue them', async () => {
+  const x = folderSyncFixture();
+  try {
+    assert.equal((await x.mounted.hook.changeFavoriteFolder({ operation: 'create', name: '新夾' })).success, false);
+    await x.start();
+    x.h.window.navigator = { onLine: false };
+    assert.equal((await x.mounted.hook.changeFavoriteFolder({ operation: 'create', name: '新夾' })).success, false);
+    assert.equal(x.calls.length, 0);
+    x.h.window.navigator.onLine = true;
+    await x.mounted.hook.changeFavoriteFolder({ operation: 'rename', folderId: x.F, name: '改名', userId: '2000000000000002' });
+    assert.equal(x.calls[0].userId, x.U);
+    assert.equal(x.calls.length, 1);
+  } finally { x.mounted.unmount(); }
+});
+test('only a verified explicit deletion can remove the last cached folder; empty and failed replies preserve it', async () => {
+  const x = folderSyncFixture(); await x.start();
+  try {
+    x.setFolders([]);
+    await x.mounted.hook.refreshFavoriteFolders();
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 1);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().foldersStale, true);
+    x.h.window.electronAPI.cloudFolderChange = async () => ({ success: false, error: 'CODE 101109' });
+    let result = await x.mounted.hook.changeFavoriteFolder({ operation: 'delete', folderId: x.F, confirmed: true });
+    assert.equal(result.success, false); assert.doesNotMatch(result.error, /CODE|101109/);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 1);
+    x.h.window.electronAPI.cloudFolderChange = async () => ({ success: true, userId: x.U, deletedId: x.F, folders: [] });
+    result = await x.mounted.hook.changeFavoriteFolder({ operation: 'delete', folderId: x.F, confirmed: true });
+    assert.equal(result.success, true);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 0);
+    assert.equal(JSON.parse(x.h.storage.get('hongguo:favorite-folders:v1')).folders.length, 0);
+  } finally { x.mounted.unmount(); }
+});
+test('a late folder mutation cannot import old-account data or leave the next account busy', async () => {
+  const x = folderSyncFixture(); await x.start(); let finish;
+  try {
+    x.h.window.electronAPI.cloudFolderChange = () => new Promise(resolve => finish = resolve);
+    const pending = x.mounted.hook.changeFavoriteFolder({ operation: 'rename', folderId: x.F, name: '舊帳號改名' });
+    x.mounted.render(false);
+    x.h.window.electronAPI.cloudFavorites = async () => ({ success: true, mode: 'cloud', userId: '2000000000000002', rows: [], folders: [] });
+    x.mounted.render(true); await x.mounted.flush();
+    finish({ success: true, userId: x.U, folders: [{ id: x.F, name: '不該出現', itemIds: [x.A] }] });
+    assert.equal((await pending).success, false);
+    const status = x.mounted.hook.favoriteSyncStatus();
+    assert.equal(status.userId, '2000000000000002');
+    assert.equal(status.folders.length, 0);
+    assert.equal(Boolean(status.folderBusy), false);
+    assert.equal(x.library.readLocalLibrary().items.some(item => item.cloud_user === '2000000000000002'), false);
+  } finally { x.mounted.unmount(); }
+});
+test('an older full sync cannot roll back a verified newer folder mutation', async () => {
+  const x = folderSyncFixture(); await x.start(); let finish;
+  try {
+    x.h.window.electronAPI.cloudFavorites = () => new Promise(resolve => finish = resolve);
+    x.tick();
+    x.h.window.electronAPI.cloudFolderChange = async () => ({ success: true, userId: x.U, folderId: x.F, folders: [{ id: x.F, name: '新名稱', revision: 'fixture-r2', itemIds: [x.A] }] });
+    assert.equal((await x.mounted.hook.changeFavoriteFolder({ operation: 'rename', folderId: x.F, name: '新名稱' })).success, true);
+    finish({ success: true, mode: 'cloud', userId: x.U, rows: [{ id: x.A }], folders: [{ id: x.F, name: '舊名稱', revision: 'fixture-r1', itemIds: [x.A] }] });
+    await x.mounted.flush();
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folders[0].name, '新名稱');
+    assert.equal(JSON.parse(x.h.storage.get('hongguo:favorite-folders:v1')).folders[0].name, '新名稱');
+  } finally { x.mounted.unmount(); }
+});
+test('the folder editor validates names and implements all five actions with separate confirmation and no favorite removal', async () => {
+  const h = fixture(), library = h.load('localLibrary.js'), A = '7300000000000000201', F = '7300000000000000101', U = '1000000000000001', writes = [];
+  library.saveLocalSeries({ id: A, title: '短劇甲', favorite: true });
+  library.replaceLocalLibrary(library.readLocalLibrary().items.map(item => ({ ...item, cloud_user: U })));
+  const sync = { mode: 'cloud', userId: U, folders: [] };
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useFavoriteSync': {
+    useFavoriteSyncStatus: () => sync,
+    refreshFavoriteFolders: async () => ({ success: true }),
+    changeFavoriteFolder: async input => {
+      writes.push(input);
+      if (input.operation === 'create') sync.folders = [{ id: F, name: input.name, itemIds: [], revision: 'fixture-r1' }];
+      if (input.operation === 'rename') sync.folders[0] = { ...sync.folders[0], name: input.name };
+      if (input.operation === 'add') sync.folders[0] = { ...sync.folders[0], itemIds: [A] };
+      if (input.operation === 'remove') sync.folders[0] = { ...sync.folders[0], itemIds: [] };
+      if (input.operation === 'delete') sync.folders = [];
+      return { success: true, folderId: input.operation === 'delete' ? '' : F };
+    },
+  } }); await ui.flush();
+  const button = label => ui.find(n => n.type === 'button' && n.props['aria-label'] === label);
+  const submit = async label => { await ui.find(n => n.type === 'form' && n.props['aria-label'] === label).props.onSubmit({ preventDefault() {} }); await ui.flush(); };
+  const name = value => { ui.find(n => n.props.id === 'folder-name-input').props.onChange({ target: { value } }); ui.render(); };
+  try {
+    button('新增收藏夾').props.onClick(); ui.render();
+    assert.equal(ui.find(n => n.props.id === 'folder-name-input').props.maxLength, 15);
+    await submit('新增收藏夾名稱'); assert.equal(writes.length, 0);
+    name('桌面夾'); await submit('新增收藏夾名稱');
+    button('重新命名收藏夾').props.onClick(); ui.render(); name('桌面改名'); await submit('修改收藏夾名稱');
+    button('加入短劇到目前收藏夾').props.onClick(); ui.render(); await submit('加入短劇到收藏夾');
+    button('將《短劇甲》移出收藏夾').props.onClick(); ui.render();
+    assert.equal(writes.length, 3);
+    await ui.find(n => n.type === 'button' && n.children.includes('確認移出收藏夾')).props.onClick(); await ui.flush();
+    assert.equal(library.readLocalLibrary().items[0].favorite, true);
+    button('刪除收藏夾').props.onClick(); ui.render(); assert.equal(writes.length, 4);
+    await ui.find(n => n.type === 'button' && n.children.includes('確認刪除收藏夾')).props.onClick(); await ui.flush();
+    assert.deepEqual(writes.map(row => row.operation), ['create', 'rename', 'add', 'remove', 'delete']);
+    assert.equal(writes[4].confirmed, true);
+    assert.equal(library.readLocalLibrary().items[0].favorite, true);
+    assert.equal(sync.folders.length, 0);
+  } finally { ui.unmount(); }
+});
+test('folder UI disables editing while logged out, offline, stale or busy, and clears old-account dialogs', async () => {
+  const h = fixture(), sync = { mode: 'local' }, library = h.load('localLibrary.js');
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useFavoriteSync': { useFavoriteSyncStatus: () => sync } }); await ui.flush();
+  const create = () => ui.find(n => n.props['aria-label'] === '新增收藏夾');
+  try {
+    assert.equal(create().props.disabled, true);
+    Object.assign(sync, { mode: 'cloud', userId: '1000000000000001', folders: [] }); ui.render(); await ui.flush();
+    h.window.navigator = { onLine: false }; ui.render(); assert.equal(create().props.disabled, true);
+    h.window.navigator.onLine = true; sync.foldersStale = true; ui.render(); assert.equal(create().props.disabled, true);
+    sync.foldersStale = false; sync.folderBusy = true; ui.render(); assert.equal(create().props.disabled, true);
+    sync.folderBusy = false; ui.render(); create().props.onClick(); ui.render();
+    assert.ok(ui.find(n => n.props.id === 'folder-name-input'));
+    sync.userId = '2000000000000002'; ui.render(); await ui.flush();
+    assert.equal(Boolean(ui.find(n => n.props.id === 'folder-name-input')), false);
+  } finally { ui.unmount(); }
+});
+
+test('reservation polling promotes a confirmed release without changing favorites, preserves unknown results and stops when inactive', async () => {
+  const timers = new Map(); let sequence = 0, answer = false;
+  const h = fixture({ setInterval: (fn, ms) => { const id = ++sequence; timers.set(id, { fn, ms }); return id; }, clearInterval: id => timers.delete(id) });
+  const library = h.load('localLibrary.js');
+  library.saveLocalSeries({ id: 'reserved-fixture', title: '预约剧', favorite: true, online_time: Date.now() - 1000 });
+  h.window.electronAPI.inspectRelease = async entries => ({ success: true, results: entries.map(entry => ({ id: entry.id, playable: answer })) });
+  const props = { active: true }, ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library }, props);
+  const reserved = () => ui.find(n => n.type === 'details' && n.props.className === 'release-reserved');
+  try {
+    await ui.flush(); assert.ok(reserved());
+    answer = true; await [...timers.values()].find(timer => timer.ms === 60000).fn(); await ui.flush();
+    assert.equal(reserved(), undefined);
+    assert.equal(library.readLocalLibrary().items[0].favorite, true);
+    answer = 'error'; await [...timers.values()].find(timer => timer.ms === 60000).fn(); await ui.flush();
+    assert.equal(reserved(), undefined, 'an unknown response cannot undo a confirmed release');
+    props.active = false; ui.render(); assert.equal(timers.size, 0);
+  } finally { ui.unmount(); }
 });
