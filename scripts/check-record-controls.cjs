@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
 
-function fixture() {
+function fixture(timers = {}) {
   const storage = new Map(), events = new Map();
   const window = {
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
@@ -16,25 +16,25 @@ function fixture() {
   const load = (file, imports = {}) => {
     const module = { exports: {} };
     const code = transformSync(fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), { loader: file.endsWith('.jsx') ? 'jsx' : 'js', format: 'cjs' }).code;
-    vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || {}, window, Event, setTimeout, clearTimeout, setInterval, clearInterval });
+    vm.runInNewContext(code, { module, exports: module.exports, require: name => imports[name] || {}, window, Event, setTimeout, clearTimeout, setInterval, clearInterval, ...timers });
     return module.exports;
   };
   const mount = (file, imports = {}, props = {}) => {
     let cursor = 0, tree;
-    const slots = [], effects = [];
+    const slots = [], effects = [], cleanups = new Map();
     const react = {
       createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) }),
       useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
       useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
       useMemo: fn => { cursor++; return fn(); },
-      useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(fn); } },
+      useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(() => { cleanups.get(i)?.(); const cleanup = fn(); if (typeof cleanup === 'function') cleanups.set(i, cleanup); }); } },
     };
     react.useLayoutEffect = react.useEffect;
     const component = load(file, { './useFavoriteSync': { useFavoriteSyncStatus: () => ({ mode: 'local' }) }, '../favoriteView.mjs': load('favoriteView.mjs'), ...imports, react }).default;
     const render = () => { cursor = 0; tree = component(props); effects.splice(0).forEach(fn => fn()); };
     const nodes = () => { const result = []; const visit = n => { if (!n || typeof n !== 'object') return; result.push(n); n.children?.forEach(visit); }; visit(tree); return result; };
     render();
-    return { render, nodes, find: fn => nodes().find(fn), flush: async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } } };
+    return { render, unmount: () => { for (const cleanup of cleanups.values()) cleanup(); }, nodes, find: fn => nodes().find(fn), flush: async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } } };
   };
   return { storage, window, load, mount };
 }
@@ -278,7 +278,7 @@ test('signed-in history: says it is the phone list, counts follow the account ro
   assert.ok(confirm.children.includes('确认移除（含手机）'));
   await confirm.props.onClick(); await ui.flush();
   assert.ok(filter('全部 2') && filter('已看完 0'));
-  assert.ok(text().includes('已从帐号历史移除《手机看完》'));
+  assert.ok(text().includes('已從帳號歷史移除《手机看完》'));
 });
 
 test('history falls back to this computer with the reason when the account cannot be read', async () => {
@@ -337,7 +337,128 @@ test('favorites with an account: merge once, follow phone removals, send local c
   library.saveLocalSeries({ id: '7300000000000000007', title: '新', favorite: true });
   await new Promise(r => setTimeout(r, 1700)); await settle();
   assert.equal(hook.favoriteSyncStatus().mode, 'local');
-  assert.match(hook.favoriteSyncStatus().error, /读不到/);
+  assert.match(hook.favoriteSyncStatus().error, /暫時無法同步/);
   assert.ok(favs().includes('7300000000000000007'));
   } finally { cleanups.forEach(fn => typeof fn === 'function' && fn()); }
+});
+
+test('history returns fresh counts immediately, orders completed first, and fades the removal toast with cleanup', async () => {
+  const timers = new Map(); let nextTimer = 0;
+  const h = fixture({ setTimeout: (fn, ms) => { timers.set(++nextTimer, { fn, ms }); return nextTimer; }, clearTimeout: id => timers.delete(id) });
+  let rows = [{ series_id: 'a', series_title: '甲', completed: true }, { series_id: 'b', series_title: '乙', completed: false }];
+  const snapshot = () => ({ success: true, results: rows, sync: { mode: 'cloud', userId: '123456', notice: `帳號回報 ${rows.length + 1} 部，已讀取 ${rows.length} 部` } });
+  h.window.electronAPI = { getWatchHistory: async () => snapshot(), removeWatchHistory: async () => { rows = rows.slice(1); return { success: true, cloud: true, history: snapshot() }; } };
+  const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
+  const labels = () => ui.nodes().filter(n => n.type === 'button' && n.props['aria-pressed'] !== undefined).map(n => n.children.join(''));
+  assert.deepEqual(labels(), ['全部 2', '已看完 1', '未看完 1']);
+  ui.find(n => n.props['aria-label'] === '从观看记录移除 甲').props.onClick(); ui.render();
+  await ui.find(n => n.props['aria-label'] === '确认从观看记录移除 甲').props.onClick(); await ui.flush();
+  const text = () => ui.nodes().flatMap(n => n.children || []).filter(x => typeof x === 'string').join('|');
+  assert.ok(text().includes('帳號回報 2 部，已讀取 1 部'));
+  assert.deepEqual(labels(), ['全部 1', '已看完 0', '未看完 1']);
+  assert.ok(ui.find(n => n.props.className === 'record-toast' && n.props.role === 'status'));
+  const timeout = [...timers.values()].find(timer => timer.ms === 4500);
+  assert.ok(timeout); timeout.fn(); ui.render();
+  assert.ok(!ui.find(n => n.props.className === 'record-toast'));
+  ui.unmount(); assert.equal(timers.size, 0);
+});
+
+test('favorites show mobile folders, filter by membership, swap comic before AI, hide raw codes and update counts on removal', async () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, category: 'comic', cloud_user: '123456' });
+  library.saveLocalSeries({ id: 'b', title: '乙', favorite: true, category: 'ai', cloud_user: '123456' });
+  const sync = { mode: 'cloud', userId: '123456', error: 'CODE 101109', folders: [{ id: '999999', name: 'TEST', itemIds: ['a'] }] };
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useFavoriteSync': { useFavoriteSyncStatus: () => sync } }); await ui.flush();
+  const text = () => ui.nodes().flatMap(n => n.children || []).filter(x => typeof x === 'string').join('|');
+  assert.doesNotMatch(text(), /101109|CODE/);
+  const filters = ui.nodes().filter(n => n.type === 'button' && n.props['aria-pressed'] !== undefined).map(n => n.children.join(''));
+  assert.ok(filters.indexOf('漫剧 1') < filters.indexOf('AI 剧 1'));
+  ui.find(n => n.type === 'select').props.onChange({ target: { value: '999999' } }); ui.render();
+  assert.equal(ui.nodes().filter(n => n.props.className === 'release-row').length, 1);
+  ui.find(n => n.props['aria-label'] === '取消收藏《甲》').props.onClick(); ui.render();
+  assert.ok(ui.find(n => n.props.className === 'release-coverage').children.join('').includes('收藏 1 部'));
+  assert.equal(ui.nodes().filter(n => n.props.className === 'release-row').length, 0);
+  assert.ok(ui.find(n => n.type === 'button' && n.children.join('') === '全部 0'));
+  ui.unmount();
+});
+
+function mountSync(h, library) {
+  const slots = [], effects = [], cleanups = new Map(), depsBySlot = new Map(); let cursor = 0;
+  const react = {
+    useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
+    useEffect: (fn, deps) => { const i = cursor++, before = depsBySlot.get(i); if (!before || deps.some((value, index) => !Object.is(value, before[index]))) { depsBySlot.set(i, deps); effects.push(() => { cleanups.get(i)?.(); cleanups.set(i, fn()); }); } },
+    useSyncExternalStore: (_subscribe, get) => get(),
+  };
+  const hook = h.load('components/useFavoriteSync.js', { react, '../localLibrary': library, '../favoriteSync.mjs': h.load('favoriteSync.mjs') });
+  return { hook, render: loggedIn => { cursor = 0; hook.default(loggedIn); effects.splice(0).forEach(fn => fn()); }, unmount: () => { for (const cleanup of cleanups.values()) cleanup?.(); }, flush: async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); } };
+}
+
+test('deferred favorites stay local; offline cancellations persist; empty and failed folder reads do not clear cached folders', async () => {
+  let interval; const timeouts = [];
+  const h = fixture({ setTimeout: fn => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: fn => { interval = fn; return 1; }, clearInterval() {} });
+  const library = h.load('localLibrary.js'), U = '1234567890123456', A = '7300000000000000001', B = '7300000000000000002';
+  const folder = { id: '7700000000000000001', name: 'TEST', itemIds: [A] };
+  h.storage.set('hongguo:favorite-folders:v1', '{broken');
+  library.saveLocalSeries({ id: B, title: '未確認上線', favorite: true, online_time: Date.now() - 1000 });
+  let cloud = [A], folders = [folder], offline = false; const sent = [];
+  h.window.electronAPI = {
+    cloudFavorites: async () => offline ? { success: true, mode: 'local', userId: U, error: 'CODE 101109' } : { success: true, mode: 'cloud', userId: U, folders, rows: cloud.map(id => ({ id, favoritedAt: Date.now() })) },
+    cloudFavoriteSet: async (id, on, userId) => { assert.equal(userId, U); sent.push([id, on]); if (on) return { success: true, userId: U, deferred: true }; cloud = cloud.filter(value => value !== id); return { success: true, userId: U, rows: [] }; },
+  };
+  const mounted = mountSync(h, library); mounted.render(true); await mounted.flush();
+  try {
+    assert.equal(library.readLocalLibrary().items.find(item => item.id === B).cloud_user, null);
+    assert.equal(library.readLocalLibrary().items.find(item => item.id === B).favorite, true);
+    assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 1);
+    assert.match(mounted.hook.favoriteSyncStatus().notice, /先保留/);
+    folders = []; interval(); await mounted.flush(); assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 1);
+    offline = true; interval(); await mounted.flush();
+    library.saveLocalSeries({ id: A, title: '甲', favorite: false });
+    timeouts.at(-1)(); await mounted.flush();
+    assert.ok(JSON.parse(h.storage.get('hongguo:favorite-cancels:v1')).ids.includes(A));
+    assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 1);
+    assert.doesNotMatch(mounted.hook.favoriteSyncStatus().error, /101109|CODE/);
+    offline = false; interval(); await mounted.flush();
+    assert.ok(sent.some(([id, on]) => id === A && !on));
+    assert.equal(library.readLocalLibrary().items.find(item => item.id === A).favorite, false);
+  } finally { mounted.unmount(); }
+});
+
+test('late replies from a signed-out account cannot import records or folders into the next account', async () => {
+  let resolveOld; const h = fixture({ setInterval: () => 1, clearInterval() {} }), library = h.load('localLibrary.js');
+  h.window.electronAPI.cloudFavorites = () => new Promise(resolve => { resolveOld = resolve; });
+  const mounted = mountSync(h, library); mounted.render(true);
+  mounted.render(false);
+  h.window.electronAPI.cloudFavorites = async () => ({ success: true, mode: 'cloud', userId: '222222', rows: [], folders: [] });
+  mounted.render(true);
+  resolveOld({ success: true, mode: 'cloud', userId: '111111', rows: [{ id: '7300000000000000001', favoritedAt: 1000 }], folders: [{ id: '7700000000000000001', name: 'Old', itemIds: [] }] });
+  await mounted.flush();
+  try {
+    assert.equal(library.readLocalLibrary().items.length, 0);
+    assert.equal(mounted.hook.favoriteSyncStatus().userId, '222222');
+    assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 0);
+  } finally { mounted.unmount(); }
+});
+
+test('unfavorite during an in-flight first upload is queued for confirmed account cancellation', async () => {
+  const h = fixture({ setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {} });
+  const library = h.load('localLibrary.js'), A = '7300000000000000001', U = '1234567890123456';
+  library.saveLocalSeries({ id: A, title: '甲', favorite: true });
+  let cloud = [], finishUpload; const sent = [];
+  h.window.electronAPI = {
+    cloudFavorites: async () => ({ success: true, mode: 'cloud', userId: U, rows: cloud.map(id => ({ id, favoritedAt: Date.now() })) }),
+    cloudFavoriteSet: async (id, on) => {
+      sent.push([id, on]);
+      if (on) return new Promise(resolve => { finishUpload = () => { cloud = [A]; resolve({ success: true, userId: U, rows: [{ id: A }] }); }; });
+      cloud = []; return { success: true, userId: U, rows: [] };
+    },
+  };
+  const mounted = mountSync(h, library); mounted.render(true); await mounted.flush();
+  library.saveLocalSeries({ id: A, title: '甲', favorite: false });
+  finishUpload(); await mounted.flush();
+  try {
+    assert.deepEqual(sent, [[A, true], [A, false]]);
+    assert.equal(library.readLocalLibrary().items.find(item => item.id === A).favorite, false);
+    assert.deepEqual(cloud, []);
+  } finally { mounted.unmount(); }
 });

@@ -96,3 +96,19 @@ test('profiles do not share state: using the reader profile first does not chang
     const after = withFrozenWorld(hongguoSamples);
     assert.equal(digest(after.landpage), GOLDEN.landpage);
 });
+
+
+test('playback signing requires a registered identity without changing directory or reader signing', () => {
+    withFrozenWorld(app => {
+        const apiPath = '/reading/bookapi/video_tab/multi_video_model/v1/';
+        assert.throws(() => app.signedMetadataRequest(apiPath), { code: 'DEVICE_REGISTRATION_FAILED' });
+        assert.throws(() => app.signedMetadataRequest(apiPath, {}, null, { identity: { device_id: '0', iid: '1' } }), { code: 'DEVICE_REGISTRATION_FAILED' });
+        const before = app.signedMetadataRequest('/reading/distribution/category/landpage/v/');
+        const signed = app.signedMetadataRequest(apiPath, { video_id: '11' }, null, { identity });
+        const query = new URL(signed.url).searchParams;
+        for (const key of ['iid', 'device_id', 'cdid']) assert.equal(query.get(key), identity[key]);
+        const after = app.signedMetadataRequest('/reading/distribution/category/landpage/v/');
+        for (const key of ['iid', 'device_id', 'cdid']) assert.equal(new URL(after.url).searchParams.get(key), new URL(before.url).searchParams.get(key));
+        assert.equal(query.get('version_code'), '73532');
+    });
+});

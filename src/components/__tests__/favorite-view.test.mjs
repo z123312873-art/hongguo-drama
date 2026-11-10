@@ -33,7 +33,7 @@ test('playable and not-yet-online split; online by date but unconfirmed still wa
 test('all category buttons remain visible, including an empty comic filter', () => {
   const items = [fav('1', { category: 'real' }), fav('2', { category: 'ai' }), fav('3', { category: 'ai' }), fav('4', { category: 'bogus' })];
   const view = favoriteView(items, { filter: 'ai', now: NOW });
-  assert.deepEqual(view.filters.map(f => [f.id, f.count]), [['all', 4], ['playable', 4], ['waiting', 0], ['real', 1], ['ai', 2], ['comic', 0]]);
+  assert.deepEqual(view.filters.map(f => [f.id, f.count]), [['all', 4], ['playable', 4], ['waiting', 0], ['real', 1], ['comic', 0], ['ai', 2]]);
   assert.deepEqual(view.rows.map(r => r.id), ['2', '3']);
   const gone = favoriteView(items, { filter: 'comic', now: NOW });
   assert.equal(gone.filter, 'comic');
@@ -46,7 +46,7 @@ test('empty and bad input', () => {
     const view = favoriteView(input, { now: NOW });
     assert.deepEqual(view.rows, []);
     assert.equal(view.total, 0);
-    assert.deepEqual(view.filters.map(f => f.id), ['all', 'playable', 'waiting', 'real', 'ai', 'comic']);
+    assert.deepEqual(view.filters.map(f => f.id), ['all', 'playable', 'waiting', 'real', 'comic', 'ai']);
   }
 });
 
@@ -61,4 +61,18 @@ test('category from the discover section', () => {
   assert.equal(categoryFromBrowse(undefined), '');
   assert.equal(favoriteCategory('ai'), 'ai');
   assert.equal(favoriteCategory('AI'), '');
+});
+
+test('folder membership intersects every category and changes counts immediately after removal', () => {
+  const items = [
+    { id: 'a', title: 'A', favorite: true, category: 'comic', favorited_at: 1 },
+    { id: 'b', title: 'B', favorite: true, category: 'ai', favorited_at: 2 },
+    { id: 'c', title: 'C', favorite: true, category: 'real', favorited_at: 3 },
+  ];
+  const view = favoriteView(items, { folderIds: ['a', 'b'] });
+  assert.deepEqual(view.rows.map(item => item.id), ['b', 'a']);
+  assert.equal(view.total, 2);
+  assert.equal(view.filters.find(item => item.id === 'real').count, 0);
+  assert.deepEqual(favoriteView(items, { folderIds: [], filter: 'comic' }).rows, []);
+  assert.equal(favoriteView(items.map(item => item.id === 'a' ? { ...item, favorite: false } : item), { folderIds: ['a', 'b'] }).total, 1);
 });

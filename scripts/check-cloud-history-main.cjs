@@ -12,7 +12,7 @@ const source = path.resolve(__dirname, '../main.js'), req = createRequire(source
 const ONE = '7300000000000000001', TWO = '7300000000000000002', THREE = '7300000000000000003';
 const row = (id, extra = {}) => ({ book_id_str: id, book_name: `剧${id.slice(-1)}`, episode_cnt: 10, vid_index: 4, current_play_position: 30000, duration: 60000, read_timestamp_ms: 2000, ...extra });
 
-function load({ account = true, saved = '1000000000000001', encryption = true, server = {} } = {}) {
+function load({ account = true, saved = '1000000000000001', encryption = true, server = {}, clock = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-cloud-'));
   const handlers = {}, app = new EventEmitter(), sent = [], timers = [];
   Object.assign(app, { getVersion: () => 'test', getPath: () => dir, commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }) });
@@ -43,9 +43,11 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
     request: async (method, apiPath, query, body) => {
       cloud.requests.push({ method, apiPath, query, body });
       if (cloud.fail) throw new Error(cloud.fail);
+      if (apiPath.includes('bookshelf_folder')) return cloud.folderResponse || { code: 0, data: { folders: [], folder_count: 0, has_more: false } };
       if (apiPath.includes('bookshelf')) {
         if (cloud.favFail) throw new Error(cloud.favFail);
         if (method === 'GET') return { code: 0, data: { video_shelf_info: cloud.favorites.map(id => ({ series_id: id, collect_time: 1700000000 })) } };
+        if (cloud.favUpdateFail) throw new Error(cloud.favUpdateFail);
         const change = JSON.parse(body).update_bookshelf_video_list[0];
         if (!cloud.favIgnore) cloud.favorites = change.video_shelf_operate_type === 0 ? [...new Set([...cloud.favorites, change.book_id])] : cloud.favorites.filter(id => id !== change.book_id);
         return { code: 0, data: {} };
@@ -59,10 +61,11 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
     },
   };
   const series = [ONE, THREE].map(id => ({ series_id: id, series_title: `本地${id.slice(-1)}`, total: 10, episodes: Array.from({ length: 10 }, (_, i) => ({ vid_index: i + 1, vid: `74${i}` })) }));
+  const freshSeries = structuredClone(series);
   const offline = { search: async () => ({ success: true, results: [] }) };
   const overrides = { electron, './src/store': store, './src/native/account-code': { createCodeClient: () => fakeClient },
-    './src/native/hongguo': { fetchEpisodeList: async id => structuredClone(series.find(item => item.series_id === id) || series[0]) }, './src/native/xifan': offline, './src/native/hema': offline };
-  const context = vm.createContext({ require: name => overrides[name] || req(name), __dirname: path.dirname(source), process, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController,
+    './src/native/hongguo': { fetchEpisodeList: async id => { (cloud.catalogReads ||= []).push(id); if (cloud.availability === 'error') throw new Error('HTTP 500'); return cloud.availability === 'offline' ? { episodes: [] } : structuredClone(cloud.catalog || freshSeries.find(item => item.series_id === id) || freshSeries[0]); } }, './src/native/xifan': offline, './src/native/hema': offline };
+  const context = vm.createContext({ Date: clock === null ? Date : class extends Date { static now() { return clock; } }, require: name => overrides[name] || req(name), __dirname: path.dirname(source), process, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController,
     setTimeout: (fn, ms) => { timers.push(fn); return timers.length; }, clearTimeout() {} });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   require('./fixtures/trusted-ipc.cjs')(context, handlers);
@@ -71,7 +74,7 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
   context.runSearchSniff = offline.search;
   vm.runInContext('seriesRegistry = fixture', context);
   const call = (name, ...args) => handlers[name]({}, ...args);
-  return { call, cloud, sent, timers, playback: () => playback, blob: () => blob, record: () => record, restored: () => restored, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return { call, cloud, sent, timers, registry: () => vm.runInContext('seriesRegistry', context), playback: () => playback, blob: () => blob, record: () => record, restored: () => restored, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
 const ids = result => result.results.map(item => item.series_id);
@@ -235,7 +238,7 @@ test('favorites: signed out stays local; signed in lists the account with names;
     h.cloud.favFail = 'HTTP 500';
     const failed = await h.call('cloud-favorites');
     assert.equal(failed.mode, 'local');
-    assert.match(failed.error, /HTTP 500/);
+    assert.match(failed.error, /暫時無法同步/);
   } finally { h.cleanup(); }
 });
 
@@ -276,4 +279,111 @@ test('existing same-time synced history repairs its completed tab without invent
     assert.equal(h.playback()[TWO].updatedAt, 2500);
     assert.equal(result.results.filter(r => r.completed).length, 1);
   } finally { h.cleanup(); }
+});
+
+test('removal returns the fresh history and both count sources without a page reload', async () => {
+  const h = load({ clock: Date.now() + 1000, server: { reportedTotal: 14 } });
+  try {
+    await h.call('get-watch-history');
+    h.cloud.reportedTotal = 13;
+    const removed = await h.call('remove-watch-history', ONE);
+    assert.equal(removed.success, true);
+    assert.equal(removed.history.sync.accountCount, 2);
+    assert.equal(removed.history.sync.reportedTotal, 13);
+    assert.match(removed.history.sync.notice, /13.*2/);
+    assert.ok(!ids(removed.history).includes(ONE));
+  } finally { h.cleanup(); }
+});
+
+test('unavailable and unconfirmed availability defer only uploads, preserving cancellations', async () => {
+  for (const availability of ['offline', 'error']) {
+    const h = load({ server: { availability } });
+    try {
+      const deferred = await h.call('cloud-favorite-set', ONE, true);
+      assert.equal(deferred.success, true); assert.equal(deferred.deferred, true);
+      assert.ok(!h.cloud.requests.some(row => row.apiPath?.includes('video/update')));
+      const cancelled = await h.call('cloud-favorite-set', TWO, false);
+      assert.equal(cancelled.success, true); assert.ok(!h.cloud.favorites.includes(TWO));
+    } finally { h.cleanup(); }
+  }
+});
+
+test('removed content is deferred without raw codes; other failures stay friendly and retryable', async () => {
+  const h = load({ server: { favUpdateFail: 'CODE 101109' } });
+  try {
+    const added = await h.call('cloud-favorite-set', ONE, true);
+    assert.equal(added.success, true); assert.equal(added.deferred, true);
+    assert.doesNotMatch(JSON.stringify(added), /101109|CODE/);
+    const cancelled = await h.call('cloud-favorite-set', TWO, false);
+    assert.equal(cancelled.success, false); assert.doesNotMatch(cancelled.error, /101109|CODE/);
+    h.cloud.favUpdateFail = 'HTTP 500';
+    const failed = await h.call('cloud-favorite-set', ONE, true);
+    assert.equal(failed.success, false); assert.match(failed.error, /暫時無法同步/);
+  } finally { h.cleanup(); }
+});
+
+test('stale-account writes and removals are refused before any account request', async () => {
+  const h = load();
+  try {
+    assert.equal((await h.call('cloud-favorite-set', ONE, true, 'other')).success, false);
+    assert.equal((await h.call('remove-watch-history', ONE, 'other')).success, false);
+    assert.equal(h.cloud.requests.length, 0);
+  } finally { h.cleanup(); }
+});
+
+test('folder reads are independent from favorites; an error does not turn favorites into an empty list', async () => {
+  const h = load({ server: { folderResponse: { code: 120007 } } });
+  try {
+    const result = await h.call('cloud-favorites');
+    assert.equal(result.mode, 'cloud'); assert.equal(result.rows.length, 2);
+    assert.match(result.foldersError, /暫時無法讀取/);
+    assert.doesNotMatch(JSON.stringify(result), /120007|CODE/);
+  } finally { h.cleanup(); }
+});
+
+test('history opens the same validated exact episode as search and repairs a saved stale catalog without rewriting progress', async () => {
+  const h = load();
+  try {
+    const entry = h.registry().find(item => item.series_id === ONE);
+    entry.episodes[0].vid = '7300000000000999999';
+    const before = structuredClone(h.playback());
+    assert.equal((await h.call('play-series', { seriesId: ONE, vidIndex: 1, resume: true })).success, true);
+    const history = await h.call('get-series-episodes', ONE);
+    assert.equal(history.data.episodes[0].vid, '740');
+    const repaired = h.registry().find(item => item.series_id === ONE).episodes[0].vid;
+    await h.call('search-resolve', ONE);
+    const searched = await h.call('get-series-episodes', ONE);
+    assert.equal(searched.data.episodes[0].vid, repaired);
+    assert.deepEqual(h.playback(), before);
+  } finally { h.cleanup(); }
+});
+
+test('failed or empty resume refresh keeps the saved catalog and local playback; a missing episode never silently selects the first', async () => {
+  const h = load();
+  try {
+    const before = JSON.stringify(h.registry());
+    h.cloud.availability = 'error';
+    assert.equal((await h.call('play-series', { seriesId: ONE, vidIndex: 1, resume: true })).success, true);
+    assert.equal(JSON.stringify(h.registry()), before);
+    h.cloud.availability = 'offline';
+    assert.equal((await h.call('play-series', { seriesId: ONE, vidIndex: 1, resume: true })).success, true);
+    assert.equal(JSON.stringify(h.registry()), before);
+    h.cloud.availability = '';
+    h.cloud.catalog = { series_id: ONE, episodes: [{ vid: '7300000000000000999', vid_index: 1 }] };
+    const missing = await h.call('play-series', { seriesId: ONE, vidIndex: 7, resume: true });
+    assert.equal(missing.success, false); assert.equal(missing.code, 'HISTORY_EPISODE_UNAVAILABLE');
+    assert.equal(JSON.stringify(h.registry()), before);
+  } finally { h.cleanup(); }
+});
+
+test('wrong-series or imprecise catalog data never replaces saved playback metadata', async () => {
+  for (const catalog of [{ series_id: TWO, episodes: [{ vid: '7300000000000000999', vid_index: 1 }] }, { series_id: ONE, episodes: [{ vid: 7300000000000000999, vid_index: 1 }] }]) {
+    const h = load({ server: { catalog } });
+    try {
+      const before = JSON.stringify(h.registry());
+      await h.call('play-series', { seriesId: ONE, vidIndex: 1, resume: true });
+      assert.equal(JSON.stringify(h.registry()), before);
+      assert.equal((await h.call('search-resolve', ONE)).success, false);
+    } finally { h.cleanup(); }
+  }
 });

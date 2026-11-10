@@ -223,16 +223,19 @@ function registeredIdentity(identity) {
 }
 function signedMetadataRequest(apiPath, values = {}, payload = null, options = {}) {
     const reader = options?.profile === 'reader';
+    const playback = !reader && apiPath === VIDEO_TAB_PATH;
     if (options?.profile !== undefined && !reader && options.profile !== 'hongguo') throw new Error('不支持的 App 身份配置');
     if (!(reader ? READER_PROFILE.paths : HONGGUO_METADATA_PATHS).includes(apiPath)) {
         throw new Error('不支持的 App 目录接口');
     }
     if (reader && !registeredIdentity(options.identity)) throw new Error('阅读接口需要已注册的匿名设备');
+    if (playback && !registeredIdentity(options.identity)) throw Object.assign(new Error('播放連線尚未準備好，請稍後重試。'), { code: 'DEVICE_REGISTRATION_FAILED' });
     const device = reader ? { ...DEVICE, aid: READER_PROFILE.aid, app_name: READER_PROFILE.appName,
         version_code: READER_PROFILE.version, version_name: READER_PROFILE.versionName, manifest_version_code: READER_PROFILE.version,
         update_version_code: READER_PROFILE.version, pv_player: READER_PROFILE.version,
         iid: options.identity.iid, device_id: options.identity.device_id, ...(options.identity.cdid ? { cdid: options.identity.cdid } : {}) }
-        : metadataDevice;
+        : playback ? { ...metadataDevice, iid: options.identity.iid, device_id: options.identity.device_id,
+            ...(options.identity.cdid ? { cdid: options.identity.cdid } : {}) } : metadataDevice;
     const body = payload === null ? null : Buffer.from(JSON.stringify(payload));
     const khronos = Math.floor(Date.now() / 1000), ticketBase = Date.now();
     let query, url, requestTicket;
@@ -368,14 +371,15 @@ async function requestMetadata(apiPath, values = {}, payload = null) {
     throw lastError || Object.assign(new Error('App 目录请求失败'), { code: 'APP_NETWORK' });
 }
 
-async function readVideoTab(vid, deadline, signal) {
+async function readVideoTab(vid, deadline, signal, identity) {
+    if (!registeredIdentity(identity)) return null;
     const values = {
         video_id: vid, video_id_type: '0', device_level: '1', need_all_video_definition: '1',
         need_mp4_align: '0', use_os_player: '0', video_platform: '1024', source: '0', from_video_id: '',
     };
     for (const host of METADATA_HOSTS) {
         try {
-            const signed = signedMetadataRequest(VIDEO_TAB_PATH, values, null, { host });
+            const signed = signedMetadataRequest(VIDEO_TAB_PATH, values, null, { host, identity });
             const json = await requestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline, signal);
             if (Number(json?.code ?? json?.Code ?? 0) !== 0) continue;
             const raw = json?.data?.video_model_data?.[vid]?.video_model;
@@ -518,10 +522,10 @@ async function fetchAppPlayUrl(vid, options = {}) {
     throw lastError?.code === 'SECURITY_BLOCKED' ? lastError
         : Object.assign(new Error('本集片源地址或密钥无法解析'), { code: 'INVALID_RESPONSE' });
     };
-    const catalogModel = await readVideoTab(vid, deadline, signal);
-    if (catalogModel) return await variantsFrom(catalogModel);
     let identity = null, registrationReason = '';
     try { identity = await takePlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
+    const catalogModel = await readVideoTab(vid, deadline, signal, identity);
+    if (catalogModel) return await variantsFrom(catalogModel);
     const firstHost = preferredHost;
     let result, answeredBy = firstHost;
     try {

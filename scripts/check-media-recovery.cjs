@@ -78,6 +78,13 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     const p=await h.handlers['prepare-online-play']({}, {vid:'11',seriesId:'1'});
     assert.equal(p.success,true,p.error); assert.equal(lookups,2);
   });
+  await check('mixed preview and empty model failures stop bounded retries instead of looping through a third source lookup', async () => {
+    let lookups = 0;
+    const h = harness(async () => { lookups++; return { url: null, code: 'SOURCE_UNAVAILABLE', error: '暫時無法取得本集片源，請稍後重試。', sources: [{ source: 'web', code: 'PREVIEW_ONLY' }, { source: 'app', code: 'EMPTY_RESPONSE' }, { source: 'api', code: 'INVALID_RESPONSE' }] }; });
+    const result = await h.handlers['prepare-online-play']({}, { vid: '11', seriesId: '1' });
+    assert.equal(result.success, false);
+    assert.equal(lookups, 2);
+  });
   await check('stream recovers before headers and preserves requested Range',async()=>{
     let lookups=0; const h=harness(async()=>++lookups===1?info('/missing','web'):info('/ok'));
     const p=await h.handlers['prepare-online-play']({}, {vid:'11',seriesId:'1'});

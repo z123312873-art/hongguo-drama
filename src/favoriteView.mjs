@@ -8,8 +8,8 @@ const FILTERS = [
   { id: 'playable', label: '可播放' },
   { id: 'waiting', label: '尚未上线' },
   { id: 'real', label: '真人剧' },
-  { id: 'ai', label: 'AI 剧' },
   { id: 'comic', label: '漫剧' },
+  { id: 'ai', label: 'AI 剧' },
 ];
 
 export const favoriteCategory = value => FAVORITE_CATEGORIES.includes(value) ? value : '';
@@ -43,8 +43,8 @@ const newestFirst = (a, b) => {
 };
 
 // Keep the same filters visible even when a category is empty or the account has not loaded yet.
-export function favoriteView(items, { filter = 'all', now = Date.now(), released = {} } = {}) {
-  const favorites = (Array.isArray(items) ? items : []).filter(item => item && item.favorite);
+export function favoriteView(items, { filter = 'all', now = Date.now(), released = {}, folderIds = null } = {}) {
+  const favorites = (Array.isArray(items) ? items : []).filter(item => item && item.favorite && (!Array.isArray(folderIds) || folderIds.includes(String(item.id))));
   const counts = Object.fromEntries(FILTERS.map(({ id }) => [id, favorites.filter(item => matches(item, id, now, released)).length]));
   const filters = FILTERS.map(row => ({ ...row, count: counts[row.id] }));
   const chosen = filters.some(row => row.id === filter) ? filter : 'all';

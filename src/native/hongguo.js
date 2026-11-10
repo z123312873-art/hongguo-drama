@@ -121,7 +121,7 @@ async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
       }
       const text = buf.toString('utf8');
       try {
-        return JSON.parse(text);
+        return require('./json-values').parseJson(text);
       } catch (e) {
         const err = new Error(`响应不是合法 JSON（HTTP 200，${buf.length} 字节）: ${text.slice(0, 100)}`);
         err.detail = signal;
@@ -753,8 +753,14 @@ function sourceFailure(source, error) {
 }
 
 function unavailableSources(sources, quality = 'auto') {
-  const names = { web: '网页', app: 'App', api: '旧接口' };
-  const error = new Error(`本集取源失败${quality === 'auto' ? '' : `（所选清晰度 ${quality}，未降级）`}：${sources.map(item => `${names[item.source]}：${item.message}`).join('；')}。请重试或在官方 App 确认可播情况。`);
+  const codes = sources.map(item => item.code);
+  let message = '暫時無法取得本集片源，請稍後重試。';
+  if (codes.includes('SECURITY_BLOCKED')) message = '片源連線未通過安全檢查，請檢查網路設定。';
+  else if (codes.includes('TIMEOUT')) message = '連接片源逾時，請稍後重試。';
+  else if (sources.some(item => /轉碼|转码/.test(item.message))) message = '本集需要轉碼元件，請確認程式已完整安裝。';
+  else if (quality !== 'auto' && codes.includes('NO_PLAYABLE_SOURCE')) message = `暫無可播放的 ${quality.toUpperCase()} 片源，請試試「自動」畫質。`;
+  else if (codes.includes('NETWORK_ERROR')) message = '無法連接片源，請檢查網路或防護軟體設定。';
+  const error = new Error(message);
   error.code = 'SOURCE_UNAVAILABLE';
   error.sources = sources;
   return error;

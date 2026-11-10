@@ -5,6 +5,8 @@ import { markConfirmed, newCancels, planFavorites } from '../favoriteSync.mjs';
 const CANCEL_KEY = 'hongguo:favorite-cancels:v1';
 const REFRESH_MS = 5 * 60 * 1000;
 const LOCAL = { mode: 'local' };
+const FOLDER_KEY = 'hongguo:favorite-folders:v1';
+const SYNC_ERROR = '手機收藏暫時無法同步，這臺電腦的收藏仍會保留。請稍後重試。';
 let current = LOCAL;
 const listeners = new Set();
 
@@ -35,7 +37,21 @@ function writeCancels(userId, ids) {
   } catch { /* retried on the next sync */ }
 }
 
-// Keeps this computer's favorites equal to the signed-in account's. Signed out, nothing is sent.
+function cachedFolders(userId, incoming) {
+  if (!userId) return [];
+  let saved;
+  try { saved = JSON.parse(window.localStorage.getItem(FOLDER_KEY) || 'null'); } catch {}
+  const previous = saved?.userId === userId && Array.isArray(saved.folders) ? saved.folders : [];
+  const valid = folders => folders.filter(folder => typeof folder?.id === 'string' && /^\d{6,25}$/.test(folder.id) && typeof folder.name === 'string' && Array.isArray(folder.itemIds) && folder.itemIds.every(id => typeof id === 'string' && /^\d{6,25}$/.test(id)));
+  if (Array.isArray(incoming) && incoming.length) {
+    const folders = valid(incoming);
+    if (folders.length !== incoming.length) return valid(previous);
+    try { window.localStorage.setItem(FOLDER_KEY, JSON.stringify({ userId, folders })); } catch {}
+    return folders;
+  }
+  return valid(previous);
+}
+
 export default function useFavoriteSync(loggedIn) {
   const user = useRef('');
   const busy = useRef(false);
@@ -45,6 +61,7 @@ export default function useFavoriteSync(loggedIn) {
   const before = useRef(readLocalLibrary().items);
   const live = useRef(loggedIn);
   live.current = loggedIn;
+  const epoch = useRef(0);
 
   const apply = (items) => {
     applying.current = true;
@@ -59,12 +76,14 @@ export default function useFavoriteSync(loggedIn) {
     if (!live.current || typeof api?.cloudFavorites !== 'function') { user.current = ''; publish(LOCAL); return; }
     if (busy.current) { again.current = true; return; }
     busy.current = true;
+    const version = epoch.current;
+    const valid = () => live.current && version === epoch.current;
     try {
       const result = await api.cloudFavorites();
-      if (!live.current) return;
+      if (!valid()) return;
       if (!result?.success || result.mode !== 'cloud' || !Array.isArray(result.rows)) {
-        user.current = '';
-        publish({ mode: 'local', error: result?.error || '' });
+        user.current = String(result?.userId || '');
+        publish({ mode: 'local', userId: user.current, folders: cachedFolders(user.current), error: result?.error ? SYNC_ERROR : '' });
         return;
       }
       const userId = String(result.userId || '');
@@ -75,23 +94,33 @@ export default function useFavoriteSync(loggedIn) {
       let cancels = plan.cancels;
       writeCancels(userId, cancels);
       const errors = [];
+      let deferredNotice = '';
+      const folders = cachedFolders(userId, result.folders);
       if (plan.changed) {
         const written = apply(plan.items);
         if (written.error) errors.push(written.error);
       }
       for (const [ids, on] of [[plan.toAdd, true], [plan.toCancel, false]]) {
         for (const id of ids) {
-          if (!live.current || user.current !== userId) return;
+          if (!valid() || user.current !== userId) return;
           let reply;
-          try { reply = await api.cloudFavoriteSet(id, on); } catch (error) { reply = { success: false, error: error.message }; }
+          try { reply = await api.cloudFavoriteSet(id, on, userId); } catch (error) { reply = { success: false, error: error.message }; }
+          if (!valid() || (reply?.userId && String(reply.userId) !== userId)) return;
+          if (reply?.deferred) { deferredNotice = '部分影片尚無法加入手機收藏，已先保留在這臺電腦；可播放後會再同步。'; continue; }
           if (!reply?.success) { errors.push(reply?.error || '手机收藏同步失败'); continue; }
           if (!on) { cancels = cancels.filter(item => item !== id); writeCancels(userId, cancels); }
-          apply(markConfirmed(readLocalLibrary().items, id, userId, on));
+          const latest = readLocalLibrary().items;
+          if (on && !latest.some(item => item.id === id && item.favorite)) {
+            cancels = [...new Set([...cancels, id])];
+            writeCancels(userId, cancels);
+            again.current = true;
+          }
+          apply(markConfirmed(latest, id, userId, on));
         }
       }
-      publish({ mode: 'cloud', userId, syncedAt: Date.now(), notice: plan.notice, error: errors[0] || '' });
+      publish({ mode: 'cloud', userId, syncedAt: Date.now(), folders, foldersError: result.foldersError || '', notice: deferredNotice || plan.notice, error: errors.length ? SYNC_ERROR : '' });
     } catch (error) {
-      publish({ mode: 'local', error: error.message || '手机收藏暂时读不到' });
+      if (valid()) publish({ mode: 'local', userId: user.current, folders: cachedFolders(user.current), error: SYNC_ERROR });
     } finally {
       busy.current = false;
       if (again.current) { again.current = false; sync(); }
@@ -111,6 +140,7 @@ export default function useFavoriteSync(loggedIn) {
   }), []);
 
   useEffect(() => {
+    epoch.current++;
     before.current = readLocalLibrary().items;
     if (!loggedIn) { user.current = ''; publish(LOCAL); return undefined; }
     sync();
@@ -118,6 +148,6 @@ export default function useFavoriteSync(loggedIn) {
     let lastFocus = 0;
     const onFocus = () => { if (Date.now() - lastFocus > 30000) { lastFocus = Date.now(); sync(); } };
     window.addEventListener('focus', onFocus);
-    return () => { clearInterval(interval); clearTimeout(timer.current); window.removeEventListener('focus', onFocus); };
+    return () => { epoch.current++; live.current = false; clearInterval(interval); clearTimeout(timer.current); window.removeEventListener('focus', onFocus); };
   }, [loggedIn]);
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Play, RefreshCw, Clock, Trash2 } from './icons';
+import { Play, RefreshCw, Clock, Trash2, Check, Shield } from './icons';
 import './WatchHistory.css';
 
 export default function WatchHistory({ active = true, onNavigate }) {
@@ -45,6 +45,13 @@ export default function WatchHistory({ active = true, onNavigate }) {
   }, [active]);
   useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(() => { if (active) load(); }), [active]);
 
+  useEffect(() => {
+    if (!active) { setStatus(''); return undefined; }
+    if (!status) return undefined;
+    const timeout = setTimeout(() => setStatus(''), 4500);
+    return () => clearTimeout(timeout);
+  }, [status, active]);
+
   const checkUpdates = async () => {
     setChecking(true); setStatus(''); setError('');
     try {
@@ -65,11 +72,14 @@ export default function WatchHistory({ active = true, onNavigate }) {
     setError('');
     setStatus('');
     try {
-      const result = await window.electronAPI.removeWatchHistory(row.series_id);
+      const result = await window.electronAPI.removeWatchHistory(row.series_id, sync.mode === 'cloud' ? sync.userId : undefined);
       if (!result?.success) throw new Error(result?.error || '移除失败，请重试');
       request.current++;
-      setRows(current => current.filter(item => item.series_id !== row.series_id));
-      setStatus(result.cloud ? `已从帐号历史移除《${row.series_title}》，手机重新进入「历史」后也会消失；视频文件不受影响。` : `已移除《${row.series_title}》的观看记录，视频文件不受影响。`);
+      if (result.history?.success && Array.isArray(result.history.results)) {
+        setRows(result.history.results);
+        setSync(result.history.sync || { mode: 'local' });
+      } else setRows(current => current.filter(item => item.series_id !== row.series_id));
+      setStatus(result.cloud ? `已從帳號歷史移除《${row.series_title}》，影片檔案保留。` : `已移除《${row.series_title}》的觀看紀錄，影片檔案保留。`);
     } catch (failure) { setError(failure.message || '移除失败，请重试'); }
     finally { setRemoving(''); }
   };
@@ -120,18 +130,21 @@ export default function WatchHistory({ active = true, onNavigate }) {
     </div>
     {sync.mode === 'local' && sync.error && <p className="history-error" role="status">{sync.error}</p>}
     {sync.mode === 'cloud' && sync.error && <p className="history-hint" role="status">{sync.error}</p>}
-    {sync.mode === 'cloud' && sync.notice && <p className="history-hint" role="status">{sync.notice}</p>}
-    <p className="history-hint">{sync.mode === 'cloud' ? '两边合并：只在这台电脑的会上传到手机，只在手机的会加进来，同一部保留较新的进度。移除会同时从手机历史删除。' : ''}检查更新只包含这份列表里的剧。移除后不再检查该剧，已下载视频仍保留；再次播放会重新出现。不同剧号的新一季标为“疑似续作”。</p>
+    <div className="record-summary" aria-label="觀看紀錄同步說明">
+      {sync.mode === 'cloud' && <div><RefreshCw size={18} /><p><strong>手機與電腦同步</strong><span>同一部保留較新進度，兩邊新增的記錄都會合併。</span></p></div>}
+      {sync.mode === 'cloud' && sync.notice && <div role="status"><Clock size={18} /><p>{sync.notice}</p></div>}
+      <div><Shield size={18} /><p><strong>移除記錄，不刪影片</strong><span>{sync.mode === 'cloud' ? '移除會同步至手機歷史。' : ''}再次播放會重新記錄；更新檢查只看目前清單。</span></p></div>
+    </div>
     <div className="history-filter" role="group" aria-label="观看进度筛选">
       {[
         ['all', '全部', rows.length],
-        ['unfinished', '未看完', rows.length - completedCount],
         ['completed', '已看完', completedCount],
+        ['unfinished', '未看完', rows.length - completedCount],
       ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={filter === value} disabled={loading} onClick={() => { setFilter(value); setPendingRemove(''); }}>{label} {count}</button>)}
     </div>
-    <p className="history-hint">按当前最后一集的片尾进度判断；旧记录可能显示未看完。</p>
+    <p className="history-hint">依帳號的完播狀態與最新觀看進度分類；新增集數後可能回到「未看完」。</p>
     {error && <div className="history-error" role="alert"><span>{error}</span><button className="btn btn-outline btn-sm" onClick={load}>重新加载</button></div>}
-    {status && <p className="history-hint" role="status">{status}</p>}
+    {status && <div key={status} className="record-toast" role="status" aria-live="polite"><Check size={18} /><span>{status}</span></div>}
     {loading ? <p role="status">正在读取观看记录…</p> : !rows.length ? <div className="history-empty">
       <Clock size={30} /><h2>还没有观看记录</h2><p>真正开始播放后，短剧和进度会出现在这里。</p>
       <button className="btn btn-primary" onClick={() => onNavigate?.('browse')}>去发现短剧</button>

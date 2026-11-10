@@ -209,9 +209,9 @@ function createCodeClient({
     if (response?.status !== 200) throw new Error(`HTTP ${response?.status || 0}`);
     const payload = parseBody(response.text);
     if (!payload || typeof payload !== 'object') throw new Error('BAD_BODY');
-    if (payload.code === undefined || String(payload.code) !== '0') throw new Error(`CODE ${payload.code}`);
+    if (payload.code === undefined || String(payload.code) !== '0') throw Object.assign(new Error(`CODE ${payload.code}`), { code: String(payload.code) });
     const nested = errorCode(payload);
-    if (nested && nested !== '0') throw new Error(`CODE ${nested}`);
+    if (nested && nested !== '0') throw Object.assign(new Error(`CODE ${nested}`), { code: String(nested) });
     return payload;
   };
   const request = async (method, path, query = {}, json = undefined) => {

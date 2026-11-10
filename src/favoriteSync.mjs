@@ -55,7 +55,7 @@ export function planFavorites({ items, cloud, userId, cancels = [], now = Date.n
   return {
     items: [...byId.values()], changed,
     toAdd: toAdd.slice(0, MAX_CHANGES), toCancel: toCancel.slice(0, MAX_CHANGES),
-    cancels: toCancel,
+    cancels: cloud.length ? toCancel : [...pendingCancel],
     notice: kept ? `手机收藏是空的，这台电脑的 ${kept} 部收藏先保留，没有删除` : '',
   };
 }

@@ -558,8 +558,9 @@ function saveSeriesRegistry() {
  * 已有的不覆盖 episodes（避免接口异常时把好数据冲掉），仅补全标题与封面。
  */
 function upsertSeriesRegistry(data) {
-  if (!data || !data.series_id || !Array.isArray(data.episodes) || data.episodes.length === 0) return;
+  if (!data || !data.series_id || !Array.isArray(data.episodes) || data.episodes.length === 0) return false;
   const sid = String(data.series_id);
+  if (/^[1-9]\d{5,24}$/.test(sid) && !require('./src/native/playback-catalog').validCatalog(data, sid)) return false;
   const idx = seriesRegistry.findIndex((s) => String(s.series_id) === sid);
   const entry = {
     series_id: sid,
@@ -582,6 +583,7 @@ function upsertSeriesRegistry(data) {
   if (idx === -1) seriesRegistry.unshift(entry);
   else seriesRegistry[idx] = { ...seriesRegistry[idx], ...entry, dismissed: false };
   saveSeriesRegistry();
+  return true;
 }
 
 /** 剧库可见的短剧（过滤掉被用户移除的） */
@@ -973,7 +975,7 @@ ipcMain.handle('hongguo-resolve', async (event, input) => {
   try {
     const seriesId = await hongguo.resolveSeriesId(input);
     const data = await hongguo.fetchEpisodeList(seriesId);
-    upsertSeriesRegistry(data);
+    if (upsertSeriesRegistry(data) === false) return { success: false, error: '分集資料不完整，已保留原有紀錄。請稍後再試。' };
     return { success: true, data };
   } catch (error) {
     console.error('[Hongguo] 解析失败:', error.message);
@@ -1470,7 +1472,8 @@ ipcMain.handle('search-resolve', async (event, seriesId) => {
   try {
     if (!seriesId) return { success: false, error: '缺少 series_id' };
     const data = await hongguo.fetchEpisodeList(String(seriesId));
-    upsertSeriesRegistry(data);
+    if (watchHistory.sourceOf(String(seriesId)) === 'hongguo' && !require('./src/native/playback-catalog').validCatalog(data, String(seriesId))) return { success: false, error: '分集資料不完整，已保留原有紀錄。請稍後再試。' };
+    if (upsertSeriesRegistry(data) === false) return { success: false, error: '分集資料不完整，已保留原有紀錄。請稍後再試。' };
     return { success: true, data };
   } catch (error) {
     console.error('[Search] 拉取分集失败:', error.message);
@@ -2192,7 +2195,29 @@ ipcMain.handle('get-playback-position', async (event, seriesId) => {
  */
 ipcMain.handle('play-series', async (event, payload) => {
   const { seriesId, vidIndex } = payload || {};
-  const entry = seriesRegistry.find(item => String(item.series_id) === String(seriesId));
+  const sid = String(seriesId || '');
+  let entry = seriesRegistry.find(item => String(item.series_id) === sid);
+  if (payload?.resume === true && /^[1-9]\d{5,24}$/.test(sid) && watchHistory.sourceOf(sid) === 'hongguo') {
+    const target = Number(vidIndex) || store.getPlayback()?.[sid]?.vid_index || 0;
+    let availableLocal = false;
+    try { availableLocal = !!entry && collectSeriesEpisodeFiles(sid, entry.series_title).ordered.some(item => target > 0 ? Number(item.vid_index) === target : true); } catch {}
+    if (!availableLocal) {
+      try {
+        const fresh = await hongguo.fetchEpisodeList(sid);
+        if (!require('./src/native/playback-catalog').validCatalog(fresh, sid)) throw new Error('INVALID_CATALOG');
+        if (target > 0 && !fresh.episodes.some(item => Number(item.vid_index) === target)) {
+          let local = false;
+          try { local = !!entry && collectSeriesEpisodeFiles(sid, entry.series_title).ordered.some(item => Number(item.vid_index) === target); } catch {}
+          if (!local) return { success: false, code: 'HISTORY_EPISODE_UNAVAILABLE', error: '來源目前沒有這一集，已保留觀看進度。請稍後重試或手動選集。' };
+        } else {
+          upsertSeriesRegistry(fresh);
+          entry = seriesRegistry.find(item => String(item.series_id) === sid);
+        }
+      } catch {
+        if (!entry?.episodes?.some(item => Number(item.vid_index) === target)) return { success: false, error: '暫時無法更新分集，已保留觀看進度。請稍後再試。' };
+      }
+    }
+  }
   if (!entry) return { success: false, code: 'SERIES_NOT_FOUND', error: '未找到短剧档案，请重新打开详情' };
   if (entry.dismissed) {
     const wasForgotten = entry.forgotten;
@@ -2332,9 +2357,9 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
     || ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'ERR_BAD_RESPONSE', 'ERR_STREAM_PREMATURE_CLOSE', 'EAI_AGAIN'].includes(error?.code);
   const rounds = options.recover !== false && /^\d{1,30}$/.test(String(vid)) ? 3 : 1;
   if (/^\d{1,30}$/.test(String(vid))) require('./src/native/app-source').warmPlayback();
-  // An empty answer from every source again and again is the network or the service refusing, not a hiccup.
   const refused = error => error?.code === 'SOURCE_UNAVAILABLE' && error.sources?.length > 0
-    && error.sources.every(item => item?.code === 'EMPTY_RESPONSE' || item?.code === 'DEVICE_REGISTRATION_FAILED');
+    && error.sources.some(item => item?.code === 'EMPTY_RESPONSE' || item?.code === 'DEVICE_REGISTRATION_FAILED')
+    && error.sources.every(item => ['EMPTY_RESPONSE', 'DEVICE_REGISTRATION_FAILED', 'INVALID_RESPONSE', 'PREVIEW_ONLY', 'MISSING_MODEL', 'HTTP_404', 'HTTP_410'].includes(item?.code));
   let lastError, transfers = 0, refusedRounds = 0;
   try {
     for (let round = 0; round < rounds; round++) {
@@ -2949,7 +2974,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
     })) : undefined;
     const emptyDirect = sources?.length && sources.every(item => item.code === 'EMPTY_RESPONSE' || item.code === 'DEVICE_REGISTRATION_FAILED')
       && getCurrentSettings().proxy_enabled !== true;
-    const message = emptyDirect ? `${error.message} 目前是直連，重複重試仍走同一條線路。人在台灣時請到設定啟用可連到來源的代理後再播放。` : error.message;
+    const message = emptyDirect ? `${error.message} 可到「設定」檢查網路或代理。` : error.message;
     return { success: false, error: message, code: error.code, ...(sources ? { sources } : {}) };
   }
 });
@@ -3614,7 +3639,7 @@ async function syncCloudHistory(force = false) {
         store.savePlayback(map);
       } catch (error) { failures.push(error.message); }
     }
-    const countNotice = state.reportedTotal > state.rows.length ? `帐号历史回报 ${state.reportedTotal} 部，完整清单实际返回 ${state.rows.length} 部；筛选数量按已返回的记录计算，不会补造或清除记录。` : '';
+    const countNotice = state.reportedTotal > state.rows.length ? `帳號回報 ${state.reportedTotal} 部，已讀取 ${state.rows.length} 部；分類以已讀取記錄計算。` : '';
     Object.assign(state, { mergedAt: state.fetchedAt, notice: [countNotice, plan.notice].filter(Boolean).join('；'),
       uploadError: failures.length ? `有 ${failures.length} 部没有同步到手机，稍后会再试（${failures[0]}）` : '' });
     return state;
@@ -3634,7 +3659,7 @@ async function watchHistoryView(force = false) {
   return {
     success: true,
     results: local.map(row => ({ ...row, synced: watchHistory.sourceOf(String(row.series_id)) === 'hongguo' ? row.cloudSynced === state.userId : undefined })),
-    sync: { mode: 'cloud', syncedAt: state.fetchedAt, ...(errors.length ? { error: errors.join('；') } : {}), ...(state.notice ? { notice: state.notice } : {}) },
+    sync: { mode: 'cloud', userId: state.userId, syncedAt: state.fetchedAt, accountCount: state.rows.length, reportedTotal: state.reportedTotal, ...(errors.length ? { error: errors.join('；') } : {}), ...(state.notice ? { notice: state.notice } : {}) },
   };
 }
 
@@ -3668,26 +3693,28 @@ async function removeWatchHistoryEverywhere(seriesId, { missingOk = false } = {}
   const map = store.getPlayback();
   if (userId) {
     const state = await loadCloudHistory(true);
+    if (syncedAccountId() !== userId || state?.userId !== userId) return { success: false, error: '帳號已切換，請重新操作。' };
     if (!state?.rows || state.error) return { success: false, error: `手机历史暂时读不到，没有移除（${state?.error || '请稍后重试'}）` };
     const row = state.rows.find(item => item.series_id === sid);
     if (row) {
       try {
         let summary;
         const after = await cloudHistoryApi.deleteEntry(cloudRequest(), row, Date.now(), { onSummary: value => { summary = value; } });
-        if (cloudHistory === state) Object.assign(state, { rows: after, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), error: '' });
+        if (cloudHistory === state) Object.assign(state, { rows: after, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), mergedAt: 0, error: '' });
       } catch (error) {
         if (error.rows && cloudHistory === state) Object.assign(state, { rows: error.rows, fetchedAt: Date.now() });
         return { success: false, error: error.code === 'CLOUD_DELETE_UNCONFIRMED' ? error.message : `从手机历史移除失败：${error.message || '请稍后重试'}` };
       }
     } else if (!map[sid]) return { success: false, error: '这部剧不在观看记录中' };
   }
+  if (userId && syncedAccountId() !== userId) return { success: false, error: '帳號已切換，請重新操作。' };
   clearTimeout(cloudUploads.get(sid));
   cloudUploads.delete(sid);
   const latest = store.getPlayback();
   if (watchHistory.forgetPlayback(latest, sid)) store.savePlayback(latest);
   else if (!userId && !missingOk) return { success: false, error: '这部剧不在观看记录中' };
   sendToRenderer('watch-history-updated', { removedSeriesId: sid });
-  return { success: true, cloud: !!userId };
+  return { success: true, cloud: !!userId, history: await watchHistoryView(false) };
 }
 
 async function refreshWatchHistory(force = false) {
@@ -3781,6 +3808,9 @@ async function refreshWatchHistory(force = false) {
 // ===== 帐号收藏（登录后与手机双向合并） =====
 const cloudFavoritesApi = require('./src/native/cloud-favorites');
 const favoriteMeta = new Map();
+const favoriteFoldersApi = require('./src/native/favorite-folders');
+const FAVORITE_SYNC_ERROR = '手機收藏暫時無法同步，這臺電腦的收藏仍會保留。請稍後重試。';
+const FAVORITE_DEFERRED = '部分影片尚無法加入手機收藏，已先保留在這臺電腦；可播放後會再同步。';
 
 // Title and poster for a favorite the phone added: the account history, the local registry, then
 // one episode-list read (a few at a time). Unknown stays unknown instead of being made up.
@@ -3815,26 +3845,44 @@ ipcMain.handle('cloud-favorites', async () => {
   }
   try {
     const rows = await cloudFavoritesApi.fetchFavorites(cloudRequest(), userId);
-    return { success: true, mode: 'cloud', userId, rows: await favoriteDetails(rows) };
+    const details = await favoriteDetails(rows);
+    let folders, foldersError = '';
+    try { folders = await favoriteFoldersApi.fetchFolders(cloudRequest()); }
+    catch { foldersError = '收藏夾暫時無法讀取，仍可查看全部收藏。'; }
+    if (syncedAccountId() !== userId) return { success: false, error: '帳號已切換，請重新整理。' };
+    return { success: true, mode: 'cloud', userId, rows: details, ...(folders ? { folders } : {}), ...(foldersError ? { foldersError } : {}) };
   } catch (error) {
-    return { success: true, mode: 'local', userId, error: `手机收藏暂时读不到，先显示这台电脑的收藏（${error.message || '请稍后重试'}）` };
+    return { success: true, mode: 'local', userId, error: FAVORITE_SYNC_ERROR };
   }
 });
 
-ipcMain.handle('cloud-favorite-set', async (_event, seriesId, on) => {
+ipcMain.handle('cloud-favorite-set', async (_event, seriesId, on, expectedUserId) => {
   const userId = syncedAccountId();
+  if (expectedUserId !== undefined && String(expectedUserId) !== userId) return { success: false, error: '帳號已切換，請重新整理。' };
   if (!userId) return { success: false, error: '没有登录，收藏只保存在这台电脑' };
   const id = cloudFavoritesApi.readId(String(seriesId || ''));
   if (!id || typeof on !== 'boolean') return { success: false, error: '这部剧无法同步到手机收藏' };
   try {
+    if (on) {
+      let playable = false;
+      try {
+        const detail = await hongguo.fetchEpisodeList(id);
+        playable = Array.isArray(detail?.episodes) && detail.episodes.length > 0;
+      } catch {}
+      if (syncedAccountId() !== userId) return { success: false, error: '帳號已切換，請重新整理。' };
+      if (!playable) return { success: true, userId, deferred: true, notice: FAVORITE_DEFERRED };
+    }
     const rows = await cloudFavoritesApi.setFavorite(cloudRequest(), userId, id, on);
+    if (syncedAccountId() !== userId) return { success: false, error: '帳號已切換，請重新整理。' };
     return { success: true, userId, rows: rows.map(row => ({ ...row })) };
   } catch (error) {
-    return { success: false, code: error.code || '', error: error.message || '手机收藏同步失败' };
+    if (on && cloudFavoritesApi.unavailable(error)) return { success: true, userId, deferred: true, notice: FAVORITE_DEFERRED };
+    return { success: false, code: error.code === 'CLOUD_FAVORITE_UNCONFIRMED' ? error.code : '', error: FAVORITE_SYNC_ERROR };
   }
 });
 
-ipcMain.handle('remove-watch-history', async (_event, seriesId) => {
+ipcMain.handle('remove-watch-history', async (_event, seriesId, expectedUserId) => {
+  if (expectedUserId !== undefined && String(expectedUserId) !== syncedAccountId()) return { success: false, error: '帳號已切換，請重新整理。' };
   try { return await removeWatchHistoryEverywhere(seriesId, { missingOk: true }); }
   catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
 });

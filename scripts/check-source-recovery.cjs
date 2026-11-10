@@ -298,7 +298,7 @@ const checks = [
       assert.equal(candidate.variants, undefined);
     }
     assert.equal(result.variants[2].contentKey, key1); assert.equal(result.variants[3].contentKey, key2);
-    assert.equal(result.variants[4].contentKey, null); assert.equal(f.calls.length, 5, 'catalog probes, one model request and its media; no media preflight');
+    assert.equal(result.variants[4].contentKey, null); assert.equal(f.calls.length, 2, 'no synthetic catalog probes; one model request and its media without preflight');
   }],
   ['Strict quality alternatives never include smaller or unknown-size streams', async () => {
     const f = appFixture({ low: { main_url: media('low'), codec_type: 'h264', width: 720, height: 1280 },
