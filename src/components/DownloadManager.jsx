@@ -1,3 +1,4 @@
+import { downloadPhaseLabel, downloadProgressText } from '../downloadPhase.mjs';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
 import './DownloadManager.css';
@@ -680,7 +681,7 @@ function DownloadManager({ onNavigate, active = true }) {
                 <div className="dm-task-body">
                   <div className="dm-task-title">{task.title || task.filename}</div>
                   <div className="dm-task-meta">
-                    <span className={`status-tag status-${waitingRetry ? 'pending' : task.status}`}>{waitingRetry ? '等待重试' : STATUS_TEXT[task.status] || task.status}</span>
+                    <span className={`status-tag status-${waitingRetry ? 'pending' : task.status}`}>{waitingRetry ? '等待重试' : downloadPhaseLabel(task) || STATUS_TEXT[task.status] || task.status}</span>
                     {waitingRetry && <span className="dm-size">自动重试 {task.sourceRetries}/3 · {new Date(task.retryAt).toLocaleTimeString('zh-CN', { hour12: false })} 后排队</span>}
                     {task.status === 'downloading' && task.totalBytes > 0 && (
                       <span className="dm-size">{fmtBytes(task.receivedBytes)} / {fmtBytes(task.totalBytes)}</span>
@@ -693,7 +694,7 @@ function DownloadManager({ onNavigate, active = true }) {
                       <div className="dm-progress-bar">
                         <div className="dm-progress-fill" style={{ width: pct + '%' }}></div>
                       </div>
-                      <span className="dm-pct">{pct}%</span>
+                      <span className="dm-pct">{task.status === 'downloading' && task.phase && task.phase !== 'downloading' ? downloadProgressText(task) : `${pct}%`}</span>
                     </div>
                   )}
                 </div>

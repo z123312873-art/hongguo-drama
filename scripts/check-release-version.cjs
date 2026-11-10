@@ -130,7 +130,8 @@ assert.deepEqual(noteBullets, [
   '紅果帳號登入，同步紀錄與收藏',
   '收藏夾可新增、改名與刪除',
   '修正無法播放，在線載入更快',
-  '提示更精簡，介面更清楚',
-], 'The 4.6 summary is exactly these four lines, in this order');
-assert(noteBullets.every(item => Array.from(item).length <= 72), 'Each 4.6 summary line fits the update window');
+  '修正下載檔案發生錯誤',
+  '精簡提示，優化標籤與底部頁碼',
+], 'The 4.6 summary is exactly these five lines, in this order');
+assert(noteBullets.every(item => Array.from(item).length <= 15), 'Each 4.6 summary line fits the large-font update window');
 console.log(`PASS ${checks} version pairs, equivalent versions, invalid versions and unpublished releases`);

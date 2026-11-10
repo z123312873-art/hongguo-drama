@@ -370,7 +370,8 @@ jobs:
           blockmap="$setup.blockmap"
           latest="release/latest.yml"
           portable="release/hongguo-downloader-4.6-win-x64.zip"
-          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
+          source="release/ffmpeg-9.0.2-x264-b35605a-win-x64-corresponding-source.tar.gz"
+          for file in "$setup" "$blockmap" "$latest" "$portable" "$source"; do test -f "$file"; done
           grep -Fq "hongguo-downloader-4.6-win-x64-setup.exe" "$latest"
           grep -Eq '^version: 4\.6\.0$' "$latest"
           setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
@@ -381,7 +382,8 @@ jobs:
           - 紅果帳號登入，同步紀錄與收藏
           - 收藏夾可新增、改名與刪除
           - 修正無法播放，在線載入更快
-          - 提示更精簡，介面更清楚
+          - 修正下載檔案發生錯誤
+          - 精簡提示，優化標籤與底部頁碼
 
           4.6 預發佈，未簽章。4.5 仍是正式版。下載與安裝都要自己確認。
 
@@ -391,6 +393,7 @@ jobs:
           便攜 ZIP：hongguo-downloader-4.6-win-x64.zip
           便攜 ZIP SHA256：$portable_sha
           對應提交：$GITHUB_SHA
+          對應來源：$(basename "$source")（同頁下載）
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
@@ -400,8 +403,8 @@ jobs:
           else
             gh release create "$tag" --target "$GITHUB_SHA" --prerelease --title "4.6 預發佈" --notes "$notes"
           fi
-          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
-          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" "$source" --clobber
+          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")" "$(basename "$source")")
           gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
             if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
               gh release delete-asset "$tag" "$name" --yes

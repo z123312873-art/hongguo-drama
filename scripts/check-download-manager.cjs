@@ -23,7 +23,7 @@ function mount(api = {}, props = {}) {
   const setTimer = (fn, delay, interval = false) => { const id = ++timerId; timers.set(id, { fn, delay, interval }); return id; };
   const module = { exports: {} };
   vm.runInNewContext(transformSync(fs.readFileSync(`${__dirname}/../src/components/DownloadManager.jsx`, 'utf8'), { loader: 'jsx', format: 'cjs' }).code, {
-    module, exports: module.exports, require: name => name === 'react' ? react : name === './useDialogKeyboard' ? open => { dialogOpen = open; } : {}, window,
+    module, exports: module.exports, require: name => name === '../downloadPhase.mjs' ? require('./download-phase-fixture.cjs') : name === 'react' ? react : name === './useDialogKeyboard' ? open => { dialogOpen = open; } : {}, window,
     document: { ...domTarget('document'), querySelector: () => null }, console, setTimeout: (fn, delay) => setTimer(fn, delay), clearTimeout: id => timers.delete(id), setInterval: (fn, delay) => setTimer(fn, delay, true), clearInterval: id => timers.delete(id),
   });
   const render = () => { cursor = 0; tree = module.exports.default(props); const visit = node => { if (!node || typeof node !== 'object') return; if (node.props?.className === 'dm-more-actions' && node.props.ref) node.props.ref.current = moreActions; node.children?.forEach(visit); }; visit(tree); effects.splice(0).forEach(fn => fn()); };
@@ -68,6 +68,15 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     ui.moreActions.open = true; ui.setProps({ active: false });
     assert.equal(ui.moreActions.open, false, 'leaving the download page closes the menu');
     ui.unmount(); assert.equal(ui.domListeners(), 0);
+  });
+  await test('native finalize progress is a named phase rather than a frozen 99 percent', async () => {
+    const ui = mount({ getDownloadTasks: async () => [{ ...task(1), progress: 99 }] }); await ui.flush();
+    assert.ok(ui.text().includes('99%'));
+    ui.emit('onDownloadProgress', { id: 't1', progress: 99, phase: 'transcoding', phaseSeconds: 12 }); ui.advance(200); await ui.flush();
+    assert.ok(ui.text().includes('正在转档')); assert.ok(ui.text().includes('已处理 12 秒'));
+    ui.emit('onDownloadProgress', { id: 't1', phase: 'verifying' }); ui.advance(200); await ui.flush();
+    assert.ok(ui.text().includes('正在检查文件'));
+    ui.unmount();
   });
   await test('automatic retry is visible, stoppable and separate from terminal failures', async () => {
     let stopped, retried;

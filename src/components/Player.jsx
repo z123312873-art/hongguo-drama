@@ -1,3 +1,4 @@
+import { downloadProgressText } from '../downloadPhase.mjs';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
 import PlayerControls from './PlayerControls';
@@ -545,7 +546,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       setDetail(previous => {
         if (!previous?.episodes.some(ep => ep.taskId === data?.id)) return previous;
         return { ...previous, episodes: previous.episodes.map(ep => ep.taskId === data.id
-          ? { ...ep, status: 'downloading', progress: data.progress, retryAt: null } : ep) };
+          ? { ...ep, status: 'downloading', ...(data.progress !== undefined ? { progress: data.progress } : {}), ...(data.phase ? { phase: data.phase, phaseSeconds: data.phaseSeconds || 0, phaseBytes: data.phaseBytes || 0 } : {}), retryAt: null } : ep) };
       });
     }));
     const timer = setInterval(async () => {
@@ -1940,8 +1941,25 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           </span>
           {current.title && <span className="player-now-sub">{current.title}</span>}
           <span className={`player-now-status status-${current.status}`}>
-            {current.locked ? '锁定' : current.status === 'completed' ? '可播放' : current.status === 'downloading' ? `下载中 ${current.progress || 0}%` : current.status === 'pending' ? '排队中' : '未下载'}
+            {current.locked ? '锁定' : current.status === 'completed' ? '可播放' : current.status === 'downloading' ? downloadProgressText(current) : current.status === 'pending' ? '排队中' : current.status === 'failed' ? '下载失败' : '未下载'}
           </span>
+        </div>
+      )}
+
+      {current?.status === 'failed' && current.error && (
+        <div className="player-download-error" role="alert">
+          <p>{current.error}</p>
+          {current.taskId && (
+            <button type="button" className="btn btn-sm btn-outline" onClick={async () => {
+              try {
+                const result = await window.electronAPI.retryTask(current.taskId);
+                if (!result?.success) throw new Error(result?.error || '重试失败');
+                showToast('本集已重新加入下载队列');
+              } catch (error) {
+                showToast(error.message || '重试失败');
+              }
+            }}>重试本集下载</button>
+          )}
         </div>
       )}
 

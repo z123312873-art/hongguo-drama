@@ -1,6 +1,6 @@
 # 第三方组件许可说明
 
-适用源码／应用目标版本：红果短剧 3.3；以下第三方组件保留各自的版本与许可。
+适用源码／应用目标版本：红果短剧 4.6；以下第三方组件保留各自的版本与许可。
 
 本软件（红果短剧下载器）使用了以下第三方组件。各组件的版权归其各自作者所有，
 本软件对这些组件的使用均遵循其原始许可证。
@@ -34,6 +34,8 @@ x264 为唯一外部编解码静态库（GPLv2-or-later）；整体构建为 GPL
 完整 FFmpeg/x264 对应源码、准确构建脚本、配置日志、工具链版本和二进制哈希随 Release 的 Windows 对应源码包提供。
 许可全文与来源说明见 `COPYING.GPLv3`、`COPYING.GPLv2`、`LICENSE.md`、`WINDOWS-X264-LICENSE.txt` 和 `WINDOWS-NOTICE.txt`。
 该精简构建提供软件 H.264 编码，不包含旧版 Gyan essentials 包及其额外库。
+
+Windows 同时内置 librempeg（固定版本 a0fafc5c42dbd7fce25b141c071277fb016a65c5），用于额外视频格式的兼容处理。整体构建为 GPLv3-or-later，不包含 AGPL 组件。许可与来源说明随应用保留于 `resources/bin/WINDOWS-LIBREMPEG-LICENSE.txt`、`WINDOWS-LIBREMPEG-LGPL.txt` 和 `WINDOWS-LIBREMPEG-NOTICE.txt`，完整对应源码随发行包提供。
 
 ---
 

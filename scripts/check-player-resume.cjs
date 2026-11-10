@@ -88,7 +88,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   const shortcutModule = { exports: {} };
   vm.runInNewContext(shortcutSource, { module: shortcutModule, exports: shortcutModule.exports, window, Event });
   const setTimer = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
-  const context = { module: { exports: {} }, require: n => n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './playerSessionProgress.js' ? sessionProgressModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n === './danmakuWarmup.mjs' ? { useDanmakuWarmup() {} } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : n.endsWith('next-season.mjs') && realSeasons ? nextSeasonModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
+  const context = { module: { exports: {} }, require: n => n === '../downloadPhase.mjs' ? require('./download-phase-fixture.cjs') : n === 'react' ? react : n === './useDialogKeyboard' ? () => {} : n === '../shortcuts' ? shortcutModule.exports : n === './playerSessionProgress.js' ? sessionProgressModule.exports : n === './VideoEnhancement' ? videoEnhancementStub : n === './danmakuSource.mjs' ? { useDanmakuSource: () => 'official', writeDanmakuSource() {} } : n === './OfficialDanmaku' ? { useOfficialDanmaku: ({ preferences }) => preferences } : n === './CommentDanmaku' ? { useCommentDanmaku: () => ({ enabled: false, settings: {}, comments: [] }) } : n === './danmakuWarmup.mjs' ? { useDanmakuWarmup() {} } : n.endsWith('chineseScript.mjs') ? chineseModule.exports : n.endsWith('next-season.mjs') && realSeasons ? nextSeasonModule.exports : {}, window, document, navigator: {}, crypto: require('node:crypto').webcrypto, setTimeout: setTimer, clearTimeout: id => timers.delete(id), setInterval: setTimer, clearInterval: id => timers.delete(id), requestAnimationFrame: fn => setTimer(fn, 0), cancelAnimationFrame: id => timers.delete(id), console };
   context.exports = context.module.exports;
   vm.runInNewContext(source, context);
   const nodes = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; out.push(n); n.children?.forEach(walk); }; walk(tree); return out; };
@@ -135,6 +135,23 @@ module.exports = { mount };
 if (require.main === module) (async () => {
   let failures = 0;
   const test = async (name, fn) => { if (process.argv[2] && !name.includes(process.argv[2])) return; try { await fn(); console.log(`PASS ${name}`); } catch (e) { failures++; console.error(`FAIL ${name}: ${e.stack}`); } };
+  await test('download finalize events preserve progress and terminal errors offer a separate download retry', async () => {
+    let onProgress, retried, failed = false;
+    const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 } }, apiOverrides: {
+      getSeriesEpisodes: async () => ({ success: true, data: { series_id: 'A', series_title: '测试剧', episodes: [{ vid_index: 1, vid: 'v1', taskId: 'download-1', status: failed ? 'failed' : 'downloading', progress: 99, error: failed ? '媒体处理超时，请重试' : '' }] } }),
+      onDownloadProgress: fn => { onProgress = fn; return () => { onProgress = null; }; },
+      retryTask: async id => { retried = id; return { success: true }; },
+    } }); await ui.flush();
+    onProgress({ id: 'download-1', phase: 'transcoding', phaseSeconds: 8 }); await ui.flush();
+    assert.ok(ui.find(node => node.props.className === 'player-now-status status-downloading' && node.children.includes('正在转档 · 已处理 8 秒')));
+    failed = true;
+    for (const timer of ui.timers.values()) if (timer.delay === 2000) timer.fn();
+    await ui.flush();
+    assert.ok(ui.find(node => node.props.role === 'alert' && node.props.className === 'player-download-error'));
+    await ui.button('重试本集下载').props.onClick(); await ui.flush();
+    assert.equal(retried, 'download-1');
+    ui.unmount();
+  });
   await test('removed history stays removed through hidden player unload and new playback can record again', async () => {
     for (const resume of [false, true]) {
       const ui = mount({ local: true }); await ui.flush(); ui.metadata();
