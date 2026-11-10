@@ -264,3 +264,16 @@ test('reported account total is disclosed separately; visible tab counts use act
     assert.match(result.sync.notice, /14.*3/);
   } finally { h.cleanup(); }
 });
+
+test('existing same-time synced history repairs its completed tab without inventing newer progress', async () => {
+  const h = load({ server: { rows: [row(TWO, { vid_index: 10, current_play_position: 0, duration: 12000000, read_timestamp_ms: 2500 })] } });
+  try {
+    h.playback()[TWO] = { watched: true, vid_index: 10, currentTime: 0, updatedAt: 2500, cloudSynced: '1000000000000001', remote: { title: '剧2', total: 10 } };
+    const result = await h.call('get-watch-history');
+    assert.equal(result.results.find(r => r.series_id === TWO).completed, true);
+    assert.equal(h.playback()[TWO].completedEpisode, 10);
+    assert.equal(h.playback()[TWO].currentTime, 0);
+    assert.equal(h.playback()[TWO].updatedAt, 2500);
+    assert.equal(result.results.filter(r => r.completed).length, 1);
+  } finally { h.cleanup(); }
+});
