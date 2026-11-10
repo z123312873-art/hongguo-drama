@@ -233,7 +233,7 @@ async function fetchCatalogPage(url, signal, proxyLogin) {
   });
 }
 
-async function browseList(options = {}, proxyLogin) {
+async function readList(options = {}, proxyLogin) {
   const { category = 'real-drama', genre = '', page = 1, forceRefresh = false } = options || {};
   const ranking = RANKINGS.has(category);
   if ((!CATEGORIES.has(category) && !ranking) || (genre && (!/^[a-z0-9-]+$/.test(genre) || ranking))) return { success: false, error: '无效的目录分类或题材' };
@@ -275,4 +275,15 @@ async function browseList(options = {}, proxyLogin) {
   return task;
 }
 
-module.exports = { browseList, parseCatalog, readRouterData, publicMetadata, parseRanking, isNewStatus };
+let catalogFilterService, catalogProxyLogin;
+function filterService(proxyLogin) {
+  if (proxyLogin) catalogProxyLogin = proxyLogin;
+  if (!catalogFilterService) catalogFilterService = require('./catalog-filters').createCatalogFilters({ read: options => readList(options, catalogProxyLogin) });
+  return catalogFilterService;
+}
+async function browseList(options = {}, proxyLogin) {
+  return RANKINGS.has(options.category) && options.genre ? filterService(proxyLogin).rankList(options) : readList(options, proxyLogin);
+}
+const browseGenres = (options, proxyLogin) => filterService(proxyLogin).genres(options);
+
+module.exports = { browseList, browseGenres, parseCatalog, readRouterData, publicMetadata, parseRanking, isNewStatus };

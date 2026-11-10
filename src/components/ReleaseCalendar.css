@@ -27,3 +27,15 @@
 .release-folders label { display: inline-flex; align-items: center; gap: 6px; }
 .release-folders select { max-width: 100%; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; background: var(--bg-secondary); color: var(--text-primary); }
 .release-folders small { width: 100%; color: var(--text-secondary); }
+
+.folder-editor, .folder-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); }
+.folder-editor input, .folder-editor select { max-width: 100%; min-width: 160px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); }
+.folder-editor small, .folder-confirm strong, .folder-confirm p { flex-basis: 100%; margin: 0; }
+.folder-editor small, .folder-confirm p { color: var(--text-secondary); }
+.folder-notice { padding: 10px 14px; color: var(--text-primary); border-left: 3px solid var(--accent-color, #3185e9); background: var(--bg-secondary); border-radius: 8px; }
+.release-folders button, .release-row-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+@media (max-width: 680px) { .folder-editor input, .folder-editor select { width: 100%; } .release-row-actions { flex-wrap: wrap; } }
+
+.release-reserved { margin-top: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary); }
+.release-reserved summary { cursor: pointer; font-weight: 600; }
+.release-reserved > p { color: var(--text-muted); margin: 10px 0; }

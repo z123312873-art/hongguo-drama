@@ -1,8 +1,10 @@
+import usePlaybackNotice from './usePlaybackNotice';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Play, RefreshCw, Clock, Trash2, Check, Shield } from './icons';
 import './WatchHistory.css';
 
 export default function WatchHistory({ active = true, onNavigate }) {
+  const { notice: playbackNotice, showNotice: showPlaybackNotice } = usePlaybackNotice();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -117,11 +119,12 @@ export default function WatchHistory({ active = true, onNavigate }) {
       const acknowledged = await window.electronAPI.acknowledgeWatchUpdates(row.series_id, { total: row.total, sequelIds: (row.sequels || []).map(item => item.series_id) });
       if (!acknowledged?.success) throw new Error(acknowledged?.error || '更新标记保存失败');
       if (version === openingRequest.current) setRows(current => current.map(item => item.series_id === row.series_id ? { ...item, hasUpdates: false, unreadEpisodes: 0 } : item));
-    } catch (failure) { if (version === openingRequest.current) setError(failure.message || '打开失败，请重试'); }
+    } catch (failure) { if (version === openingRequest.current) showPlaybackNotice(failure.message || '打开失败，请重试'); }
     finally { if (version === openingRequest.current) { setOpening(''); openingRef.current = false; } }
   };
 
   return <section className="history-container" aria-labelledby="history-title">
+    {playbackNotice && <div key={playbackNotice.id} className="record-toast playback-toast" role="status" aria-live="polite"><span>{playbackNotice.text}</span></div>}
     <div className="history-header">
       <div><h1 id="history-title">观看记录</h1><p>继续上次的故事。{sync.mode === 'cloud' ? '已登录：与手机「历史」双向同步。' : '未同步：记录仅保存在这台电脑。'}</p></div>
       <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || loading || !!removing || !rows.length}>

@@ -5,7 +5,7 @@ import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { Film, RefreshCw, Download, Play, Check, X, Search, Heart } from './icons';
 import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../localLibrary';
-import { SHARED_BROWSE_TAGS, formatPublicScore, posterMatchesTags, toggleBrowseTags } from '../catalogTags.mjs';
+import { formatPublicScore } from '../catalogTags.mjs';
 import { applyPublicRatings } from '../publicRatings.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
@@ -116,6 +116,10 @@ function Browse({ onNavigate, active = true }) {
   const [genre, setGenre] = useState('');
   const [tagLabels, setTagLabels] = useState([]);
   const [genreCatalog, setGenreCatalog] = useState({});
+  const [sourceTags, setSourceTags] = useState({});
+  const [tagError, setTagError] = useState('');
+  const [tagRefresh, setTagRefresh] = useState(0);
+  const tagForce = useRef(false);
   const [library, setLibrary] = useState(readLocalLibrary);
   const [ratings, setRatings] = useState({});
   const [heats, setHeats] = useState({});
@@ -192,7 +196,7 @@ function Browse({ onNavigate, active = true }) {
   const showToast = useCallback((text, type = 'success') => {
     setToast({ text, type });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3000);
+    toastTimer.current = setTimeout(() => setToast(null), 2800);
   }, []);
 
   const loadDownloadedMap = useCallback(async () => {
@@ -393,9 +397,36 @@ function Browse({ onNavigate, active = true }) {
     if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory('real-drama'); }
   }, [sourceIds, source, invalidateList, closeDetail]);
 
+  useEffect(() => {
+    if (!active || source !== 'hongguo' || category === 'comic' || upcoming || typeof window.electronAPI?.browseGenres !== 'function') return undefined;
+    let cancelled = false, pending = false;
+    const pull = async forceRefresh => {
+      if (pending) return;
+      pending = true;
+      try {
+        const result = await window.electronAPI.browseGenres({ category, forceRefresh });
+        if (cancelled) return;
+        if (!result?.success || !Array.isArray(result.genres)) throw new Error();
+        const valid = result.genres.filter(item => item.count > 0);
+        setSourceTags(previous => ({ ...previous, [category]: valid }));
+        setTagLabels(previous => previous.some(label => !valid.some(item => item.label === label)) ? [] : previous);
+        setTagError(result.unavailable ? '部分標籤尚未確認，暫不顯示；請稍後重新整理。' : '');
+      } catch {
+        if (!cancelled) {
+          setSourceTags(previous => ({ ...previous, [category]: [] }));
+          setTagError('分類標籤暫時無法確認，請稍後重試。');
+        }
+      } finally { pending = false; }
+    };
+    pull(tagForce.current);
+    tagForce.current = false;
+    const timer = setInterval(() => { if (!document.hidden) pull(false); }, 600000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [active, source, category, upcoming, tagRefresh]);
   const rankingView = source === 'hongguo' && String(category).startsWith('hot-');
-  const serverSlug = source === 'hongguo' && tagLabels.length === 1 && !rankingView
-    ? (genreCatalog[category]?.[tagLabels[0]] || '') : '';
+  const categoryTags = sourceTags[category] || [];
+  const serverSlug = source === 'hongguo' && tagLabels.length === 1
+    ? (categoryTags.find(item => item.label === tagLabels[0])?.slug || '') : '';
   useEffect(() => {
     if (source !== 'hongguo' || serverSlug === genre) return;
     setGenre(serverSlug);
@@ -436,6 +467,12 @@ function Browse({ onNavigate, active = true }) {
   }, [source, results, upcoming]);
 
   const comicView = source === 'hongguo' && category === 'comic';
+  const refreshCurrent = () => {
+    if (comicView) { setComicReload(value => value + 1); return; }
+    tagForce.current = true;
+    setTagRefresh(value => value + 1);
+    loadList(category, genre, page, true);
+  };
 
   useEffect(() => {
     if (!active || !sourceIds.split('|').includes(source)) return undefined;
@@ -727,12 +764,12 @@ function Browse({ onNavigate, active = true }) {
   useDialogKeyboard(active && (!!detail || detailLoading), closeDetail, '.browse-drawer');
 
   const chooseTags = (label) => {
-    setTagLabels(toggleBrowseTags(tagLabels, label));
+    setTagLabels(label === '全部' || tagLabels[0] === label ? [] : [label]);
     setPage(1);
   };
-  const clientTagFilter = source === 'hongguo' && (tagLabels.length > 1 || (tagLabels.length === 1 && !serverSlug));
+  const clientTagFilter = false;
   const completionResults = completion === 'all' ? results : results.filter((item) => item.completion_status === completion);
-  const visibleResults = clientTagFilter ? completionResults.filter(item => posterMatchesTags(item.tags, tagLabels)) : completionResults;
+  const visibleResults = completionResults;
   const wall = upcoming && source === 'hongguo' ? upcomingItems : visibleResults;
   const favoriteIds = new Set((library.items || []).filter(item => item.favorite).map(item => item.id));
   const toggleFavorite = (event, item) => {
@@ -767,7 +804,7 @@ function Browse({ onNavigate, active = true }) {
         <div className="browse-header-right">
           <label className="source-control">来源<select className="input-field" aria-label="短剧来源" value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}</select></label>
           <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />搜索短剧</button>
-          <button className="btn btn-outline" disabled={loading || sourcesLoading || upcoming} onClick={() => (comicView ? setComicReload(value => value + 1) : loadList(category, genre, page, true))}><RefreshCw size={15} />刷新片单</button>
+          <button className="btn btn-outline" disabled={loading || sourcesLoading || upcoming} onClick={refreshCurrent}><RefreshCw size={15} />刷新片单</button>
           {!upcoming && shownTotal > 0 && <span className="browse-stat">共 {shownTotal} 部</span>}
         </div>
       </div>
@@ -802,13 +839,14 @@ function Browse({ onNavigate, active = true }) {
       {(!comicView || upcoming) && <>
       {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
       {source === 'hongguo' && !upcoming && (
-        <div className="browse-genres" role="group" aria-label="标签筛选，可左右滑动，最多同时选择两个">
+        <div className="browse-genres" role="group" aria-label="來源標籤篩選，每次選擇一個">
           <button type="button" className={`genre-chip ${tagLabels.length === 0 ? 'active' : ''}`} aria-pressed={tagLabels.length === 0} onClick={() => chooseTags('全部')}>全部</button>
-          {SHARED_BROWSE_TAGS.map((label) => (
+          {categoryTags.map(({ label }) => (
             <button type="button" key={label} className={`genre-chip ${tagLabels.includes(label) ? 'active' : ''}`} aria-pressed={tagLabels.includes(label)} onClick={() => chooseTags(label)}>{label}</button>
           ))}
         </div>
       )}
+      {tagError && source === 'hongguo' && !comicView && !upcoming && <p role="status" className="page-description">{tagError}</p>}
       {source !== 'hongguo' && meta.genres.length > 0 && (
         <div className="browse-genres">
           <button
@@ -842,9 +880,9 @@ function Browse({ onNavigate, active = true }) {
       {!upcoming && !loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status">{clientTagFilter ? <><p>本页没有同时带有所选标签的剧集。</p><button className="btn btn-outline" onClick={() => chooseTags('全部')}>显示本页全部</button></> : <><p>本页没有明确标记为{completion === 'completed' ? '已完结' : '更新中'}的剧集。</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>显示本页全部</button></>}</div>}
 
       {!upcoming && error && results.length > 0 && <div className="alert alert-error browse-update-error" role="alert">
-        <span>{error}</span><button className="btn btn-outline btn-sm" disabled={loading || sourcesLoading} onClick={() => loadList(category, genre, page, true)}>重试</button>
+        <span>{error}</span><button className="btn btn-outline btn-sm" disabled={loading || sourcesLoading} onClick={refreshCurrent}>重试</button>
       </div>}
-      {!upcoming && error && results.length === 0 && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{unsupported ? '这里是图文漫画' : '暂时没能加载剧集'}</h3><p>{error}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>查看漫剧</button> : <button className="btn btn-primary" onClick={() => loadList(category, genre, page, true)}><RefreshCw size={15} />重新加载</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>按剧名搜索</button></div></div>}
+      {!upcoming && error && results.length === 0 && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{unsupported ? '这里是图文漫画' : '暂时没能加载剧集'}</h3><p>{error}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>查看漫剧</button> : <button className="btn btn-primary" onClick={refreshCurrent}><RefreshCw size={15} />重新加载</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>按剧名搜索</button></div></div>}
 
       {!upcoming && loading && results.length > 0 && <div className="browse-loading" role="status"><RefreshCw size={18} className="spin" /><span>正在更新片单，仍可浏览上次结果…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>取消加载</button></div>}
 
@@ -1046,7 +1084,7 @@ function Browse({ onNavigate, active = true }) {
       )}
 
       {toast && (
-        <div className={`dm-toast dm-toast-${toast.type}`} onClick={() => setToast(null)}>
+        <div key={toast.text} className="record-toast playback-toast" role="status" aria-live="polite" onClick={() => setToast(null)}>
           {toast.text}
         </div>
       )}

@@ -127,10 +127,10 @@ const preBullets = releaseSummary(preBody).items;
 assert.deepEqual(readmeBullets, noteBullets, 'README must copy the 4.6 summary');
 assert.deepEqual(preBullets, noteBullets, 'The 4.6 pre-release must publish the same summary');
 assert.deepEqual(noteBullets, [
-  '新增「紅果立即登入」登入成功後，顯示頭像與暱稱',
-  '登入時發驗證碼，登入後同步觀看記錄與收藏',
-  '未上線短劇播放提示2秒後自動關閉',
-  '頁碼可從目前頁直接點後面五頁',
+  '紅果帳號登入，同步紀錄與收藏',
+  '收藏夾可新增、改名與刪除',
+  '修正無法播放，在線載入更快',
+  '提示更精簡，介面更清楚',
 ], 'The 4.6 summary is exactly these four lines, in this order');
 assert(noteBullets.every(item => Array.from(item).length <= 72), 'Each 4.6 summary line fits the update window');
 console.log(`PASS ${checks} version pairs, equivalent versions, invalid versions and unpublished releases`);

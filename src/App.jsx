@@ -16,7 +16,8 @@ import useFavoriteSync from './components/useFavoriteSync';
 import AppUpdateNotice from './components/AppUpdateNotice';
 import useAccountSession from './components/useAccountSession';
 import { AccountAccess, AccountDialog, AccountStrip } from './components/AccountChrome';
-import { WAITING_DISMISS_MS, isWaitingNotice, noticeAfterDelay, noticeAfterNavigate } from './waitingNotice.mjs';
+import usePlaybackNotice from './components/usePlaybackNotice';
+import { isWaitingNotice } from './waitingNotice.mjs';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
@@ -46,6 +47,7 @@ export default function App() {
   const [calendarOpening, setCalendarOpening] = useState('');
   const [visited, setVisited] = useState(['browse']);
   const [storageError, setStorageError] = useState('');
+  const { notice: playbackNotice, showNotice: showPlaybackNotice, clearNotice: clearPlaybackNotice } = usePlaybackNotice();
   const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
   const [playerMounted, setPlayerMounted] = useState(false);
   const [playerTarget, setPlayerTarget] = useState(null); // 浏览页点播 -> 播放页选中
@@ -63,7 +65,8 @@ export default function App() {
   }, []);
 
   useEffect(() => window.electronAPI.onStorageError?.((data) => {
-    setStorageError(data === null ? '' : data?.error || '数据保存失败，请检查磁盘空间和目录权限后重试。');
+    if (isWaitingNotice(data?.error)) showPlaybackNotice(data.error);
+    else setStorageError(data === null ? '' : data?.error || '数据保存失败，请检查磁盘空间和目录权限后重试。');
   }), []);
 
   // 主进程发来的导航指令（例如浏览页点「立即播放」）
@@ -83,7 +86,7 @@ export default function App() {
       setCalendarOpening('');
       pageRef.current = nextPage;
     }
-    setStorageError(current => noticeAfterNavigate(current));
+    clearPlaybackNotice();
     if (nextPage === 'player') setPlayerMounted(true);
     setVisited((pages) => pages.includes(nextPage) ? pages : [...pages, nextPage]);
     setPage(nextPage);
@@ -96,7 +99,7 @@ export default function App() {
       case 'player':
         return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onNavigate={navigate} /> : null;
       case 'calendar':
-        return <ReleaseCalendar opening={calendarOpening} active={page === id} onUnavailable={message => setStorageError(message)} onPlay={async ({ seriesId }) => {
+        return <ReleaseCalendar opening={calendarOpening} active={page === id} onUnavailable={showPlaybackNotice} onPlay={async ({ seriesId }) => {
           if (pageRef.current !== 'calendar' || calendarOpeningRef.current) return;
           const version = ++calendarRequest.current;
           calendarOpeningRef.current = true;
@@ -113,7 +116,7 @@ export default function App() {
             }
             if (!result?.success) throw new Error(result?.error || '打开播放失败，请重试');
           } catch (error) {
-            if (version === calendarRequest.current) setStorageError(error.message);
+            if (version === calendarRequest.current) showPlaybackNotice(error.message);
           } finally {
             if (version === calendarRequest.current) { calendarOpeningRef.current = false; setCalendarOpening(''); }
           }
@@ -148,11 +151,6 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (!isWaitingNotice(storageError)) return undefined;
-    const timer = setTimeout(() => setStorageError(current => noticeAfterDelay(current)), WAITING_DISMISS_MS);
-    return () => clearTimeout(timer);
-  }, [storageError]);
 
   const account = useAccountSession();
   useFavoriteSync(account.status.loggedIn === true);
@@ -243,6 +241,7 @@ export default function App() {
         {stealthMode && <div className="stealth-toolbar"><span>移开暂停隐藏 · 移回继续</span><button className="btn btn-outline btn-sm" onClick={() => toggleStealth(false)}>退出小窗</button></div>}
         {stealthError && <div className="app-storage-error" role="alert">{stealthError}</div>}
         {storageError && <div className="app-storage-error" role="alert"><span>{storageError}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>关闭提示</button></div>}
+        {playbackNotice && <div key={playbackNotice.id} className="record-toast playback-toast" role="status" aria-live="polite"><span>{playbackNotice.text}</span></div>}
         <AppUpdateNotice />
         {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{renderPage(id)}</main>)}
       </div>

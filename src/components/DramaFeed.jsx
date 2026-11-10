@@ -1,3 +1,4 @@
+import usePlaybackNotice from './usePlaybackNotice';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Film, Play, RefreshCw } from './icons';
 import RandomDrama, { DramaPoster } from './RandomDrama';
@@ -30,7 +31,8 @@ function DramaFeed({ active = true, onNavigate }) {
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [playError, setPlayError] = useState('');
+  const { notice: playbackNotice, showNotice, clearNotice } = usePlaybackNotice();
+  const setPlayError = message => message ? showNotice(message) : clearNotice();
   const [randomRefresh, setRandomRefresh] = useState(0);
   const listController = useRef(null);
   const playController = useRef(null);
@@ -220,7 +222,7 @@ function DramaFeed({ active = true, onNavigate }) {
             <p className="drama-feed-play-note">在「我的剧库」选集、播放，接着上次继续看。</p>
             <div className="drama-feed-actions"><button className="btn btn-primary" disabled={resolving} onClick={startItem}><Play size={16} />{resolving ? '正在打开剧库…' : '在剧库播放'}</button>
               {resolving && <button className="btn btn-outline" onClick={() => { playController.current?.abort(); setResolving(false); setPlayError('已取消加载，可重试本剧。'); }}>取消加载</button>}</div>
-            {playError && <p className="drama-inline-error" role="alert">{playError}</p>}
+            {playbackNotice && <div key={playbackNotice.id} className="record-toast playback-toast" role="status" aria-live="polite"><span>{playbackNotice.text}</span></div>}
           </div>
         </div>
         <div className="drama-feed-navigation">

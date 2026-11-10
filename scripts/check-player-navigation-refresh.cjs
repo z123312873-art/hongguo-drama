@@ -135,8 +135,9 @@ const picker = ui => ui.find(n => n.props.className?.includes('series-picker-btn
   await test('storage recovery event clears the displayed failure', async () => {
     const source = fs.readFileSync(require.resolve('../src/App.jsx'), 'utf8');
     const effect = source.match(/useEffect\(\(\) => window\.electronAPI\.onStorageError\?\.\([\s\S]*?\), \[\]\);/)[0];
+    const { isWaitingNotice } = await import('../src/waitingNotice.mjs');
     let receive, displayed;
-    vm.runInNewContext(effect, { useEffect: fn => fn(), setStorageError: value => { displayed = value; }, window: { electronAPI: { onStorageError: fn => { receive = fn; } } } });
+    vm.runInNewContext(effect, { isWaitingNotice, useEffect: fn => fn(), setStorageError: value => { displayed = value; }, window: { electronAPI: { onStorageError: fn => { receive = fn; } } } });
     receive({ error: '模拟保存失败' }); assert.equal(displayed, '模拟保存失败');
     receive(null); assert.equal(displayed, '');
   });

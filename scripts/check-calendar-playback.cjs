@@ -69,7 +69,7 @@ function fixture({ exists = true, dismissed = false, saveError = '', resolveErro
     play: async () => { await find(node => node.type === './components/ReleaseCalendar').props.onPlay({ seriesId: 'A' }); await flush(); },
     directPlay: payload => handler({}, payload),
     target: () => find(node => node.type === './components/Player')?.props.target,
-    error: () => find(node => node.props.role === 'alert')?.children[0]?.children[0],
+    error: () => find(node => (node.props.role === 'alert' || node.props.className === 'record-toast playback-toast'))?.children[0]?.children[0],
   };
 }
 
@@ -152,7 +152,7 @@ for (const all of [false, true]) for (const failure of ['success', 'partial', 'i
     await player.button(all ? '全部删除' : '删除文件').props.onClick(); await player.flush();
     assert.ok(detailReads > beforeDetail, 'partial deletion must reload episode paths');
     assert.ok(storageReads > beforeStorage, 'partial deletion must reload remaining storage');
-    const toast = player.find(node => node.props.className === 'dm-toast dm-toast-success')?.children.join('');
+    const toast = player.find(node => node.props.className === 'record-toast playback-toast')?.children.join('');
     if (failure === 'partial') { assert.match(toast, /已删除 1 个/); assert.match(toast, /2 个.*失败/); }
     else if (failure === 'ipc') assert.match(toast, /IPC disconnected/);
     else assert.match(toast, /已删除 1 个/);
@@ -222,7 +222,7 @@ function mountHistoryNavigation() {
     acknowledgeWatchUpdates: async () => { calls.push(['ack']); return { success: true }; },
   };
   const module = { exports: {} };
-  vm.runInNewContext(source, { module, exports: module.exports, require: name => name === 'react' ? react : {}, window: { electronAPI: api } });
+  vm.runInNewContext(source, { module, exports: module.exports, require: name => name === 'react' ? react : createAppExtra(react)(name) || {}, window: { electronAPI: api } });
   const render = (runPassive = true) => {
     cursor = 0; tree = module.exports.default(props);
     layoutEffects.splice(0).forEach(fn => fn());

@@ -130,7 +130,7 @@ test('oversized prepare and protocol errors remain visible while automatic downl
     apiOverrides: { downloadSingleEpisode: async () => { downloads++; return { success: true }; } } });
   const text = node => typeof node === 'string' ? node : node?.children?.map(text).join('') || '';
   try {
-    await ui.flush(); assert.match(text(ui.find(n => n.props.className?.includes('dm-toast'))), /本集过大，请下载后播放/);
+    await ui.flush(); assert.match(text(ui.find(n => n.props.className?.includes('playback-toast'))), /本集过大，请下载后播放/);
     assert.equal(downloads, 1); assert.ok(ui.button('取消等待'));
   }
   finally { ui.unmount(); }
@@ -141,6 +141,6 @@ test('oversized prepare and protocol errors remain visible while automatic downl
     await streaming.flush();
     const playing = streaming.prepares.find(p => !p.prefetch);
     progress({ ...tooLarge, requestId: playing.requestId }); await streaming.flush();
-    assert.match(text(streaming.find(n => n.props.className?.includes('dm-toast'))), /本集过大，请下载后播放/);
+    assert.match(text(streaming.find(n => n.props.className?.includes('playback-toast'))), /本集过大，请下载后播放/);
   } finally { streaming.unmount(); }
 });

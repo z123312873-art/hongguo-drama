@@ -1242,6 +1242,13 @@ const BROWSE_CATEGORIES = [
 ];
 
 ipcMain.handle('browse-categories', async () => BROWSE_CATEGORIES);
+ipcMain.handle('browse-genres', async (_event, options) => {
+  if (!BROWSE_CATEGORIES.some(item => item.slug === options?.category)) return { success: false, error: '請重新選擇分類。' };
+  return require('./src/native/catalog').browseGenres({ category: options.category, forceRefresh: options.forceRefresh === true }, (authInfo, callback) => {
+    if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
+    else callback();
+  });
+});
 
 async function invalidateCustomSource(id) {
   require('./src/native/custom-source').cancelRequests(id);
@@ -2503,7 +2510,9 @@ function registerStreamProtocol() {
         // A fallback can change encryption and size; serve Range only after decoding that candidate.
         if (playInfo.contentKey && !playInfo.spadeA) {
           if (request.method === 'HEAD') { cleanup(); return new Response(null, { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } }); }
-          const finished = adoptPrefetchFile(session.cacheKey || session.vid);
+          const cachedCapture = onlineCache.get(session.cacheKey || session.vid);
+          const finished = adoptPrefetchFile(session.cacheKey || session.vid)
+            || (cachedCapture?.filePath && cachedCapture.mediaIdentity === identity ? cachedCapture : null);
           if (finished) {
             entry.filePath = finished.filePath;
             entry.disk = finished.disk;
@@ -2725,7 +2734,7 @@ function startOnlineCapture(session, entry, playInfo, identity) {
       if (onlineCache.has(key)) { await capture.discard(); return onlineCache.get(key); }
       capture.adopt();
       const source = /^custom:[^:]+/.exec(session.vid)?.[0] || /^(xifan|hema):/.exec(session.vid)?.[1] || 'hongguo';
-      const finished = { ...base, filePath, size, disk: { directory, readers: 0 }, vid: session.vid, source, complete: true, lastUsed: Date.now() };
+      const finished = { ...base, filePath, size, disk: { directory, readers: 0 }, vid: session.vid, source, mediaIdentity: identity, complete: true, lastUsed: Date.now() };
       onlineCache.set(key, finished); trimOnlineCache();
       return finished;
     }, error => {
@@ -2940,6 +2949,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
               if (!/^[a-f\d]{32}$/i.test(playInfo.contentKey)) throw new Error('片源解密密钥格式无效');
               const transcoding = playInfo.codec === 'bytevc2' || playInfo.transcode === 'bytevc2';
               if (prefetch && transcoding) beginBytevc2Prefetch(key, playInfo, controller.signal);
+              else if (prefetch) startOnlineCapture(session, entry, playInfo, JSON.stringify([playInfo.url, playInfo.contentKey, playInfo.spadeA]));
               return {...entry,playInfo};
             }
             else if (!seekable && !prefetch && !playInfo.spadeA && !playInfo.contentKey) return {...entry,playInfo};
@@ -3853,6 +3863,52 @@ ipcMain.handle('cloud-favorites', async () => {
     return { success: true, mode: 'cloud', userId, rows: details, ...(folders ? { folders } : {}), ...(foldersError ? { foldersError } : {}) };
   } catch (error) {
     return { success: true, mode: 'local', userId, error: FAVORITE_SYNC_ERROR };
+  }
+});
+
+let folderMutationBusy = false;
+const folderRules = require('./src/native/folder-rules');
+function folderRequest(userId) {
+  const client = accountCode();
+  return async (method, path, query, body) => {
+    const valid = () => syncedAccountId() === userId && accountCode() === client;
+    if (!valid()) throw folderRules.folderError('FOLDER_ACCOUNT');
+    let response;
+    try {
+      response = await client.request(method, path, query, body, {
+        retry: path !== favoriteFoldersApi.UPDATE_PATH && path !== favoriteFoldersApi.ITEM_PATH,
+        expectedUserId: userId,
+      });
+    } catch (error) {
+      if (!valid() || error.message === 'ACCOUNT_CHANGED') throw folderRules.folderError('FOLDER_ACCOUNT');
+      throw error;
+    }
+    if (!valid()) throw folderRules.folderError('FOLDER_ACCOUNT');
+    return response;
+  };
+}
+ipcMain.handle('cloud-folder-list', async (_event, expectedUserId) => {
+  const userId = syncedAccountId();
+  if (!userId || String(expectedUserId || '') !== userId) return { success: false, error: folderRules.publicError({ code: 'FOLDER_ACCOUNT' }) };
+  try {
+    const folders = await favoriteFoldersApi.fetchFolders(folderRequest(userId));
+    return { success: true, userId, folders };
+  } catch (error) {
+    return { success: false, userId, error: folderRules.publicError(error) };
+  }
+});
+ipcMain.handle('cloud-folder-change', async (_event, input) => {
+  const userId = syncedAccountId();
+  if (!userId || input?.userId !== userId) return { success: false, error: folderRules.publicError({ code: 'FOLDER_ACCOUNT' }) };
+  if (folderMutationBusy) return { success: false, userId, error: folderRules.publicError({ code: 'FOLDER_BUSY' }) };
+  folderMutationBusy = true;
+  try {
+    const result = await favoriteFoldersApi.changeFolder(folderRequest(userId), { ...input, userId });
+    return { success: true, userId, ...result };
+  } catch (error) {
+    return { success: false, userId, uncertain: error.uncertain === true, error: folderRules.publicError(error) };
+  } finally {
+    folderMutationBusy = false;
   }
 });
 

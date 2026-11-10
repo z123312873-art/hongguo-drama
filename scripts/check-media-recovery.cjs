@@ -97,6 +97,37 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     assert.equal(p.success,true,p.error);
     const r=await h.protocols['hongguo-stream'](new Request(p.url)); assert.equal(await r.text(),'complete-media');
   });
+  await check('compatible prefetch starts one shared capture and releasing its last owner cancels it', async () => {
+    let created = 0, aborted = 0, lookups = 0;
+    const h = harness(async () => { lookups++; return { ...info('/ok'), contentKey: '11'.repeat(16), codec: 'h264' }; }, {
+      './src/native/seekable-capture': { createContentKeyCapture: () => {
+        created++; let reject;
+        return { readable: true, result: new Promise((_resolve, failure) => { reject = failure; }), abort: () => { aborted++; reject(Object.assign(new Error('cancelled'), { code: 'ERR_CANCELED' })); }, discard: async () => {}, adopt() {} };
+      } },
+    });
+    const [first, second] = await Promise.all([h.handlers['prepare-online-play']({}, { vid: '11', seriesId: '1', prefetch: true }), h.handlers['prepare-online-play']({}, { vid: '11', seriesId: '1', prefetch: true })]);
+    assert.equal(first.success, true); assert.equal(second.success, true);
+    assert.equal(created, 1); assert.equal(lookups, 1);
+    await h.handlers['release-online-play']({}, { streamId: first.streamId }); assert.equal(aborted, 0);
+    await h.handlers['release-online-play']({}, { streamId: second.streamId }); assert.equal(aborted, 1);
+    assert.equal(h.run('onlineCaptures.size'), 0);
+  });
+  await check('completed compatible prefetch is adopted by the existing stream without another source or media request', async () => {
+    let created = 0, finish, capture, lookups = 0, adopted = 0;
+    const h = harness(async () => { lookups++; return { ...info('/ok'), contentKey: '22'.repeat(16), codec: 'h264' }; }, {
+      './src/native/seekable-capture': { createContentKeyCapture: ({ directory }) => {
+        created++;
+        capture = { readable: false, result: new Promise(resolve => { finish = () => { const filePath = path.join(directory, 'clear.mp4'); fs.writeFileSync(filePath, 'complete-media'); resolve({ filePath, size: 14 }); }; }), abort() {}, discard: async () => {}, adopt: () => { adopted++; } };
+        return capture;
+      } },
+    });
+    const prepared = await h.handlers['prepare-online-play']({}, { vid: '11', seriesId: '1', prefetch: true });
+    assert.equal(prepared.success, true); finish(); await capture.finished;
+    const response = await h.protocols['hongguo-stream'](new Request(prepared.url, { headers: { Range: 'bytes=2-5' } }));
+    assert.equal(response.status, 206); assert.equal(await response.text(), 'mple');
+    assert.equal(created, 1); assert.equal(lookups, 1); assert.equal(adopted, 1);
+    assert.equal(h.run(`onlineSessions.get(${JSON.stringify(prepared.streamId)}).entry.playInfo`), undefined);
+  });
   await check('broken download retries without keeping partial bytes',async()=>{
     let lookups=0; const h=harness(async()=>++lookups===1?info('/broken'):info('/ok')), t=task('broken');
     await h.context.executeHongguoDownload(t); assert.equal(t.status,'completed',t.error);

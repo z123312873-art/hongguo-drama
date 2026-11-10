@@ -39,7 +39,7 @@ export default defineConfig({
     // The packaged page imports the account helpers. Vite only rewrites
     // CommonJS inside node_modules unless these files are listed too.
     commonjsOptions: {
-      include: [/node_modules/, /[/\\]src[/\\]native[/\\]account-(profile|session)\.js$/],
+      include: [/node_modules/, /[/\\]src[/\\]native[/\\](?:account-(profile|session)|folder-rules)\.js$/],
     },
   },
 });

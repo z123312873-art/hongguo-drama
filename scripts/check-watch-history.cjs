@@ -99,12 +99,12 @@ function mountHistory({ missing = false, playError = '', resolveError = '', lock
   },
  };
  const module = { exports: {} };
- vm.runInNewContext(historySource, { module, exports: module.exports, require: name => name === 'react' ? react : {}, window: { electronAPI: api } });
+ vm.runInNewContext(historySource, { module, exports: module.exports, require: name => name === 'react' ? react : require('./app-view-shim.cjs')(react)(name) || {}, window: { electronAPI: api } });
  const render = () => { cursor = 0; tree = module.exports.default({}); effects.splice(0).forEach(fn => fn()); };
  const find = predicate => { const visit = node => { if (!node || typeof node !== 'object') return; if (predicate(node)) return node; return node.children?.map(visit).find(Boolean); }; return visit(tree); };
  const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } };
  render();
- return { calls, acknowledgements, find, flush, open: async () => { await flush(); await find(node => node.type === 'button' && node.children.includes('续作')).props.onClick(); await flush(); }, error: () => find(node => node.props.role === 'alert')?.children[0]?.children[0] };
+ return { calls, acknowledgements, find, flush, open: async () => { await flush(); await find(node => node.type === 'button' && node.children.includes('续作')).props.onClick(); await flush(); }, error: () => find(node => (node.props.role === 'alert' || node.props.className === 'record-toast playback-toast'))?.children[0]?.children[0] };
 }
 
 test('local sequel starts from the first playable episode without network or saved-position resume', async () => {

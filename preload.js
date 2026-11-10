@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   findSeriesSequels: (seriesId, options) => ipcRenderer.invoke('find-series-sequels', seriesId, options),
   searchResolve: (seriesId) => ipcRenderer.invoke('search-resolve', seriesId),
   cloudFavorites: () => ipcRenderer.invoke('cloud-favorites'),
+  cloudFolderList: (userId) => ipcRenderer.invoke('cloud-folder-list', userId),
+  cloudFolderChange: (input) => ipcRenderer.invoke('cloud-folder-change', input),
   cloudFavoriteSet: (seriesId, on, userId) => ipcRenderer.invoke('cloud-favorite-set', seriesId, on, userId),
   searchWindowShow: (visible, sourceUrl) => ipcRenderer.invoke('search-window-show', visible, sourceUrl),
   getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
@@ -85,6 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMediaSources: () => ipcRenderer.invoke('get-media-sources'),
   browseCategories: () => ipcRenderer.invoke('browse-categories'),
   browseList: (options) => ipcRenderer.invoke('browse-list', options),
+  browseGenres: (options) => ipcRenderer.invoke('browse-genres', options),
   listPremieres: () => ipcRenderer.invoke('list-premieres'),
   inspectRelease: (entries) => ipcRenderer.invoke('inspect-release', entries),
   browseUpcoming: (listener) => {
