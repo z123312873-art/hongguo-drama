@@ -396,7 +396,7 @@ function mountSync(h, library) {
   return { hook, render: loggedIn => { cursor = 0; hook.default(loggedIn); effects.splice(0).forEach(fn => fn()); }, unmount: () => { for (const cleanup of cleanups.values()) cleanup?.(); }, flush: async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); } };
 }
 
-test('deferred favorites stay local; offline cancellations persist; empty and failed folder reads do not clear cached folders', async () => {
+test('deferred favorites stay local; offline cancellations persist; confirmed empty folders clear stale cache', async () => {
   let interval; const timeouts = [];
   const h = fixture({ setTimeout: fn => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: fn => { interval = fn; return 1; }, clearInterval() {} });
   const library = h.load('localLibrary.js'), U = '1234567890123456', A = '7300000000000000001', B = '7300000000000000002';
@@ -414,12 +414,12 @@ test('deferred favorites stay local; offline cancellations persist; empty and fa
     assert.equal(library.readLocalLibrary().items.find(item => item.id === B).favorite, true);
     assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 1);
     assert.match(mounted.hook.favoriteSyncStatus().notice, /先保留/);
-    folders = []; interval(); await mounted.flush(); assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 1);
+    folders = []; interval(); await mounted.flush(); assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 0);
     offline = true; interval(); await mounted.flush();
     library.saveLocalSeries({ id: A, title: '甲', favorite: false });
     timeouts.at(-1)(); await mounted.flush();
     assert.ok(JSON.parse(h.storage.get('hongguo:favorite-cancels:v1')).ids.includes(A));
-    assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 1);
+    assert.equal(mounted.hook.favoriteSyncStatus().folders.length, 0);
     assert.doesNotMatch(mounted.hook.favoriteSyncStatus().error, /101109|CODE/);
     offline = false; interval(); await mounted.flush();
     assert.ok(sent.some(([id, on]) => id === A && !on));
@@ -494,22 +494,49 @@ test('folder actions bind to the current session, refuse logged-out and offline 
     assert.equal(x.calls.length, 1);
   } finally { x.mounted.unmount(); }
 });
-test('only a verified explicit deletion can remove the last cached folder; empty and failed replies preserve it', async () => {
+test('failed and incomplete folder replies preserve cache, but verified empty refresh and login clear it', async () => {
   const x = folderSyncFixture(); await x.start();
   try {
-    x.setFolders([]);
-    await x.mounted.hook.refreshFavoriteFolders();
+    x.h.window.electronAPI.cloudFolderList = async () => ({ success: false, userId: x.U, folders: [] });
+    assert.equal((await x.mounted.hook.refreshFavoriteFolders()).success, false);
     assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 1);
     assert.equal(x.mounted.hook.favoriteSyncStatus().foldersStale, true);
-    x.h.window.electronAPI.cloudFolderChange = async () => ({ success: false, error: 'CODE 101109' });
-    let result = await x.mounted.hook.changeFavoriteFolder({ operation: 'delete', folderId: x.F, confirmed: true });
-    assert.equal(result.success, false); assert.doesNotMatch(result.error, /CODE|101109/);
+    x.h.window.electronAPI.cloudFolderList = async () => ({ success: true, userId: x.U });
+    assert.equal((await x.mounted.hook.refreshFavoriteFolders()).success, false);
     assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 1);
-    x.h.window.electronAPI.cloudFolderChange = async () => ({ success: true, userId: x.U, deletedId: x.F, folders: [] });
-    result = await x.mounted.hook.changeFavoriteFolder({ operation: 'delete', folderId: x.F, confirmed: true });
-    assert.equal(result.success, true);
+    x.h.window.electronAPI.cloudFolderList = async () => ({ success: true, userId: x.U, folders: [] });
+    assert.equal((await x.mounted.hook.refreshFavoriteFolders()).success, true);
     assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 0);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().foldersStale, false);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folderBusy, false);
+    assert.match(x.mounted.hook.favoriteSyncStatus().folderNotice, /共 0 個/);
     assert.equal(JSON.parse(x.h.storage.get('hongguo:favorite-folders:v1')).folders.length, 0);
+    x.setFolders([]);
+    x.mounted.render(false); await x.mounted.flush();
+    x.mounted.render(true); await x.mounted.flush();
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 0);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().foldersError, '');
+    assert.equal(x.library.readLocalLibrary().items.filter(item => item.favorite).length, 1);
+  } finally { x.mounted.unmount(); }
+});
+test('folder refresh shows busy state, rejects duplicate reads and writes, and ignores a late old-account reply', async () => {
+  const x = folderSyncFixture(); await x.start(); let finish;
+  try {
+    let reads = 0;
+    x.h.window.electronAPI.cloudFolderList = () => { reads++; return new Promise(resolve => finish = resolve); };
+    const pending = x.mounted.hook.refreshFavoriteFolders();
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folderBusy, true);
+    assert.match(x.mounted.hook.favoriteSyncStatus().folderNotice, /正在重新整理/);
+    assert.equal((await x.mounted.hook.refreshFavoriteFolders()).success, false);
+    assert.equal((await x.mounted.hook.changeFavoriteFolder({ operation: 'create', name: '測試' })).success, false);
+    assert.equal(reads, 1);
+    x.mounted.render(false); await x.mounted.flush();
+    x.h.window.electronAPI.cloudFavorites = async () => ({ success: true, mode: 'cloud', userId: '2000000000000002', rows: [], folders: [] });
+    x.mounted.render(true); await x.mounted.flush();
+    finish({ success: true, userId: x.U, folders: [{ id: x.F, name: '舊帳號', itemIds: [] }] });
+    assert.equal((await pending).success, false);
+    assert.equal(x.mounted.hook.favoriteSyncStatus().folders.length, 0);
+    assert.equal(Boolean(x.mounted.hook.favoriteSyncStatus().folderBusy), false);
   } finally { x.mounted.unmount(); }
 });
 test('a late folder mutation cannot import old-account data or leave the next account busy', async () => {
@@ -632,9 +659,38 @@ test('a stale cached folder cannot block safe creation or be silently renamed or
     assert.equal(ui.find(n => n.props['aria-label'] === '刪除收藏夾').props.disabled, true);
     const create = ui.find(n => n.props['aria-label'] === '新增收藏夾'); assert.equal(create.props.disabled, false);
     create.props.onClick(); ui.render();
+    assert.equal(ui.find(n => n.props.id === 'folder-name-input').props.disabled, false);
     ui.find(n => n.props.id === 'folder-name-input').props.onChange({ target: { value: '已移除的夾' } }); ui.render();
+    assert.equal(ui.find(n => n.type === 'button' && n.props.type === 'submit').props.disabled, false);
     await ui.find(n => n.type === 'form').props.onSubmit({ preventDefault() {} }); await ui.flush();
     assert.equal(writes.length, 1); assert.equal(writes[0].operation, 'create');
     assert.equal(sync.folders.length, 1, 'a cached snapshot is not cleared by opening or submitting the editor');
+  } finally { ui.unmount(); }
+});
+
+
+test('expanded create and reservation sections expose explicit collapse controls', async () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  library.saveLocalSeries({ id: '7300000000000000001', title: '等待', favorite: true, online_time: Date.now() + 86400000 });
+  const sync = { mode: 'cloud', userId: '1000000000000001', folders: [] };
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useFavoriteSync': { useFavoriteSyncStatus: () => sync } });
+  try {
+    const create = () => ui.find(n => n.props['aria-label'] === '新增收藏夾');
+    create().props.onClick(); ui.render();
+    assert.equal(create().props['aria-expanded'], true);
+    assert.ok(ui.find(n => n.props.id === 'folder-name-input'));
+    create().props.onClick(); ui.render();
+    assert.equal(create().props['aria-expanded'], false);
+    assert.equal(Boolean(ui.find(n => n.props.id === 'folder-name-input')), false);
+    let reserved = ui.find(n => n.type === 'details');
+    assert.equal(reserved.props.open, false);
+    reserved.props.onToggle({ currentTarget: { open: true } }); ui.render();
+    reserved = ui.find(n => n.type === 'details');
+    assert.equal(reserved.props.open, true);
+    const collapse = ui.find(n => n.type === 'button' && n.children.some(value => typeof value === 'string' && value.includes('收起尚未上線')));
+    assert.ok(collapse);
+    collapse.props.onClick(); ui.render();
+    assert.equal(ui.find(n => n.type === 'details').props.open, false);
+    assert.equal(library.readLocalLibrary().items.filter(item => item.favorite).length, 1);
   } finally { ui.unmount(); }
 });

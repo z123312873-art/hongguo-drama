@@ -68,3 +68,24 @@ test('ranking tags normalize source whitespace without offering an empty filter'
   const { genres } = await api.genres({ category: 'hot-ai-drama' });
   assert.equal((await api.rankList({ category: 'hot-ai-drama', genre: genres[0].slug })).results.length, 1);
 });
+
+
+test('each category discovers its own tags and orders by verified count, without borrowing a shared set', async () => {
+  const offered = {
+    'real-drama': [{ slug: 'family', label: '家庭', count: 8 }, { slug: 'urban', label: '都市', count: 20 }],
+    'comic-drama': [{ slug: 'fantasy', label: '玄幻', count: 30 }, { slug: 'adventure', label: '冒險', count: 6 }],
+    'ai-drama': [{ slug: 'creative', label: '腦洞', count: 10 }, { slug: 'fantasy', label: '玄幻', count: 40 }],
+  };
+  const filters = createCatalogFilters({ read: async ({ category, genre }) => {
+    const tags = offered[category];
+    if (!genre) return { success: true, genres: tags };
+    const tag = tags.find(item => item.slug === genre);
+    assert.ok(tag);
+    return { success: true, results: [{ series_id: 'sample' }], total: tag.count };
+  } });
+  for (const category of Object.keys(offered)) {
+    const result = await filters.genres({ category });
+    assert.equal(result.success, true);
+    assert.deepEqual(result.genres.map(item => item.slug), [...offered[category]].sort((a, b) => b.count - a.count).map(item => item.slug));
+  }
+});

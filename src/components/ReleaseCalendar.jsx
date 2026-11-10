@@ -25,6 +25,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const [folderConfirm, setFolderConfirm] = useState(null);
   const [folderError, setFolderError] = useState('');
   const [folderPending, setFolderPending] = useState(false);
+  const [reservedExpanded, setReservedExpanded] = useState(false);
   const pendingFolder = useRef(false);
   const folderEpoch = useRef(0);
   const mounted = useRef(true);
@@ -74,6 +75,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
   const folderOnline = window.navigator?.onLine !== false;
   const createFolderReady = active && sync.mode === 'cloud' && Boolean(sync.userId) && folderOnline && !folderBusy;
   const folderReady = createFolderReady && !sync.foldersStale && !sync.foldersError;
+  const editorReady = folderDialog?.operation === 'create' ? createFolderReady : folderReady;
   const editableFolder = folderReady && Boolean(folder?.revision);
   const eligible = favorites.filter(item => /^\d{6,25}$/.test(item.id) && item.cloud_user === sync.userId && !isWaiting(item, Date.now(), released));
   const snapshot = target => ({ folderId: target.id, revision: target.revision });
@@ -162,8 +164,8 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
         <option value="">全部收藏</option>
         {folders.map(item => <option key={item.id} value={item.id}>{item.name}（{item.itemIds.length}）</option>)}
       </select>
-      <button type="button" className="btn btn-sm btn-outline" aria-label="重新整理收藏夾" disabled={!active || !sync.userId || folderBusy || !folderOnline} onClick={async () => { setFolderError(''); const result = await refreshFavoriteFolders(); if (!result?.success) setFolderError('收藏夾暫時無法讀取，已保留原有資料。'); }}><RefreshCw size={14} />重新整理</button>
-      <button type="button" className="btn btn-sm" aria-label="新增收藏夾" disabled={!createFolderReady} onClick={() => openName('create')}><Plus size={14} />新增收藏夾</button>
+      <button type="button" className="btn btn-sm btn-outline" aria-label="重新整理收藏夾" disabled={!active || !sync.userId || folderBusy || !folderOnline} onClick={async () => { const version = folderEpoch.current; setFolderError(''); const result = await refreshFavoriteFolders(); if (mounted.current && version === folderEpoch.current && !result?.success) setFolderError('收藏夾暫時無法讀取，已保留原有資料。'); }}><RefreshCw size={14} className={folderBusy ? 'folder-refresh-spin' : ''} />{folderBusy ? '整理中…' : '重新整理'}</button>
+      <button type="button" className="btn btn-sm" aria-label="新增收藏夾" aria-expanded={folderDialog?.operation === 'create'} aria-controls="favorite-folder-editor" disabled={!createFolderReady} onClick={() => folderDialog?.operation === 'create' ? setFolderDialog(null) : openName('create')}><Plus size={14} />{folderDialog?.operation === 'create' ? '收起新增表單' : '新增收藏夾'}</button>
       {folder && <>
         <button type="button" className="btn btn-sm btn-outline" aria-label="重新命名收藏夾" disabled={!editableFolder} onClick={() => openName('rename')}>改名</button>
         <button type="button" className="btn btn-sm btn-outline" aria-label="刪除收藏夾" disabled={!editableFolder} onClick={requestDelete}><Trash2 size={14} />刪除收藏夾</button>
@@ -173,12 +175,12 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
     </div>
     {sync.folderNotice && <p className="folder-notice" role="status">{sync.folderNotice}</p>}
     {folderError && <p className="release-error" role="alert">{folderError}</p>}
-    {folderDialog && ['create', 'rename'].includes(folderDialog.operation) && <form className="folder-editor" aria-label={folderDialog.operation === 'create' ? '新增收藏夾名稱' : '修改收藏夾名稱'} onSubmit={submitName}>
+    {folderDialog && ['create', 'rename'].includes(folderDialog.operation) && <form id="favorite-folder-editor" className="folder-editor" aria-label={folderDialog.operation === 'create' ? '新增收藏夾名稱' : '修改收藏夾名稱'} onSubmit={submitName}>
       <label htmlFor="folder-name-input">收藏夾名稱</label>
-      <input id="folder-name-input" value={folderDialog.name} maxLength={folderRules.MAX_NAME_LENGTH} disabled={!folderReady} autoFocus onChange={event => setFolderDialog({ ...folderDialog, name: event.target.value })} />
+      <input id="folder-name-input" value={folderDialog.name} maxLength={folderRules.MAX_NAME_LENGTH} disabled={!editorReady} autoFocus onChange={event => setFolderDialog({ ...folderDialog, name: event.target.value })} />
       <small>{folderDialog.name.trim().length} / {folderRules.MAX_NAME_LENGTH} 字；表情符號通常占 2 字</small>
-      <button className="btn btn-sm" type="submit" disabled={!folderReady}>{folderBusy ? '同步中…' : '儲存收藏夾'}</button>
-      <button className="btn btn-sm btn-outline" type="button" disabled={folderBusy} onClick={() => { setFolderDialog(null); setFolderError(''); }}>取消</button>
+      <button className="btn btn-sm" type="submit" disabled={!editorReady}>{folderBusy ? '同步中…' : '儲存收藏夾'}</button>
+      <button className="btn btn-sm btn-outline" type="button" disabled={folderBusy} onClick={() => { setFolderDialog(null); setFolderError(''); }}>收起</button>
     </form>}
     {folderDialog?.operation === 'add' && <form className="folder-editor" aria-label="加入短劇到收藏夾" onSubmit={submitAdd}>
       <label htmlFor="folder-drama-input">短劇</label>
@@ -189,7 +191,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
         {folders.filter(target => target.revision && !target.itemIds.includes(folderDialog.itemId)).map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
       </select>
       <button className="btn btn-sm" type="submit" disabled={!folderReady || !folderDialog.folderId}>確認加入</button>
-      <button className="btn btn-sm btn-outline" type="button" disabled={folderBusy} onClick={() => setFolderDialog(null)}>取消</button>
+      <button className="btn btn-sm btn-outline" type="button" disabled={folderBusy} onClick={() => setFolderDialog(null)}>收起</button>
     </form>}
     {folderConfirm && <div className="folder-confirm" role="alertdialog" aria-label={folderConfirm.operation === 'delete' ? '確認刪除收藏夾' : '確認移出收藏夾'}>
       <strong>{folderConfirm.operation === 'delete' ? `刪除「${folderConfirm.name}」？其中有 ${folderConfirm.itemCount} 筆內容。` : `將《${folderConfirm.title}》移出「${folderConfirm.name}」？`}</strong>
@@ -201,6 +203,6 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
     {!library.error && !favorites.length && <div className="release-empty"><h3>还没有收藏</h3><p>在「发现短剧」的海报右下角点爱心，这部剧就会出现在这里。</p></div>}
     {favorites.length > 0 && !view.rows.length && <p className="page-description" role="status">这个筛选下没有收藏。</p>}
     {visibleRows.length > 0 && <ul className="release-list" aria-label="收藏清单，最近收藏的在前">{visibleRows.map(row)}</ul>}
-    {waitingRows.length > 0 && <details className="release-reserved"><summary>尚未上線 {waitingRows.length} 部 · 已保留收藏，展開查看</summary><p>上線並確認可播放後，會自動回到上方清單。預計日期不代表已能播放。</p><ul className="release-list" aria-label="尚未上線的收藏">{waitingRows.map(row)}</ul></details>}
+    {waitingRows.length > 0 && <details className="release-reserved" open={reservedExpanded} onToggle={event => setReservedExpanded(event.currentTarget.open)}><summary>尚未上線 {waitingRows.length} 部 · 已保留收藏，{reservedExpanded ? '收起列表' : '展開查看'}</summary><p>上線並確認可播放後，會自動回到上方清單。預計日期不代表已能播放。</p><ul className="release-list" aria-label="尚未上線的收藏">{waitingRows.map(row)}</ul><button type="button" className="btn btn-sm btn-outline" onClick={() => setReservedExpanded(false)}>收起尚未上線列表</button></details>}
   </section>;
 }

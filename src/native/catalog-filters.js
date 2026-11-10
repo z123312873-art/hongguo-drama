@@ -1,4 +1,5 @@
 const TAG_TTL = 10 * 60 * 1000;
+const byCount = (a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-Hant') || a.slug.localeCompare(b.slug);
 function createCatalogFilters({ read, now = () => Date.now(), ttl = TAG_TTL }) {
   const saved = new Map(), pending = new Map();
   const cached = (key, refresh, load) => {
@@ -29,7 +30,7 @@ function createCatalogFilters({ read, now = () => Date.now(), ttl = TAG_TTL }) {
     });
     const counts = new Map();
     for (const item of results) for (const label of new Set((item.tags || []).filter(tag => typeof tag === 'string' && tag.trim()).map(tag => tag.trim()))) counts.set(label, (counts.get(label) || 0) + 1);
-    const genres = [...counts].map(([label, count]) => ({ label, count, slug: `tag-${Buffer.from(label).toString('hex')}` }));
+    const genres = [...counts].map(([label, count]) => ({ label, count, slug: `tag-${Buffer.from(label).toString('hex')}` })).sort(byCount);
     return { results, genres, sourceUrl: first.sourceUrl };
   });
   async function genres({ category, forceRefresh = false } = {}) {
@@ -51,7 +52,7 @@ function createCatalogFilters({ read, now = () => Date.now(), ttl = TAG_TTL }) {
           } catch { return { unavailable: true }; }
         });
         const positive = checked.filter(item => !item.unavailable && item.count > 0);
-        const valid = [...new Map(positive.map(item => [item.label, item])).values()];
+        const valid = [...new Map(positive.map(item => [item.label, item])).values()].sort(byCount);
         return { success: true, genres: valid, candidates: candidates.length, dropped: checked.filter(item => !item.unavailable && !item.count).length + positive.length - valid.length, unavailable: checked.filter(item => item.unavailable).length };
       });
     } catch { return { success: false, error: '分類標籤未完整確認，請稍後重試。' }; }

@@ -10,6 +10,7 @@ const SYNC_ERROR = '手機收藏暫時無法同步，這臺電腦的收藏仍會
 let current = LOCAL;
 let folderVersion = 0;
 let folderAction = null;
+let folderRefresh = null;
 const listeners = new Set();
 
 function publish(next) {
@@ -40,20 +41,15 @@ function writeCancels(userId, ids) {
   } catch { /* retried on the next sync */ }
 }
 
-function cachedFolders(userId, incoming, deletedId = '') {
+function cachedFolders(userId, incoming) {
   if (!userId) return [];
   let saved;
   try { saved = JSON.parse(window.localStorage.getItem(FOLDER_KEY) || 'null'); } catch {}
   const previous = saved?.userId === userId && Array.isArray(saved.folders) ? saved.folders : [];
   const valid = folders => folders.filter(folder => typeof folder?.id === 'string' && /^\d{6,25}$/.test(folder.id) && typeof folder.name === 'string' && Array.isArray(folder.itemIds) && folder.itemIds.every(id => typeof id === 'string' && /^\d{6,25}$/.test(id)));
-  if (Array.isArray(incoming) && incoming.length) {
+  if (Array.isArray(incoming)) {
     const folders = valid(incoming);
     if (folders.length !== incoming.length) return valid(previous);
-    try { window.localStorage.setItem(FOLDER_KEY, JSON.stringify({ userId, folders })); } catch {}
-    return folders;
-  }
-  if (Array.isArray(incoming) && !incoming.length && deletedId) {
-    const folders = valid(previous).filter(folder => folder.id !== deletedId);
     try { window.localStorage.setItem(FOLDER_KEY, JSON.stringify({ userId, folders })); } catch {}
     return folders;
   }
@@ -69,26 +65,31 @@ const ACCOUNT_ERROR = '帳號已變更或登入已過期，請重新登入後再
 export async function refreshFavoriteFolders() {
   const userId = current.userId;
   if (!userId || typeof window.electronAPI?.cloudFolderList !== 'function') return { success: false, error: ACCOUNT_ERROR };
-  if (folderAction) return { success: false, error: '收藏夾正在更新，請稍候。' };
+  if (folderAction || folderRefresh) return { success: false, error: '收藏夾正在更新，請稍候。' };
+  const action = {};
+  folderRefresh = action;
   const version = ++folderVersion;
+  publish({ ...current, folderBusy: true, folderNotice: '正在重新整理收藏夾…' });
   try {
     const result = await window.electronAPI.cloudFolderList(userId);
     if (version !== folderVersion || userId !== current.userId) return { success: false, error: ACCOUNT_ERROR };
     if (!result?.success || String(result.userId) !== userId || !Array.isArray(result.folders)) throw new Error('UNCONFIRMED');
     const folders = cachedFolders(userId, result.folders);
-    const stale = !result.folders.length && folders.length > 0;
-    publish({ ...current, folders, foldersStale: stale, foldersError: stale ? '手機回傳空清單，暫保留上次收藏夾；請重新整理確認。' : '', folderNotice: '' });
+    publish({ ...current, folders, foldersStale: false, foldersError: '', folderNotice: `收藏夾已重新整理，共 ${folders.length} 個。` });
     return { success: true, folders };
   } catch {
-    if (version === folderVersion && userId === current.userId) publish({ ...current, foldersError: FOLDER_ERROR, foldersStale: true });
+    if (version === folderVersion && userId === current.userId) publish({ ...current, foldersError: FOLDER_ERROR, foldersStale: true, folderNotice: '' });
     return { success: false, error: FOLDER_ERROR };
+  } finally {
+    if (folderRefresh === action) folderRefresh = null;
+    if (!folderAction && !folderRefresh && current.folderBusy) publish({ ...current, folderBusy: false });
   }
 }
 export async function changeFavoriteFolder(input) {
   const userId = current.userId;
   if (!userId || current.mode !== 'cloud' || typeof window.electronAPI?.cloudFolderChange !== 'function') return { success: false, error: ACCOUNT_ERROR };
   if (window.navigator?.onLine === false) return { success: false, error: '目前離線，收藏夾未變更。連線後請重新整理再操作。' };
-  if (folderAction) return { success: false, error: '收藏夾正在更新，請稍候。' };
+  if (folderAction || folderRefresh) return { success: false, error: '收藏夾正在更新，請稍候。' };
   const action = {};
   folderAction = action;
   const version = ++folderVersion;
@@ -97,7 +98,7 @@ export async function changeFavoriteFolder(input) {
     const result = await window.electronAPI.cloudFolderChange({ ...input, userId });
     if (version !== folderVersion || userId !== current.userId || current.mode !== 'cloud') return { success: false, error: ACCOUNT_ERROR };
     if (!result?.success || String(result.userId) !== userId || !Array.isArray(result.folders)) return { success: false, uncertain: result?.uncertain === true, error: folderFailure(result) };
-    const folders = cachedFolders(userId, result.folders, result.deletedId || '');
+    const folders = cachedFolders(userId, result.folders);
     const notice = { create: '收藏夾已新增並同步到手機。', rename: '收藏夾已改名並同步到手機。', delete: '收藏夾已刪除，手機收藏與影片不受影響。', add: '已加入收藏夾並同步到手機。', remove: '已從收藏夾移除，仍保留在全部收藏。' }[input.operation];
     publish({ ...current, folders, foldersError: '', foldersStale: false, folderNotice: notice || '', folderBusy: false });
     return { success: true, folderId: result.folderId, deletedId: result.deletedId || '' };
@@ -105,7 +106,7 @@ export async function changeFavoriteFolder(input) {
     return { success: false, uncertain: true, error: FOLDER_ERROR };
   } finally {
     if (folderAction === action) folderAction = null;
-    if (!folderAction && current.folderBusy) publish({ ...current, folderBusy: false });
+    if (!folderAction && !folderRefresh && current.folderBusy) publish({ ...current, folderBusy: false });
   }
 }
 
@@ -176,9 +177,10 @@ export default function useFavoriteSync(loggedIn) {
         }
       }
       const freshFolders = folderReadVersion === folderVersion;
-      const folders = freshFolders ? cachedFolders(userId, result.folders) : (current.userId === userId ? current.folders || [] : cachedFolders(userId));
-      const foldersStale = freshFolders ? Boolean(result.foldersError) || (Array.isArray(result.folders) && !result.folders.length && folders.length > 0) : current.foldersStale;
-      publish({ mode: 'cloud', userId, syncedAt: Date.now(), folders, foldersStale, foldersError: freshFolders ? result.foldersError || (foldersStale ? '手機回傳空清單，暫保留上次收藏夾；請重新整理確認。' : '') : current.foldersError, folderBusy: Boolean(folderAction), folderNotice: current.userId === userId ? current.folderNotice : '', notice: deferredNotice || plan.notice, error: errors.length ? SYNC_ERROR : '' });
+      const confirmedFolders = freshFolders && !result.foldersError && Array.isArray(result.folders);
+      const folders = confirmedFolders ? cachedFolders(userId, result.folders) : (current.userId === userId ? current.folders || [] : cachedFolders(userId));
+      const foldersStale = freshFolders ? !confirmedFolders : current.foldersStale;
+      publish({ mode: 'cloud', userId, syncedAt: Date.now(), folders, foldersStale, foldersError: freshFolders ? result.foldersError || (foldersStale ? FOLDER_ERROR : '') : current.foldersError, folderBusy: Boolean(folderAction || folderRefresh), folderNotice: current.userId === userId ? current.folderNotice : '', notice: deferredNotice || plan.notice, error: errors.length ? SYNC_ERROR : '' });
     } catch (error) {
       if (valid()) publish({ mode: 'local', userId: user.current, folders: cachedFolders(user.current), error: SYNC_ERROR });
     } finally {
