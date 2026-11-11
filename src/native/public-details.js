@@ -59,10 +59,10 @@ async function fetchPublicDetails(seriesId, vid = '') {
   const url = vid ? `${SITE}/player/${seriesId}/${vid}` : `${SITE}/detail?series_id=${seriesId}`;
   if (cache.get(url)?.expires > Date.now()) return cache.get(url).data;
   if (pending.has(url)) return pending.get(url);
-  // 同一时间只打一页公开页。当前集和下一集预载排队，避免连点时被来源挡住。
+
   const request = enqueuePublic(async () => {
     try {
-      // Axios defaults preserve the app's configured proxy; no cookies or account headers are added.
+
       const response = await axios.get(url, { timeout: 10000, signal: AbortSignal.timeout(10000),
         maxRedirects: 0, responseType: 'text', maxContentLength: 8 * 1024 * 1024,
         headers: { 'User-Agent': UA, Referer: `${SITE}/` } });

@@ -1,4 +1,4 @@
-// Offline resource regressions with a tiny buffer budget; no large allocations or external media.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

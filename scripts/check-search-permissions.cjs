@@ -1,4 +1,4 @@
-// Isolated window navigation and permission checks; no Electron GUI or network.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const { EventEmitter } = require('node:events');
@@ -20,7 +20,7 @@ async function checkWindows() {
   const context = vm.createContext({ BrowserWindow: Window, SEARCH_SITE: 'https://hongguoduanju.com',
     SEARCH_TIMEOUT_MS: 20, SEARCH_UA: '', SNIFFER_JS: 'cards', BROWSE_META_JS: 'meta',
     setTimeout, clearTimeout, URL, console: { log() {}, warn() {} } });
-  vm.runInContext(source.slice(source.indexOf('function sourcePageUrl('), source.indexOf('/**\n * 通用卡片')), context);
+  vm.runInContext(source.slice(source.indexOf('function sourcePageUrl('), source.indexOf('const SNIFFER_JS =')), context);
   vm.runInContext(source.slice(source.indexOf('async function runSniffOnUrl('), source.indexOf('async function runSearchSniff(')), context);
   const visible = context.getSearchWindow(); await visible.loadURL('https://hongguoduanju.com/detail?series_id=1234567');
   assert.equal((await context.runSniffOnUrl('https://hongguoduanju.com/search/fixture', 'Search')).success, true);

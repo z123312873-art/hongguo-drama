@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const nativeDir = path.join(__dirname, '../src/native');
 
-// Published SM3 vectors plus a long input cross-checked with Node 22/OpenSSL.
+
 const vectors = [
   ['abc', '66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0'],
   ['abcd'.repeat(16), 'debe9ff92275b8a138604889c18e5a4d6fdb70e5387e5765293dcba39c0c5732'],
@@ -41,8 +41,9 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
       return { status: 200, headers: {}, data: JSON.stringify({ code: 1 }) };
     }
     if (config.method === 'POST') {
-      assert.ok(config.headers['x-medusa']);
-      assert.ok(config.headers['x-gorgon']);
+      assert.ok(config.headers['x-argus'].length > 100);
+      assert.equal(config.headers['x-medusa'], undefined);
+      assert.equal(config.headers['x-gorgon'], undefined);
       const model = { video_model: JSON.stringify({ fallback_api: fallback }) };
       return { status: 200, headers: {}, data: JSON.stringify({ code: 0, data: { '999': model, ...(wrongVid ? {} : { '11': model }) } }) };
     }
@@ -55,6 +56,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
   const context = { Buffer, URL, URLSearchParams, AbortSignal, signedDeviceIds, module: { exports: {} },
     require: name => {
       if (name === 'axios') return axios;
+      if (name === './player-signing') return { headers(url, body) { signedDeviceIds.push(new URL(url).searchParams.get('device_id')); return require(path.join(nativeDir, 'player-signing')).headers(url, body); } };
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
@@ -69,13 +71,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
       throw new Error(`Unexpected dependency: ${name}`);
     },
   };
-  vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'app-source.js'), 'utf8') + `
-    const originalDeviceProto = deviceProto;
-    deviceProto = function (deviceId) {
-      signedDeviceIds.push(deviceId);
-      return originalDeviceProto(deviceId);
-    };
-  `, context);
+  vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'app-source.js'), 'utf8'), context);
   return { fetch: context.module.exports.fetchAppPlayUrl, calls, signedDeviceIds };
 }
 function loadApp(axios, { videoTab = false } = {}) {
@@ -83,6 +79,7 @@ function loadApp(axios, { videoTab = false } = {}) {
     require: name => {
       if (name === 'axios') return config => !videoTab && String(config.url).includes('/reading/bookapi/video_tab/')
         ? Promise.resolve({ status: 200, headers: {}, data: JSON.stringify({ code: 1 }) }) : axios(config);
+      if (name === './player-signing') return require(path.join(nativeDir, 'player-signing'));
       if (name === './sm3') return require(path.join(nativeDir, 'sm3'));
       if (name === './playback-device') return require(path.join(nativeDir, 'playback-device'));
       if (name === './download-quality') return require(path.join(nativeDir, 'download-quality'));
@@ -144,7 +141,8 @@ const checks = [
         assert.equal(config.headers['Cookie'], undefined);
         assert.equal(config.headers['X-Tt-Token'], undefined);
         assert.equal(query.get('user_id'), null);
-        for (const name of ['x-gorgon', 'x-medusa', 'x-helios']) assert.ok(config.headers[name]);
+        for (const name of ['x-gorgon', 'x-medusa', 'x-helios']) assert.equal(config.headers[name], undefined);
+        for (const name of ['x-argus', 'x-ladon', 'x-khronos']) assert.ok(config.headers[name]);
         ids.push(id);
         return { status: 200, headers: {}, data: JSON.stringify({ code: 0, data: { video_model_data: { '11': { video_model: JSON.stringify({ video_list: [{ main_url: media, codec_type: 'h264', vwidth: 1080, vheight: 1920 }] }) } } } }) };
       }, { videoTab: true });
@@ -297,7 +295,7 @@ const checks = [
         }
         if (config.method === 'POST') {
           const count = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register')).length;
-          assert.ok(config.headers['x-gorgon'], 'a registered device is signed first');
+          assert.ok(config.headers['x-argus'].length > 100);
           if (count === 1) return { status: 200, headers: {}, data: '' };
           assert.equal(new URL(config.url).searchParams.get('device_id'), '1234567890123456');
           return { status: 200, headers: {}, data: JSON.stringify(model) };
@@ -356,7 +354,7 @@ const checks = [
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
     }
   }],
-  ['an empty signed answer falls back to the unsigned style on the same device and does not register again', async () => {
+  ['an empty signed answer retries the alternate profile with fresh signing on the same device', async () => {
     const device = require(path.join(nativeDir, 'playback-device'));
     device.resetPlaybackDevice();
     const media = 'https://v3-reading.qznovelvod.com/video.mp4';
@@ -372,10 +370,12 @@ const checks = [
         }
         const videos = calls.filter(call => call.method === 'POST' && !String(call.url).includes('device_register'));
         if (videos.length === 1) {
-          assert.ok(config.headers['x-gorgon'], 'the signed style goes first');
+          assert.ok(config.headers['x-argus'].length > 100);
           return { status: 200, headers: {}, data: '' };
         }
         assert.equal(config.headers['x-gorgon'], undefined);
+        assert.ok(config.headers['x-argus'].length > 100);
+        assert.notEqual(config.headers['x-argus'], videos[0].headers['x-argus']);
         assert.equal(new URL(config.url).searchParams.get('device_id'), '1234567890123456');
         assert.equal(new URL(config.url).searchParams.get('iid'), '6543210987654321');
         return { status: 200, headers: {}, data: JSON.stringify(model) };
@@ -413,7 +413,7 @@ const checks = [
         const url = new URL(config.url);
         const id = url.searchParams.get('device_id');
         used.set(id, (used.get(id) || 0) + 1);
-        // The service answers a device once, and the first edge host answers nobody.
+
         if (used.get(id) > 1 || url.hostname.startsWith('api5-normal-sinfonlineb')) return { status: 200, headers: {}, data: '' };
         return { status: 200, headers: {}, data: JSON.stringify(model) };
       });

@@ -1,4 +1,4 @@
-// SM3 (GB/T 32905), pure JavaScript: Electron's bundled crypto may omit SM3.
+
 module.exports = function sm3(input) {
   const source = Buffer.isBuffer(input) ? input : Buffer.from(input);
   const data = Buffer.alloc(Math.ceil((source.length + 9) / 64) * 64);

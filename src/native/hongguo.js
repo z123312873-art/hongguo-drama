@@ -13,9 +13,9 @@ const API = "https://api5-normal-sinfonlineb.fqnovel.com";
 const UA = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)";
 const VIDEO_REFERER = "https://novelquickapp.com/";
 
-// ===== 优先使用官网网页版，App 接口保留为回退 =====
-// 官网 player 页是服务端渲染的：完整分集 vid 列表与可直接下载的 MP4 直链
-// 都内嵌在 HTML 里，无需任何签名。走的是官网对普通用户开放的同一层。
+
+
+
 const SITE_ORIGIN = "https://hongguoduanju.com";
 const WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const WEB_REFERER = SITE_ORIGIN + "/";
@@ -86,20 +86,20 @@ const MODEL_BIZ_PARAM = {
   video_platform: 1024,
 };
 
-/**
- * API 调用封装
- */
+
+
+
 async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
   const q = { ...COMMON_QUERY, _rticket: Date.now().toString() };
   for (let i = 0; i < retries; i++) {
-    const signal = {}; // 供错误信息回溯（HTTP 状态 / 字节数 / CDN logid）
+    const signal = {};
     try {
       const res = await axios.post(API + apiPath, body, {
         ...require('./direct-connect').directAxiosOptions(),
         params: q,
         headers: HEADERS,
         timeout,
-        // 200 + 空 body 时 axios 会解析成 ''，这里统一按原始字节处理便于判断
+
         responseType: 'arraybuffer',
         transformResponse: [(d) => d],
       });
@@ -111,7 +111,7 @@ async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
         throw new Error(`HTTP ${res.status}`);
       }
       if (buf.length === 0) {
-        // 服务端返回 200 但无任何内容：网关在做业务处理前就丢弃了请求
+
         const err = new Error(
           `接口返回空响应（HTTP 200，0 字节）${signal.logid ? ' logid=' + signal.logid : ''}`
         );
@@ -137,22 +137,22 @@ async function apiCall(apiPath, body, retries = 3, timeout = 25000) {
   }
 }
 
-// ===== 官网网页版数据源实现 =====
+
 
 const responseCache = new Map();
 const pendingRequests = new Map();
 const failedWebMedia = new Map();
 
-/** A real media GET failed; keep retries off that episode's web CDN briefly. */
+
 function markWebMediaFailure(playInfo) {
   if (playInfo?.source !== 'web' || !playInfo.vid) return;
   failedWebMedia.set(String(playInfo.vid), Date.now() + 5 * 60 * 1000);
   if (failedWebMedia.size > 128) failedWebMedia.delete(failedWebMedia.keys().next().value);
 }
 
-// A page with no full video (a preview only, or a missing page) is the same answer for the next episode of that
-// series, and asking costs a second or more before the App is tried. Such a series goes straight to the App for a
-// while; the page is still the last resort. Timeouts and server errors say nothing about the page and never count.
+
+
+
 const webMisses = new Map();
 const WEB_MISS_MS = 5 * 60 * 1000;
 function webMissed(sid) {
@@ -168,14 +168,14 @@ function noteWebMiss(sid, error) {
   if (webMisses.size > 128) webMisses.delete(webMisses.keys().next().value);
 }
 
-/** 仅保留短期成功结果；重复点击共享请求，失败后立即允许重试。 */
+
 async function cachedRequest(key, ttl, load, { force = false } = {}) {
   const cached = responseCache.get(key);
   if (!force && cached && cached.expires > Date.now()) return cached.value;
   responseCache.delete(key);
   if (!force && pendingRequests.has(key)) return pendingRequests.get(key);
   const request = Promise.resolve().then(load).then(value => {
-    // A forced lookup owns the cache even if an older request finishes later.
+
     if (pendingRequests.get(key) === request) {
       responseCache.set(key, { value, expires: Date.now() + ttl });
       if (responseCache.size > 128) responseCache.delete(responseCache.keys().next().value);
@@ -188,7 +188,7 @@ async function cachedRequest(key, ttl, load, { force = false } = {}) {
   return request;
 }
 
-/** MP4 直链：去掉 HTML 转义并剥掉 Range 头，让 CDN 回整段 */
+
 function normalizeVideoUrl(raw) {
   return String(raw || '')
     .replace(/\\u002F/g, '/')
@@ -198,7 +198,7 @@ function normalizeVideoUrl(raw) {
     .replace(/[?&]$/, '');
 }
 
-/** 从响应体里安全地取出某个字符串字段 */
+
 function pickJsonString(text, key) {
   const m = text.match(new RegExp('"' + key + '"\\s*:\\s*"([^"]*)"'));
   return m ? m[1].replace(/\\u002F/g, '/').replace(/\\u0026/g, '&') : '';
@@ -207,9 +207,9 @@ function pickJsonString(text, key) {
 const sitePages = new Map();
 const sitePending = new Map();
 
-/** 拉取官网页面 HTML。同一地址共享进行中的请求，并在短时间内复用结果。 */
+
 async function fetchSiteHtml(url, timeout = 30000, signal, { trustedOfficialDns = false } = {}) {
-  // Only detail pages are reused. Playback pages change per episode and must not stick.
+
   const reusable = !signal && String(url).includes('/detail?series_id=');
   const cached = reusable ? sitePages.get(url) : null;
   if (cached && cached.expires > Date.now()) return cached.html;
@@ -220,7 +220,7 @@ async function fetchSiteHtml(url, timeout = 30000, signal, { trustedOfficialDns 
       if (new URL(url).origin === SITE_ORIGIN) {
         guarded = { ...webMediaRequestOptions(url, { trustedOfficialDns: true }), adapter: 'http' };
       }
-    } catch (_) { /* a malformed URL is rejected by axios below */ }
+    } catch (_) {                                                  }
   }
   const task = (async () => {
     let last;
@@ -261,10 +261,10 @@ async function fetchSiteHtml(url, timeout = 30000, signal, { trustedOfficialDns 
   finally { if (reusable) sitePending.delete(url); }
 }
 
-/**
- * 从官网 player 页内嵌 JSON 取完整分集列表
- * vid_list 按下标即集数顺序（下标 i → 第 i+1 集）
- */
+
+
+
+
 function episodeListFromHtml(html, seriesId) {
   const m = String(html || '').match(/"vid_list"\s*:\s*\[([^\]]*)\]/);
   if (!m) return null;
@@ -297,7 +297,7 @@ function episodeListFromHtml(html, seriesId) {
     total: episodes.length,
     web_accessible_episodes: webAccessibleEpisodes,
     episodes,
-    source: 'web', // 标记来源，便于排查
+    source: 'web',
   };
 }
 
@@ -342,7 +342,7 @@ function asPublicCard(value) {
   return { rating: value ?? null, heat: '' };
 }
 
-/** Public 0–10 score and the heat sentence beside it. Stops once the hero is in hand. */
+
 async function fetchPublicCard(seriesId, timeout = 8000) {
   const id = String(seriesId || '');
   if (!/^\d{6,30}$/.test(id)) return { rating: null, heat: '' };
@@ -390,8 +390,8 @@ function describeWebLoadError(error) {
 async function fetchEpisodeListFromWeb(seriesId, deadline = 0) {
   const prelude = takeWebEpisodes(seriesId);
   if (prelude) return prelude;
-  // Some player pages hang on a bad CDN edge while the detail page is healthy.
-  // Race both, then hedge with ordinary DNS if the first attempt is still waiting.
+
+
   const id = String(seriesId);
   const race = async (timeout, trustedOfficialDns) => {
     const budget = deadline ? Math.min(timeout, deadline - Date.now()) : timeout;
@@ -421,7 +421,7 @@ async function fetchEpisodeListFromWeb(seriesId, deadline = 0) {
     throw error;
   });
   const hedge = (async () => {
-    // A page that has already arrived should not open another round of requests.
+
     for (let i = 0; i < 4 && !firstValue && !firstError; i += 1) await Promise.resolve();
     if (firstValue) return firstValue;
     if (firstError) throw firstError;
@@ -440,12 +440,12 @@ async function fetchEpisodeListFromWeb(seriesId, deadline = 0) {
   }
 }
 
-/**
- * 从官网取单集可直接下载的 MP4 直链
- * 官网页里与当前分集绑定的 VideoObject.contentUrl 是明文 MP4，无 CENC 加密，
- * 因此不需要 spade_a / 解密这一步。
- * sid 已知时用 /player/{sid}/{vid}；未知时退回 /player/_/{vid} 再自行解析。
- */
+
+
+
+
+
+
 async function fetchPlayUrlFromWeb(vid, sid, onFailure) {
   const candidates = [];
   if (sid) candidates.push(`${SITE_ORIGIN}/player/${encodeURIComponent(sid)}/${encodeURIComponent(vid)}`);
@@ -464,15 +464,15 @@ async function fetchPlayUrlFromWeb(vid, sid, onFailure) {
           (sid && actualSid !== String(sid)) || String(data.seriesDetail?.series_id) !== actualSid ||
           data.publicVideoSeo?.available !== true || String(data.publicVideoSeo.itemId) !== String(vid) ||
           String(data.publicVideoSeo.seriesId) !== actualSid) continue;
-      // Protected pages expose a short SEO preview even when metadata claims the full duration.
+
       if (data.protectedPlayback === true) { lastErr = { code: 'PREVIEW_ONLY' }; break; }
-      // Bind media to the current player, never a recommended video's URL elsewhere in the page.
+
       const matchesPlayer = (value, videoUrl) => {
         try {
           const target = new URL(value);
           return target.origin === SITE_ORIGIN && !target.username && !target.password &&
             (target.pathname === `/player/${actualSid}/${String(vid)}` ||
-              // The current canonical page omits vid; its official media path must still identify this episode.
+
               target.pathname === `/player/${actualSid}` && videoUrl.origin === SITE_ORIGIN &&
                 videoUrl.pathname.startsWith(`/video/public/${String(vid)}/`));
         } catch (_) { return false; }
@@ -497,11 +497,11 @@ async function fetchPlayUrlFromWeb(vid, sid, onFailure) {
   return null;
 }
 
-/**
- * 分享链接 -> series_id
- */
+
+
+
 function shareHttpUrl(value, base) {
-  // Validate before Axios or URL parsing: network timeouts cannot stop synchronous data: parsing.
+
   if (typeof value !== 'string' || value.length > 4096 || /[\s\\]/.test(value)) {
     throw new Error('分享链接无效或过长');
   }
@@ -541,7 +541,7 @@ async function resolveSeriesId(shareUrl) {
         transformResponse: [(data) => data],
         maxContentLength: 2 * 1024 * 1024,
         maxBodyLength: 1024,
-        // Follow manually so every Location is bounded and validated before Axios sees it.
+
         maxRedirects: 0,
         validateStatus: (status) => (status >= 200 && status < 300) || [301, 302, 303, 307, 308].includes(status),
       });
@@ -568,7 +568,7 @@ async function resolveSeriesId(shareUrl) {
       const raw = decodeURIComponent(schemeParams);
       const match = raw.match(/"video_id"\s*:\s*"(\d{1,30})"/);
       if (match) return match[1];
-    } catch (_) { /* Malformed optional parameters must not hide valid page data. */ }
+    } catch (_) {                                                                    }
   }
   const match = bodyText.match(/video_series_id=(\d{1,30})(?!\d)/)
     || bodyText.match(/"(?:video_id|series_id)"\s*:\s*"(\d{1,30})"/);
@@ -576,14 +576,23 @@ async function resolveSeriesId(shareUrl) {
   throw new Error('无法从分享链接解析剧集 ID');
 }
 
-/**
- * 获取全集剧集列表
- */
+
+
+
 async function fetchEpisodeList(seriesId) {
   if (String(seriesId).startsWith('custom:')) return require('./custom-source').fetchEpisodeList(seriesId);
   if (String(seriesId).startsWith('hema:')) return require('./hema').fetchEpisodeList(seriesId);
   if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisodeList(seriesId);
   return cachedRequest(`episodes:${seriesId}`, 60000, () => fetchEpisodeListFresh(seriesId));
+}
+
+async function fetchSeriesMetadata(seriesId) {
+  const id = String(seriesId || '');
+  if (!/^\d{1,30}$/.test(id)) return fetchEpisodeList(id);
+  return cachedRequest(`series-metadata:${id}`, 60000, async () => {
+    try { return await require('./app-source').fetchAppSeriesMetadata(id); }
+    catch { return fetchEpisodeList(id); }
+  });
 }
 
 async function fetchEpisodeListFresh(seriesId) {
@@ -602,6 +611,10 @@ async function fetchEpisodeListFresh(seriesId) {
   try {
     j = await apiCall("/novel/player/multi_video_detail/preload/v1", body);
   } catch (e) {
+    try {
+      const metadata = await require('./app-source').fetchAppSeriesMetadata(seriesId);
+      if (metadata.episodes?.length) return metadata;
+    } catch {}
     throw new Error(`获取分集失败：官网数据源（${webError.message}），备用接口（${e.message}）`);
   }
   if (!j || j.code !== 0) {
@@ -633,10 +646,10 @@ async function fetchEpisodeListFresh(seriesId) {
   };
 }
 
-/**
- * 单条视频流的清晰度评分
- * 返回 { defNum, pixels, bitrate }，数值越大越清晰
- */
+
+
+
+
 function streamScore(v) {
   const meta = v.video_meta || {};
   const defStr = String(meta.definition || '');
@@ -655,10 +668,10 @@ function streamScore(v) {
   return { defNum, pixels: w * h, bitrate };
 }
 
-/**
- * 解析单个 video_model JSON
- * 选流优先级：H.264 兼容性 > 短边分辨率（无尺寸时用标签） > 像素 > 码率
- */
+
+
+
+
 function parseModelVideo(vm) {
   if (typeof vm !== 'string') return [null, null, null];
   let vmj;
@@ -668,9 +681,9 @@ function parseModelVideo(vm) {
     return [null, null, null];
   }
   const vl = vmj.video_list || [];
-  // 比较两条流：返回 >0 表示 a 更适合播放
+
   const cmp = (a, b) => {
-    if (a.codecRank !== b.codecRank) return b.codecRank - a.codecRank; // rank 越小越好
+    if (a.codecRank !== b.codecRank) return b.codecRank - a.codecRank;
     if (a.defNum !== b.defNum) return a.defNum - b.defNum;
     if (a.pixels !== b.pixels) return a.pixels - b.pixels;
     return a.bitrate - b.bitrate;
@@ -700,9 +713,9 @@ function parseModelVideo(vm) {
   return best || [null, null, null];
 }
 
-/**
- * 获取单集播放直链与 spade_a 加密 key
- */
+
+
+
 async function fetchPlayUrlSingle(vid, sid, options = {}) {
   try {
     const quality = normalizeDownloadQuality(options.quality);
@@ -717,7 +730,7 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
       : require('./app-source').fetchAppPlayUrl(String(vid), { quality, allowLowerQuality }).catch(error => {
         throw unavailableSources([sourceFailure('app', error)], allowLowerQuality ? 'auto' : quality);
       }), options);
-    // Last-resort web recovery must not replace App priority during the penalty window.
+
     if (skipWeb && result.source === 'web' && responseCache.get(cacheKey)?.value === result) responseCache.delete(cacheKey);
     return result;
   } catch (error) {
@@ -726,7 +739,7 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
   }
 }
 
-// Local filters (AdGuard, antivirus, VPN) can block the anonymous device registration or re-sign HTTPS.
+
 const FILTER_HINT = '若电脑装有 AdGuard 等拦截软件，请把红果短剧加入例外或暂时关闭后再试';
 const { CERT_HINT } = require('./cert-hint');
 function registrationHint(reason) {
@@ -791,7 +804,7 @@ async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
   } catch (e) {
     sources.push(sourceFailure('api', e));
   }
-  // A transient CDN failure changes priority, not permanent source availability.
+
   if (skipWeb) {
     const lastWeb = await fetchPlayUrlFromWeb(vid, sid, error => sources.push(sourceFailure('web', error)));
     if (lastWeb?.url) return lastWeb;
@@ -799,9 +812,9 @@ async function fetchPlayUrlFresh(vid, sid, skipWeb = false) {
   throw unavailableSources(sources);
 }
 
-/**
- * FFmpeg 兼容 Base64 解码
- */
+
+
+
 function avBase64Decode(s) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const table = {};
@@ -842,9 +855,9 @@ function avBase64Decode(s) {
   return Buffer.from(dst);
 }
 
-/**
- * spade_a -> 16 字节 AES Key
- */
+
+
+
 function deriveKey(spadeA) {
   if (!spadeA) return null;
   const buf = avBase64Decode(spadeA);
@@ -895,18 +908,18 @@ function deriveKey(spadeA) {
   }
 }
 
-/**
- * AES-128-ECB 加密
- */
+
+
+
 function aes128EcbEncrypt(key16, data) {
   const cipher = crypto.createCipheriv('aes-128-ecb', key16, null);
   cipher.setAutoPadding(false);
   return Buffer.concat([cipher.update(data), cipher.final()]);
 }
 
-/**
- * CENC-AES-CTR 解密 sample
- */
+
+
+
 function decryptSample(key, nonce, cipher) {
   if (!cipher || cipher.length === 0) return Buffer.alloc(0);
   const nblocks = Math.ceil(cipher.length / 16);
@@ -923,9 +936,9 @@ function decryptSample(key, nonce, cipher) {
   return plain;
 }
 
-/**
- * MP4 Box 结构解析
- */
+
+
+
 function parseBoxes(data, start, end) {
   const boxes = [];
   let off = start;
@@ -950,9 +963,9 @@ function parseBoxes(data, start, end) {
   return boxes;
 }
 
-/**
- * 重建 moov box
- */
+
+
+
 function rebuildMoov(data, moovOff, moovSize, top) {
   const moovBox = top.find(b => b.typ === 'moov');
   if (!moovBox) throw new Error('no moov box');
@@ -1072,11 +1085,11 @@ function rebuildMoov(data, moovOff, moovSize, top) {
   return serialize(tree);
 }
 
-/**
- * 解密 CENC-AES-CTR 加密的 MP4（内存版）
- * 输入一个完整的加密 MP4 Buffer，返回解密并重建过 moov 的 Buffer。
- * 注意：会就地修改传入的 Buffer（调用方应独占它）。
- */
+
+
+
+
+
 function decryptMp4Buffer(data, key) {
   const total = data.length;
   const top = parseBoxes(data, 0, total);
@@ -1204,9 +1217,9 @@ function decryptMp4Buffer(data, key) {
   return Buffer.concat(out);
 }
 
-/**
- * 解密 MP4 文件并保存
- */
+
+
+
 function decryptMp4File(srcPath, dstPath, key) {
   const data = fs.readFileSync(srcPath);
   const finalBuf = decryptMp4Buffer(data, key);
@@ -1216,6 +1229,7 @@ function decryptMp4File(srcPath, dstPath, key) {
 module.exports = {
   resolveSeriesId,
   fetchEpisodeList,
+  fetchSeriesMetadata,
   fetchEpisodeListFromWeb,
   fetchSiteHtml,
   fetchPublicScore,

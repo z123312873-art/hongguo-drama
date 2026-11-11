@@ -1,4 +1,4 @@
-// Shown until the main process answers with its own list, so the category rows never appear half empty.
+
 export const DEFAULT_BROWSE_CATEGORIES = Object.freeze([
   { slug: 'real-drama', label: '真人剧' },
   { slug: 'comic-drama', label: '漫剧' },

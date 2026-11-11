@@ -1,5 +1,5 @@
-// Remembers which comic episodes were opened, per comic, in localStorage. Every call tolerates a missing,
-// full or corrupt store: reading progress is a convenience and must never break the page.
+
+
 const KEY = 'comic-progress:v1';
 const MAX_COMICS = 200;
 const MAX_EPISODES = 600;
@@ -36,7 +36,7 @@ export function markRead(storage, seriesId, itemId, now = Date.now()) {
   try { storage.setItem(KEY, JSON.stringify(all)); return true; } catch (_) { return false; }
 }
 
-// The episode after / before `itemId` in directory order, or null at either end.
+
 export function neighbours(episodes, itemId) {
   const list = Array.isArray(episodes) ? episodes : [];
   const at = list.findIndex(entry => String(entry?.itemId) === String(itemId));

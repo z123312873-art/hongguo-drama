@@ -19,7 +19,6 @@
 .comic-reader-end { padding: 40px 16px 60px; text-align: center; color: #b9b2a6; }
 .comic-reader-end p { margin: 0 0 16px; }
 .comic-reader-end div { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-/* The reader is dark in both themes, so shared buttons must not take their colours from the page theme. */
 .comic-reader .btn:not(.btn-primary) { background: #ffffff14; color: #f1ede6; border-color: #ffffff38; }
 .comic-reader .btn:not(.btn-primary):hover:not(:disabled) { background: #ffffff26; border-color: #ffffff59; color: #fff; }
 .comic-reader .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }

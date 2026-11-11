@@ -43,8 +43,6 @@
   height: 100%;
   max-width: none;
   object-fit: cover;
-  /* Portrait covers are much taller than this banner. A vertical center
-     crop lands on torsos; 28% keeps faces without sitting on the title. */
   object-position: center 28%;
   border-radius: 0;
   box-shadow: none;

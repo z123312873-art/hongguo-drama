@@ -66,7 +66,7 @@ async function request(source, params, draft = false) {
   const timer = setTimeout(() => controller.abort(), 12000);
   try {
     const response = await axios.get(url.href, {
-      // Proxy selection follows app settings; the selected proxy owns final destination DNS.
+
       ...guard, adapter: 'http', timeout: 12000, signal: controller.signal,
       maxContentLength: 8 * 1024 * 1024, maxBodyLength: 1024,
       responseType: 'text', transformResponse: [data => data],
@@ -89,7 +89,7 @@ async function request(source, params, draft = false) {
     }
     return data;
   } catch (error) {
-    // Never forward remote messages or Axios diagnostics containing signed URLs.
+
     if (/^(自定义源|该自定义源|来源配置)/.test(error.message)) throw error;
     throw new Error(controller.signal.aborted || ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code)
       ? '自定义源请求已取消或超时，请重试' : '自定义源请求失败，请检查公网接口与网络');

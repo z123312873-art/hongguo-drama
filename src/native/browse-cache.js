@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Persistent poster-list cache for sources that are read page by page (Xifan, Hema).
-//
-// A list that was fetched once is answered from disk at once, also after a restart. An old one is still
-// answered immediately and refreshed in the background, so switching sources never waits for the network
-// twice. Fetches go through one small queue so a wide window (many pages at once) cannot flood a slow link.
+
+
+
+
+
+
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -70,7 +70,7 @@ function createBrowseCache({ now = Date.now, slots = NETWORK_SLOTS, setTimer = s
         const temporary = `${file}.${process.pid}.tmp`;
         fs.writeFileSync(temporary, JSON.stringify({ version: 1, entries: [...entries.values()], aux: Object.fromEntries(aux) }));
         fs.renameSync(temporary, file);
-      } catch (_) { /* the cache only saves time; a failed write costs one network round trip */ }
+      } catch (_) {                                                                              }
     }, 800);
     saveTimer.unref?.();
   }
@@ -102,7 +102,7 @@ function createBrowseCache({ now = Date.now, slots = NETWORK_SLOTS, setTimer = s
         if (Number.isFinite(value?.savedAt) && at - value.savedAt <= FALLBACK_AGE_MS && value.value !== undefined) aux.set(name, { savedAt: value.savedAt, value: value.value });
       }
       trim();
-    } catch (_) { /* a missing or damaged cache is rebuilt from the network */ }
+    } catch (_) {                                                              }
   }
 
   function store(source, genre, page, data) {
@@ -131,7 +131,7 @@ function createBrowseCache({ now = Date.now, slots = NETWORK_SLOTS, setTimer = s
     fetchShared(source, genre, page, options, true).catch(() => {});
   }
 
-  // Wraps the source's own list function. `fetcher(options)` must resolve to `{ success, results, ... }`.
+
   function wrap(source, fetcher) {
     sources.set(source, fetcher);
     return async function cachedList(options = {}) {
@@ -162,13 +162,13 @@ function createBrowseCache({ now = Date.now, slots = NETWORK_SLOTS, setTimer = s
     save();
   }
 
-  // Refresh the lists that were looked at recently and have gone stale. Quiet, sequential, and bounded.
+
   async function refreshDue() {
     const at = now();
     const due = [...entries.values()].filter(entry => sources.has(entry.source) && at - entry.savedAt > FRESH_MS
       && at - entry.usedAt <= RECENT_USE_MS).sort((a, b) => a.savedAt - b.savedAt).slice(0, PERIODIC_BATCH);
     for (const entry of due) {
-      try { await fetchShared(entry.source, entry.options.genre, entry.options.page, { ...entry.options }, true); } catch (_) { /* tried again next round */ }
+      try { await fetchShared(entry.source, entry.options.genre, entry.options.page, { ...entry.options }, true); } catch (_) {                              }
       await new Promise(resolve => { setTimer(resolve, PERIODIC_GAP_MS); });
     }
     return due.length;

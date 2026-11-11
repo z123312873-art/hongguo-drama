@@ -1,17 +1,17 @@
-/**
- * setup-ffmpeg.js —— 打包前置：下载并放置内置 ffmpeg
- *
- * 为什么需要：
- *   一键合并功能依赖 ffmpeg，但它体积较大（约 167MB），不纳入版本管理。
- *   clone 仓库后执行一次本脚本，即可把 ffmpeg.exe / ffprobe.exe 放到
- *   build/ffmpeg/，之后 `npm run build` 会通过 extraResources 打进安装包。
- *
- * 若下载失败，也可以自行从 https://www.gyan.dev/ffmpeg/builds/ 下载
- * essentials 版，把 bin 目录里的 ffmpeg.exe 与 ffprobe.exe 复制到
- * build/ffmpeg/ 即可。
- *
- * 用法：node scripts/setup-ffmpeg.js
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -24,7 +24,7 @@ const ZIP = path.join(ROOT, 'build', 'ffmpeg-essentials.zip');
 const TMP = path.join(ROOT, 'build', '_ffmpeg_tmp');
 
 const OFFICIAL_URL = 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip';
-// SHA-256 of the official 7.1 essentials zip. A mirror or FFMPEG_ZIP_URL override must match a pinned hash.
+
 const OFFICIAL_SHA256 = 'fa7d4d7e795db0e2503f49f105f46ed5852386f0cfdd819899be3b65ebde24fc';
 const URL = process.env.FFMPEG_ZIP_URL || OFFICIAL_URL;
 
@@ -81,7 +81,7 @@ function download(url, dest, redirects = 0) {
   const ffmpegExe = path.join(DEST, 'ffmpeg.exe');
   const ffprobeExe = path.join(DEST, 'ffprobe.exe');
 
-  // 许可证文本随源码入库，这里只做一次存在性校验（合规需要）
+
   const requiredLicenses = ['COPYING.GPLv3', 'COPYING.GPLv2', 'COPYING.LGPLv2.1', 'LICENSE.md', 'FFMPEG-NOTICE.txt'];
   const missing = requiredLicenses.filter((f) => !fs.existsSync(path.join(DEST, f)));
   if (missing.length) {
@@ -108,7 +108,7 @@ function download(url, dest, redirects = 0) {
 
   console.log('正在解压…');
   fs.rmSync(TMP, { recursive: true, force: true });
-  // 用 PowerShell 解压（Windows 自带，无需额外依赖）
+
   execFileSync('powershell', [
     '-NoProfile', '-Command',
     `Expand-Archive -LiteralPath '${ZIP}' -DestinationPath '${TMP}' -Force`,

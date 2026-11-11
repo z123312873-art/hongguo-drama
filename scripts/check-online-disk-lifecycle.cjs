@@ -1,4 +1,4 @@
-// Real file readers, isolated main-process state; no network, app data or GUI.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -42,7 +42,7 @@ function load() {
       const directory=path.join(h.root,'disk');fs.mkdirSync(directory);const file=path.join(directory,'video.mp4');fs.writeFileSync(file,Buffer.alloc(4*1024*1024));
       const entry={filePath:file,size:fs.statSync(file).size,disk:{directory,readers:0}}, session={requests:new Set()};
       fs.createReadStream=(...args)=>{reader=originalRead(...args);return reader;};
-      // Model Windows refusing removal of an open file while retaining a real Node reader.
+
       fs.rmSync=(target,...args)=>{if(target===directory&&!reader.closed)throw Object.assign(new Error('file open'),{code:'EBUSY'});return originalRemove(target,...args);};
       const response=h.context.diskMediaResponse(new Request('https://fixture.example/video'),entry,session);
       assert.equal(entry.disk.readers,1,'stream readers must participate in disk ownership');

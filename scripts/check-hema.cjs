@@ -7,8 +7,8 @@ const vm = require('node:vm');
 const sourcePath = path.join(__dirname, '../src/native/hema.js');
 const sid = 'hema:41000115014';
 const vid = `${sid}:591821028`;
-// Public response fields captured on 2026-10-07; signed URLs replaced with inert examples.
-// Remaining episode IDs are synthetic; preserve the observed 74 total / 5 free / 69 charged shape.
+
+
 const detail = { bookInfoVo: { bookId: '41000115014', bookName: '出手', totalChapterNum: '74', coverWap: 'https://images.example/cover.jpg' },
   chapterList: Array.from({ length: 74 }, (_, i) => ({ chapterId: String(591821028 + i), chapterName: `第${i + 1}集`,
     chapterIndex: i + 1, isCharge: i < 5 ? '0' : '1', ...(i < 5 ? { chapterVideoVo: {

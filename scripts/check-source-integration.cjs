@@ -1,4 +1,4 @@
-// New-source permission checks through the real main IPC, with no network or user data.
+
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm');
 const {EventEmitter}=require('node:events'),{createRequire}=require('node:module');
 const file=path.resolve(__dirname,'../main.js'),req=createRequire(file),root=fs.mkdtempSync(path.join(os.tmpdir(),'hongguo-source-'));

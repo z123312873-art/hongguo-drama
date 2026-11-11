@@ -1,4 +1,4 @@
-// Actual OfficialDanmaku effects + model in memory; no browser, network or playback.
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -73,7 +73,7 @@ test('playing fullscreen transition frame gap retains current overlay', () => {
   try {
     const before = ids(ui);
     ui.resized(1987, 1248);
-    ui.tick(1.8, 1900); // macOS fullscreen transition stalls RAF, while media time advances.
+    ui.tick(1.8, 1900);
     assert.deepEqual(ids(ui), before, 'a frame gap must not be treated as seeking');
     ui.resized(800, 600); ui.tick(3.4, 3500);
     assert.deepEqual(ids(ui), before, 'exiting fullscreen must also retain current overlay');
@@ -155,7 +155,7 @@ test('hidden resize restore immediately keeps an originally visible item inside 
     for (const [width, height] of [[800, 600], [1987, 1248]]) {
       ui.document.hidden = true; ui.props.danmaku.running = false; ui.render();
       assert.ok(ui.tree, 'hidden overlay stays mounted while its animation effect stops');
-      ui.layer.clientWidth = width; ui.layer.clientHeight = height; // Resize occurs while the animation effect and observer are stopped.
+      ui.layer.clientWidth = width; ui.layer.clientHeight = height;
       ui.document.hidden = false; ui.props.danmaku.running = true; ui.render();
       assert.ok(ui.tree, 'overlay layer must remain mounted');
       assert.deepEqual(ids(ui), before);

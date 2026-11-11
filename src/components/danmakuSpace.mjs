@@ -1,4 +1,4 @@
-// 时间轴和本集评论各写各的层。读取时传入自己的层名，只拿另一层的位置，避免把自己当成障碍往前推。
+
 const layers = new Map();
 
 export function syncDanmakuLayer(name, items) {
@@ -15,7 +15,7 @@ export function clearDanmakuLayer(name) {
   layers.delete(name);
 }
 
-// 时间轴先落地，本集评论再按条数决定补多少。播放器里两个钩子的调用顺序不变。
+
 let timeline = { key: '', count: 0, ready: false };
 const timelineListeners = new Set();
 

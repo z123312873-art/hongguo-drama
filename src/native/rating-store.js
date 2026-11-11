@@ -69,7 +69,7 @@ function createRatingStore(options = {}) {
       fs.renameSync(tmp, file);
       dirty = false;
     } catch {
-      try { fs.unlinkSync(tmp); } catch { /* the next confirmed score tries again */ }
+      try { fs.unlinkSync(tmp); } catch {                                            }
     }
   }
 

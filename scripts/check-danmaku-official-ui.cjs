@@ -1,4 +1,4 @@
-// Pure in-memory hook checks; no browser, real playback or upstream requests.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -146,8 +146,8 @@ function mount({ response, enabled = true } = {}) {
   assert.doesNotMatch(overlay, /querySelector\('\.player-controls'\)/);
   assert.match(overlay, /advanceTimedDanmaku\(state, list, video.currentTime/);
   const settings = fs.readFileSync(path.join(root, 'Settings.jsx'), 'utf8');
-  assert.match(settings, /openExternalUrl\('https:\/\/github.com\/dawei233\/hongguo-drama'\)/);
-  // check-player-controls.cjs verifies the 2.9 one-second pointer idle deadline,
-  // including playback keys and fullscreen/source changes that must not renew it.
+  assert.match(settings, /openExternalUrl\('https:\/\/github.com\/z123312873-art\/hongguo-drama\/blob\/main\/LICENSE'\)/);
+
+
   console.log('PASS frontend danmaku wiring: timeline first, comments added after a successful timeline read, shared preferences, retry, stale response, episode switch');
 })().catch(error => { console.error(error); process.exitCode = 1; });

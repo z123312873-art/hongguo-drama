@@ -6,7 +6,7 @@ const os = require('node:os');
   const { decryptInWorker } = require('../src/native/decrypt-worker.cjs');
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-worker-'));
   try {
-    const bytes = Buffer.from([0,0,0,8,109,111,111,118]); // empty valid moov, no encrypted samples
+    const bytes = Buffer.from([0,0,0,8,109,111,111,118]);
     const srcPath = path.join(dir, 'input.mp4'), dstPath = path.join(dir, 'out.mp4');
     await fs.writeFile(srcPath, bytes);
     const key = Buffer.alloc(16);

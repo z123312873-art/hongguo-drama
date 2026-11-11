@@ -1,4 +1,4 @@
-// In-memory Player behavior only; no real media, network, or user files.
+
 const assert = require('node:assert/strict');
 const { mount } = require('./check-player-resume.cjs');
 const defer = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };

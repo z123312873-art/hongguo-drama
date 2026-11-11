@@ -1,4 +1,4 @@
-// Component behavior via the existing in-memory hook/media harness; no app, network or user data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -35,7 +35,7 @@ const download = (ui, index = 1) => ui.find(n => n.props['aria-label'] === `第 
 const poll = async ui => { ui.changed(); await [...ui.timers.values()].find(t => t.delay === 2000).fn(); await ui.flush(); };
 const source = ui => ui.find(n => n.type === 'video').props.src;
 
-// App executes its own state/effects; child Player instances use the shared media harness.
+
 function mountApp() {
   const slots = [], pending = [];
   let cursor = 0, tree, navigateEvent;

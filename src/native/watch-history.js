@@ -9,7 +9,7 @@ function isWatched(record) {
     && Number.isFinite(record.updatedAt) && Number.isInteger(record.vid_index) && record.vid_index > 0;
 }
 
-// A drama added from the account may not be in the local registry yet; its saved name and poster list it.
+
 function remoteSeries(series, playback) {
   const known = new Set(series.map(item => String(item.series_id)));
   return Object.entries(playback || {}).filter(([id, record]) => !known.has(id) && typeof record?.remote?.title === 'string' && record.remote.title)
@@ -54,7 +54,7 @@ function applyEpisodeUpdate(record, oldSeries, freshSeries, now = Date.now()) {
     unreadEpisodes: Math.max(0, knownTotal - acknowledgedTotal), lastCheckedAt: now, lastCheckError: '' };
 }
 
-// shortcut: independent sequels have no authoritative relation; only exact base titles with higher explicit seasons qualify.
+
 function findSequels(series, candidates) {
   const current = seasonTitle(series.series_title);
   const source = sourceOf(String(series.series_id));

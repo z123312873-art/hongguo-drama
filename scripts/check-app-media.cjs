@@ -1,4 +1,4 @@
-// Offline app-source regression. No credentials, network beyond a local fixture, or GUI.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -10,7 +10,7 @@ const { PassThrough } = require('node:stream');
 const { createRequire } = require('node:module');
 const source = path.resolve(__dirname, '../main.js'), req = createRequire(source);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-app-media-'));
-const contentKey = '01'.repeat(16); // Synthetic test key, never a captured credential.
+const contentKey = '01'.repeat(16);
 const clearBytes = Buffer.from('decrypted-mp4-fixture');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(condition, message, attempts = 200) {
@@ -56,7 +56,7 @@ function load(url, mode = 'ok', key = contentKey) {
   const context = vm.createContext({ require: n => n === './src/native/media-finalize' && mode === 'stall-first' ? { waitForMediaProcess: (child, options) => req(n).waitForMediaProcess(child, { ...options, idleTimeoutMs: 20, timeoutMs: 200, killAfterMs: 10 }) } : n === 'electron' ? electron : n === './src/native/hongguo' ? native : n === 'child_process' || n === 'node:child_process' ? childProcess : n === './src/store' ? { saveTasks() {}, getSettings: () => ({ root: dir }) } : req(n), __dirname: path.dirname(source), console: { log() {}, warn() {}, error() {} }, process, Buffer, URL, Response, Request, Headers, AbortController, setTimeout, clearTimeout });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   require('./fixtures/trusted-ipc.cjs')(context, handlers);
-  // These transport/decryption fixtures are synthetic; real media validity is checked separately.
+
   context.probeVideoInfo = async () => ({ w: 1080, h: 1920, duration: 12, codec: 'h264' });
   context.resolveFfmpeg = () => '/fixture/ffprobe';
   context.resolveFfmpeg = () => '/bundled/ffmpeg'; context.registerStreamProtocol();

@@ -1,7 +1,7 @@
 'use strict';
 
-// Catalog pages already include a full vid_list. Search snippets often do not
-// (a handful of vids against a much larger episode_cnt) and must not be reused.
+
+
 
 const TTL_MS = 10 * 60 * 1000;
 const LIMIT = 1000;

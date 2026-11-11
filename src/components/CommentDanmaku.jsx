@@ -156,7 +156,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
       width = nextWidth; height = nextHeight;
       setItems([...state.items]); paint(); start();
     };
-    // Settings keep current trajectories and consumption; only new arrivals use the new lanes.
+
     start();
     const observer = new ResizeObserver(resize);
     observer.observe(layer);

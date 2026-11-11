@@ -46,7 +46,7 @@ Ubuntu 24.04 安装 gcc-mingw-w64-x86-64、make、pkg-config 后运行 `bash scr
 
 ## 应用内更新发行门槛
 
-- 固定公开源为 `jackotom/hongguo-drama` GitHub Releases；客户端包不得包含发布令牌。
+- 固定公开源为 `z123312873-art/hongguo-drama` GitHub Releases；客户端包不得包含发布令牌。
 - Mac 两种架构使用同一份 `latest-mac.yml`，`files` 中分别列出含 `arm64`、`x64` 的 ASCII ZIP 文件名、最终文件 SHA512（base64）及大小。
 - 构建产生的 ZIP 只作中间产物。正式更新 ZIP 必须从已完成 Developer ID 签名、Apple 公证与装订的最终 App 重新压缩，然后重算清单摘要；禁止沿用签名前的 ZIP、blockmap 或摘要。DMG 同样完成签名、公证、装订。
 - Windows `latest.yml` 仅指向同名 NSIS 安装包，保留 builder 生成的 SHA512、大小和 blockmap；复制上传不得再改名。安装版与便携版共享同一版本和数据格式。

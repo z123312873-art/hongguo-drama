@@ -44,8 +44,6 @@
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
-
-/* 「去下载」推到最右侧（该行放不下时自然换行） */
 .dm-toolbar-end {
   margin-left: auto;
 }
@@ -59,8 +57,6 @@
   color: var(--text-secondary);
   font-size: 13px;
 }
-
-/* 一键暂停：实心警示色，和主色按钮区分开 */
 .btn-danger-solid {
   background: var(--danger-fill);
   border-color: var(--danger-fill);
@@ -72,8 +68,6 @@
   background: var(--danger-hover);
   border-color: var(--danger-hover);
 }
-
-/* 并发运行状态条 */
 .dm-queue-bar {
   display: flex;
   align-items: center;
@@ -117,8 +111,6 @@
   font-size: 12px;
   color: var(--text-tertiary);
 }
-
-/* ===== 合并 ===== */
 .merge-inline {
   display: flex;
   align-items: center;
@@ -212,8 +204,6 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-
-/* 删除确认里的勾选项 */
 .dm-confirm-check {
   display: flex;
   align-items: flex-start;

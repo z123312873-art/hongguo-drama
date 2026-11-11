@@ -1,4 +1,4 @@
-// Offline renderer and main IPC regressions; no user data or external media.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const { mount } = require('./check-player-resume.cjs');

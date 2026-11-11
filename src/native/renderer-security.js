@@ -4,7 +4,7 @@ function createRendererSecurity(entryFile, devUrl) {
   const fileIdentity = url => {
     if (url.protocol !== 'file:' || url.search) return null;
     let file = fileURLToPath(url);
-    // Chromium uppercases Windows drives and may spell unreserved characters without escapes.
+
     if (process.platform === 'win32') file = file.replace(/^[a-z]:/i, drive => drive.toUpperCase());
     return pathToFileURL(file).href;
   };

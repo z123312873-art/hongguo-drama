@@ -1,4 +1,4 @@
-// Exercise the actual hidden-window queue with stalled Electron operations.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');

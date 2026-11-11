@@ -23,7 +23,7 @@ export default function ShortcutSettings({ active = true }) {
   };
   const record = (event, action) => {
     if (recording !== action.id || event.repeat || event.isComposing) return;
-    // Keep OS/browser combinations untouched; only player-owned keys are captured.
+
     if (event.metaKey || event.ctrlKey || event.altKey) { setError('Cmd、Ctrl、Alt 组合保留给系统，请使用单键或 Shift 组合'); return; }
     if (event.key === 'Tab') { setRecording(null); return; }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setRecording(null); setError(''); return; }

@@ -22,12 +22,12 @@ import { categoryFromBrowse } from '../favoriteView.mjs';
 const COMIC_SOURCE_URL = 'https://hongguoduanju.com/category/comic';
 
 const pageCache = new Map();
-// Category and rank clicks swap this snapshot. A fresh one is not downloaded again.
-// The refresh button, a larger window that still needs more pages, or this age starts an update.
+
+
 const PAGE_CACHE_TTL_MS = 10 * 60 * 1000;
 const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
-// Each source page has its own limit and one retry (catalogPages.mjs); this bounds the whole list.
-// The posters in the first screen start loading at once instead of waiting for the lazy-load margin.
+
+
 const EAGER_POSTERS = 12;
 const LIST_TIMEOUT_MS = 30_000;
 
@@ -71,13 +71,13 @@ function writeSnapshot(source, category, genre, page, entry) {
       if (category === 'hot-drama') writeDiscoverShelf(localStorage, { hero: entry.results });
       if (category === 'real-drama' && stored === entry) writeDiscoverShelf(localStorage, { posters: entry.results });
     }
-  } catch { /* the shelf only shortens the next open */ }
+  } catch {                                             }
 }
 
-// Window size only. The live grid's top moves when genre chips, skeletons, or
-// scrolling appear, and that was flipping a full window between one and two source pages.
-// Hongguo lists use the comic page size, so every category opens with the same poster count.
-// Sources added by the user open with at least MIN_SOURCE_POSTERS.
+
+
+
+
 function readPosterCapacity(reservedRows = 0, minimum = 0) {
   try {
     const width = window.innerWidth;
@@ -98,15 +98,15 @@ function maxJoinedPages(source) {
   return source === 'hongguo' ? undefined : MAX_OPEN_PAGES;
 }
 
-/**
- * Browse —— 分类淘剧
- *
- * 数据链路：
- *   独立来源目录 -> 卡片(series_id/剧名/封面/集数/标签)
- *   点卡片 -> 复用 search-resolve 拉全集并写入短剧档案
- *         -> 复用 get-series-episodes 拿到每集「已下载/下载中/未下载」状态
- *         -> 跳播放器 或 走既有批量下载
- */
+
+
+
+
+
+
+
+
+
 function Browse({ onNavigate, active = true }) {
   const [source, setSource] = useState('hongguo');
   const { sources: mediaSources, loading: sourcesLoading, error: sourcesError } = useMediaSources();
@@ -143,8 +143,8 @@ function Browse({ onNavigate, active = true }) {
   const [sourceUrl, setSourceUrl] = useState('');
   const [comicReload, setComicReload] = useState(0);
 
-  // 详情抽屉
-  const [detail, setDetail] = useState(null); // { series_id, series_title, cover, episodes: [...] }
+
+  const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [rangeInput, setRangeInput] = useState('');
   const [rangeError, setRangeError] = useState('');
@@ -182,7 +182,7 @@ function Browse({ onNavigate, active = true }) {
     clearTimeout(toastTimer.current);
   }, [invalidateList]);
 
-  // 已下载统计（按 series_id -> 已下载集数）
+
   const [downloadedMap, setDownloadedMap] = useState({});
   const [toast, setToast] = useState(null);
   const [heroItems, setHeroItems] = useState(() => savedShelf().hero);
@@ -257,7 +257,7 @@ function Browse({ onNavigate, active = true }) {
       const stale = !haveCards || Date.now() - cached.savedAt >= PAGE_CACHE_TTL_MS;
       const visible = haveCards && !stale;
       if (haveCards) pageSpan.current = cached.pageSpan || 1;
-      // A fresh list stays on screen. An expired one is loaded again instead of remaining as the whole catalog.
+
       if (reuseFreshSnapshot({ haveCards, stale, forceRefresh, neededSpan, pageSpan: cached?.pageSpan || 1 })) {
         setResults(cached.results);
         setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
@@ -301,7 +301,7 @@ function Browse({ onNavigate, active = true }) {
         if (pg === 1 && knownPages >= 2 && slots > 0) {
           const nextSpan = pagesToFill(slots, firstResults.length, knownPages, maxJoinedPages(source));
           const width = window.innerWidth || 0;
-          // Refresh uses the same window and must not drop back to a short page.
+
           pageSpan.current = sameCatalogWindow(spanWidth.current, width) ? Math.max(pageSpan.current, nextSpan) : nextSpan;
           spanWidth.current = width;
         } else if (pg === 1 && knownPages < 2) {
@@ -310,8 +310,8 @@ function Browse({ onNavigate, active = true }) {
         const windowed = reportedPages >= 2 ? sourcePageWindow(pg, pageSpan.current, reportedPages)
           : openEnded ? { start: planned.start, count: Math.max(1, pageSpan.current), uiPages: 0 }
             : { start: pg, count: 1, uiPages: reportedPages };
-        // The extra source pages do not depend on each other, so they load together. Without a list on screen,
-        // each page that has arrived (in order) is shown at once; a slow page never hides the ones before it.
+
+
         const replies = new Array(Math.max(0, windowed.count - 1)).fill(null);
         let shownCount = firstResults.length;
         const showArrived = () => {
@@ -457,7 +457,7 @@ function Browse({ onNavigate, active = true }) {
             heatsRef.current = { ...heatsRef.current, ...response.heats };
             setHeats(heatsRef.current);
           }
-        } catch { /* The next group still runs. A miss is retried below. */ }
+        } catch {                                                           }
       }
       if (cancelled || request !== ratingRequest.current || attempt >= 2 || !pendingIds().length) return;
       retryTimer = setTimeout(() => { pull(attempt + 1); }, attempt === 0 ? 4000 : 12000);
@@ -568,13 +568,13 @@ function Browse({ onNavigate, active = true }) {
           });
           return changed ? next : current;
         });
-      } catch { /* the posters stay usable without the premiere badge */ }
+      } catch {                                                          }
     })();
     return () => { cancelled = true; };
   }, [premiereKey]);
 
-  // A list that is still loading shows only the pages that arrived so far, so its size says nothing about how
-  // many posters a page holds. Judging it then started the load over and cleared the posters on screen.
+
+
   useEffect(() => {
     if (!active || page !== 1 || !results.length || loading) return undefined;
     let timer;
@@ -592,8 +592,8 @@ function Browse({ onNavigate, active = true }) {
     return () => { clearTimeout(timer); window.removeEventListener?.('resize', onResize); };
   }, [active, page, results.length, loading, category, genre, loadList, meta.totalPages, meta.hasMore, reserveRows, source]);
 
-  // Moving to another page of the same list keeps the number of source pages joined per page; a different
-  // list starts over. Resetting here put page 2 on the source page that page 1 had already shown.
+
+
   const showSnapshot = (nextSource, cat, gen, pg, sameList = false) => {
     const snap = readSnapshot(nextSource, cat, gen, pg);
     if (snap?.pageSpan) pageSpan.current = snap.pageSpan;
@@ -646,7 +646,7 @@ function Browse({ onNavigate, active = true }) {
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // ===== 打开某部剧 =====
+
   const openSeries = async (item) => {
     const request = ++detailRequest.current;
     setDetailLoading(true);
@@ -662,7 +662,7 @@ function Browse({ onNavigate, active = true }) {
         return;
       }
       const data = res.data;
-      // 合并下载状态
+
       const epRes = await window.electronAPI.getSeriesEpisodes(item.series_id);
       if (request !== detailRequest.current) return;
       const statusMap = {};
@@ -676,7 +676,7 @@ function Browse({ onNavigate, active = true }) {
         fileUrl: statusMap[ep.vid_index] ? statusMap[ep.vid_index].fileUrl : null,
       }));
       setDetail({ ...data, episodes, completedCount: episodes.filter((e) => e.status === 'completed').length });
-      // 打开详情只准备在线播放。下载必须由用户勾选集数后另行确认。
+
     } catch (e) {
       if (request === detailRequest.current) showToast('打开失败: ' + e.message, 'error');
     } finally {
@@ -692,7 +692,7 @@ function Browse({ onNavigate, active = true }) {
     setSelectedIdx(next);
   };
 
-  // 区间快选：1-50 / 前10 / 后30 / 全选 / 清空
+
   const applyRange = (expr) => {
     if (!detail) return;
     try {
@@ -726,7 +726,7 @@ function Browse({ onNavigate, active = true }) {
     }
   };
 
-  // 从第一集开始；播放器按实际状态选择本地或在线片源。
+
   const playNow = async () => {
     if (!detail) return;
     const first = detail.episodes.find((e) => !e.locked);
@@ -809,7 +809,7 @@ function Browse({ onNavigate, active = true }) {
         </div>
       </div>
 
-      {/* 分类 tab */}
+      {            }
       {source === 'hongguo' && !upcoming && [true, false].map(ranking => {
         const group = (categories.length ? categories : [{ slug: 'real-drama', label: '真人剧' }])
           .filter(c => c.slug.startsWith('hot-') === ranking);
@@ -837,7 +837,7 @@ function Browse({ onNavigate, active = true }) {
       {comicView && !upcoming && <ComicBrowse active={active} reservedRows={reserveRows} reloadToken={comicReload} />}
 
       {(!comicView || upcoming) && <>
-      {/* 题材 chips. Hongguo uses one scrollable row for categories and ranks. */}
+      {                                                                         }
       {source === 'hongguo' && !upcoming && (
         <div className="browse-genres" role="group" aria-label="來源標籤篩選，每次選擇一個">
           <button type="button" className={`genre-chip ${tagLabels.length === 0 ? 'active' : ''}`} aria-pressed={tagLabels.length === 0} onClick={() => chooseTags('全部')}>全部</button>
@@ -961,7 +961,7 @@ function Browse({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 分页 */}
+      {        }
       {!upcoming && totalPages > 1 && (
         <div className="browse-pager">
           <button className="pager-item" aria-label="上一页" disabled={page <= 1} onClick={() => gotoPage(page - 1)}>‹</button>
@@ -984,7 +984,7 @@ function Browse({ onNavigate, active = true }) {
 
       </>}
 
-      {/* ===== 剧集详情抽屉 ===== */}
+      {                        }
       {(detail || detailLoading) && (
         <div className="browse-drawer-mask" onClick={closeDetail}>
           <div className="browse-drawer" role="dialog" aria-modal="true" aria-label="剧集详情" tabIndex={-1} onClick={(e) => e.stopPropagation()}>

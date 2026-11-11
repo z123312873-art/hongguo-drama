@@ -1,5 +1,5 @@
-// Run explicitly: node scripts/check-merge-benchmark.cjs --old /path/old-main.js --report /path/report.json --real /path/003.mp4 /path/004.mp4
-// Uses real main-process IPC, silent decode only. The original media is never changed.
+
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), vm = require('node:vm');
 const { EventEmitter } = require('node:events');
@@ -57,7 +57,7 @@ async function checkMerge(label, source, media, compatible, mode = '') {
   console.log(`${label}: ${seconds.toFixed(2)}s, ${(fs.statSync(result.output).size / 1048576).toFixed(2)} MiB, ${frames} frames, full silent decode passed`);
 }
 (async () => {
-  // Same-codec compatible mode exposes needless re-encoding; mixed-codec mode exposes bitrate inflation and serial work.
+
   if (!argv.includes('--new-mixed-only')) {
     await checkMerge('old-same-compatible', arg('--old'), [files[0], files[0]], true);
     await checkMerge('new-same-compatible', current, [files[0], files[0]], true);

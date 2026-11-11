@@ -28,7 +28,7 @@ assert.match(css, /max-width:\s*1060px\)[\s\S]*\.sidebar \{[^}]*width:\s*190px/)
 assert.match(css, /max-width:\s*760px\)[\s\S]*\.sidebar \{[^}]*width:\s*164px/);
 assert.doesNotMatch(css, /@media\s*\(\s*min-width:\s*(?:1280|1920|2560|3840)px\)/);
 assert.match(css, /\.account-name \{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/s);
-// Signed in or out, the account row has no card of its own; it sits on the sidebar colour in every theme.
+
 assert.match(css, /\.account-strip \{[^}]*background:\s*transparent/s);
 assert.doesNotMatch(css, /\.account-strip(?![-\w.])[^{,]*\{[^}]*background:\s*var\(--bg-elevated\)/s);
 assert.match(css, /\.account-avatar \{[^}]*flex:\s*0 0 calc\(32px \* var\(--font-scale, 1\)\)/s);

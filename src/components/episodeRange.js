@@ -1,4 +1,4 @@
-// Match whole tokens; clamp iteration to the actual episode count.
+
 export function parseEpisodeRange(value, total) {
   const parts = String(value || '').trim().split(/[,，]/);
   const selected = new Set();

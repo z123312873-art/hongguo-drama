@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// One codec family for App playback and the web parser.
-// A label the desktop player can decode is H.264 or HEVC, including the
-// parameter suffixes those families use (avc1.64001f, hvc1.1.6.L93.B0, h265_hvc1).
-// Newer or unrelated families stay out; they are not renamed into a known codec.
+
+
+
+
+
 const H264 = new Set(['h264', 'avc', 'avc1']);
 const HEVC = new Set(['h265', 'h265_hvc1', 'hevc', 'hvc1', 'hev1', 'bytevc1']);
 const REFUSED = new Set(['bytevc2', 'h266', 'vvc', 'av1']);

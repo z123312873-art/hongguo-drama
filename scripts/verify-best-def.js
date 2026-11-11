@@ -1,11 +1,11 @@
-/**
- * 验证 parseModelVideo 新逻辑：同一份 video_model 响应内，确认选中的是最高档
- * 用法: node scripts/verify-best-def.js [vid ...]
- */
+
+
+
+
 const path = require('path');
 const fs = require('fs');
 
-// 加载真实模块源码并额外导出内部函数 parseModelVideo
+
 const srcPath = path.join(__dirname, '..', 'src', 'native', 'hongguo.js');
 const src = fs.readFileSync(srcPath, 'utf8');
 const Module = require('module');
@@ -28,8 +28,8 @@ function defNumber(defStr) {
   for (const vid of vids) {
     try {
       const playInfo = await hongguo.fetchPlayUrlSingle(vid);
-      // fetchPlayUrlSingle 内部也走 parseModelVideo，但拿不到完整 video_model；
-      // 这里再取一次原始 model，用真实 parseModelVideo 选流并与全档位对比
+
+
       const axios = require('axios');
       const API = "https://api5-normal-sinfonlineb.fqnovel.com";
       const q = {

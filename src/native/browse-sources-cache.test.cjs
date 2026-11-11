@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Xifan and Hema through the real list cache, with the network replaced.
+
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const Module = require('node:module');

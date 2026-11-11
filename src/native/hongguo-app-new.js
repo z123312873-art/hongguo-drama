@@ -1,5 +1,5 @@
-// App「近期上新」目录补搜：官网搜索索引与 App 不同步时，用 App 分类接口
-// （线上时间倒序）补齐当天刚上线、官网搜索还查不到的短剧。
+
+
 const { signedMetadataRequest, parseSearchInteger, requestJson } = require('./app-source');
 const { cleanTitle } = require('./hongguo-app-search');
 const { catalogCover } = require('./hongguo-app-search');
@@ -8,19 +8,19 @@ const CATEGORY_API = '/reading/distribution/category/landpage/v/';
 const REQUEST_TIMEOUT_MS = 8000;
 const CACHE_TTL_MS = 60 * 1000;
 const PAGE_LIMIT = 50;
-// 默认翻四页，让首发海报也能看到第三页之后才出现的条目。
+
 const DEFAULT_PAGES = 4;
 const CATEGORY_HOSTS = Object.freeze(['api5-normal-hl.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-sinfonlineb.fqnovel.com']);
 const MAX_RESULTS = 20;
 const PREMIERE_LABEL = /^(?:红果首发|紅果首發)$/;
-// 真人剧与 AI 剧使用同一分类接口、不同筛选值；两者都能出现在搜索结果里。
+
 const GENRES = [
   { reqScene: 'default', genre: 'short_play' },
   { reqScene: 'ai_series', genre: 'ai_series' },
 ];
 
-let cache = null; // { expires, pages, items }
-let inflight = null; // { pages, task }
+let cache = null;
+let inflight = null;
 let premiereMemo = { expires: 0, ids: new Set() };
 let premiereCooldownUntil = 0;
 
@@ -46,7 +46,7 @@ function newReleaseFromRow(row) {
     const text = cleanTitle(value);
     if (text && !labels.includes(text)) labels.push(text);
   };
-  // 「新剧」标签在 tag_info，上线日期在 sub_title_list；两处都保留用于展示和排序。
+
   addLabel(row.tag_info?.text);
   for (const item of Array.isArray(row.sub_title_list) ? row.sub_title_list : []) addLabel(item?.content);
   const releasedToday = labels.includes('今日上新');
@@ -73,7 +73,7 @@ function collectRows(rows) {
     if (!item) continue;
     const existing = seen.get(item.series_id);
     if (!existing) { seen.set(item.series_id, item); continue; }
-    // 同一部剧可能同时出现在真人/AI 列表；保留「今日上新」标记和更完整的字段。
+
     existing.released_today = existing.released_today || item.released_today;
     existing.is_premiere = existing.is_premiere === true || item.is_premiere === true;
     existing.tags = [...new Set([...existing.tags, ...item.tags])].slice(0, 4);
@@ -144,12 +144,12 @@ async function fetchGenre(config, { pages, deadline, request }) {
     rows.push(...data.video_data);
     if (data.has_more !== true) break;
     const next = parseSearchInteger(data.next_offset);
-    // 游标必须前进，否则上游异常时会在同一页空转。
+
     if (next === null || next <= offset) break;
     offset = next;
     sessionId = String(data.session_id || '');
   }
-  // 一页都没读到就撞上截止时间，不能当成“确实没有上新”缓存下来。
+
   if (!rows.length && Date.now() >= deadline) throw appError('App 上新请求超时', 'APP_TIMEOUT');
   return rows;
 }
@@ -158,10 +158,10 @@ function cachedItems(pages) {
   return cache && cache.expires > Date.now() && cache.pages >= pages ? cache.items : null;
 }
 
-/**
- * 读取 App 近 7 天上新列表（真人 + AI），按线上时间倒序，最多取 pages 页。
- * 结果在进程内短暂缓存；两种剧集任一失败仍可使用另一种的结果。
- */
+
+
+
+
 async function listNewReleases(options = {}) {
   const { pages = DEFAULT_PAGES, deadline = 0, request = defaultRequest, useCache = true } = options || {};
   const count = Math.max(1, Math.min(8, Number(pages) || DEFAULT_PAGES));
@@ -186,9 +186,9 @@ async function listNewReleases(options = {}) {
       throw failures[0];
     }
     const result = { items, cached: false, partial: failures.length > 0 };
-    // 只缓存完整结果；部分失败或空列表下次搜索重新请求，避免把上游一次空响应锁住一分钟。
+
     if (result.partial === false && items.length) cache = { expires: Date.now() + CACHE_TTL_MS, pages: count, items };
-    // 海報首發標記可以先用已讀到的名單。部分失敗只記很短，下次搜索仍會重抓。
+
     if (result.partial === false) rememberPremieres(items, CACHE_TTL_MS);
     else if (items.length) rememberPremieres(items, 15 * 1000);
     return result;
@@ -198,10 +198,10 @@ async function listNewReleases(options = {}) {
   return task;
 }
 
-/**
- * 在 App 上新列表里按标题匹配：完整标题优先，其次包含搜索词，
- * 最后支持用户多打了季数/后缀时用剧名反向匹配。
- */
+
+
+
+
 function matchNewReleases(items, keyword) {
   const query = normalizeTitle(keyword);
   if (query.length < 2 || !Array.isArray(items)) return [];
@@ -250,7 +250,7 @@ function premiereIds() {
   return premiereReady() ? premiereMemo.ids : new Set();
 }
 
-// 啟動時預讀首發名單。失敗後短暫停手，避免每一頁都再等一次網路。
+
 function warmNewReleases() {
   if (premiereReady() || Date.now() < premiereCooldownUntil) return Promise.resolve();
   return listNewReleases().then(() => undefined, () => undefined);

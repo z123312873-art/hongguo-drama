@@ -1,4 +1,4 @@
-// In-memory DOM propagation + real Player handlers. Native browser behavior also needs UI acceptance.
+
 const assert = require('node:assert/strict');
 const { mount } = require('./check-player-resume.cjs');
 
@@ -71,7 +71,7 @@ async function ready() {
     const focused = target('button');
     let clicks = 0;
     const { down, up } = press(ui, ' ', focused);
-    // A button's default Space activation on keyup is cancelled by a cancelled keydown.
+
     if (!down.defaultPrevented && !up.defaultPrevented) { clicks++; ui.episode(2); }
     assert.equal(ui.media.paused, true, 'Space after clicking an episode must pause');
     assert.equal(clicks, 0, 'Space must not reactivate the focused episode button');

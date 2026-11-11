@@ -1,4 +1,4 @@
-// Public rank pages are 20 items across 5 pages. A one-page snapshot must not be shown as the whole rank.
+
 export const RANK_PAGE_SIZE = 20;
 export const RANK_SOURCE_PAGES = 5;
 export const RANK_TOTAL = RANK_PAGE_SIZE * RANK_SOURCE_PAGES;

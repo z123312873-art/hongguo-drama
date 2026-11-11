@@ -1,6 +1,6 @@
-// Real Chromium + real FFmpeg check of the encrypted-episode seek path, using the production main.js.
-// Needs ffmpeg on PATH and a display:  xvfb-run -a node_modules/electron/dist/electron scripts/check-seek-chromium.cjs --no-sandbox
-// Env: HONGGUO_MAIN=<path> runs another main.js (for example the previous release) for start-up comparisons.
+
+
+
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 

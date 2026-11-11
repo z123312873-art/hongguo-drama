@@ -23,7 +23,7 @@ function chineseSeason(season) {
   return `${season < 20 ? '' : digits[Math.floor(season / 10)]}十${season % 10 ? digits[season % 10] : ''}`;
 }
 
-// Only the immediately following season. Season 1 never selects season 5 when season 2 is missing.
+
 export function immediateNextSeason(series, candidates) {
   const current = seasonTitle(series?.series_title);
   const source = sourceOf(String(series?.series_id || ''));

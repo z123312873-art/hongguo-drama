@@ -241,7 +241,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   props.available = true; await media.play(); render(); advance(); render();
   keyboard('keyup', 'ArrowDown');
 
-  // Replay previous -> playback -> natural end -> automatic next, including native event churn.
+
   props.autoContinue = true; render(); movePointer(); advance(); render();
   keyboard('keydown', 'ArrowUp');
   props.continuing = true; props.available = false; media.pause(); render();
@@ -403,7 +403,7 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
         await ui.flush(); ui.metadata(); await ui.flush();
         const key = custom ? (direction === 'previous' ? 'j' : 'k') : (direction === 'previous' ? 'ArrowUp' : 'ArrowDown');
         const init = { key, code: custom ? `Key${key.toUpperCase()}` : key, shiftKey: custom, target: keyTarget };
-        // Input/menu events must never be redirected to an episode.
+
         for (const target of [{ isContentEditable: true }, { closest: query => query.includes('input') ? {} : null }, { closest: query => query.includes('[data-player-menu]') ? {} : null }]) {
           const event = ui.dispatchKey('keydown', { ...init, target });
           assert.equal(event.defaultPrevented, false, 'typing and menu navigation are not hijacked');

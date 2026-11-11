@@ -1,4 +1,4 @@
-// Execute main.js startup with an Electron boundary double; no windows, network or user files.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

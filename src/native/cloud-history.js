@@ -1,6 +1,6 @@
 'use strict';
 
-// The account's watch history, merged both ways with this computer's records while signed in.
+
 
 const { compatibleCover } = require('./cover-url');
 
@@ -25,8 +25,8 @@ function flag(value) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
-// Account history records the current episode and the series length. Its duration is not the
-// current episode's duration, so it cannot be used as a playback-ended threshold here.
+
+
 function finished(index, total) {
   return Number.isInteger(index) && Number.isInteger(total) && total > 0 && index >= total;
 }
@@ -58,8 +58,8 @@ function parsePage(payload) {
   return { rows: data.data_list, hasMore: flag(data.has_more), nextOffset: Math.floor(number(data.next_offset)) };
 }
 
-// Reads every page. A repeated page or a page cap means the list is incomplete, which is an error,
-// not a shorter list: a partial list must never delete or hide anything.
+
+
 async function fetchHistory(request, { maxPages = MAX_PAGES, onSummary } = {}) {
   const rows = new Map();
   const seen = new Set();
@@ -94,7 +94,7 @@ async function fetchHistory(request, { maxPages = MAX_PAGES, onSummary } = {}) {
   throw new Error('手机历史太多页，没有读完');
 }
 
-// JSON with the long ids written as numbers, without float rounding.
+
 function idJson(value) {
   return JSON.stringify(value).replace(/"\\u0000id:(\d+)"/g, '$1');
 }
@@ -119,7 +119,7 @@ async function uploadEntry(request, entry, now = Date.now()) {
   await request('POST', UPDATE_PATH, {}, updateBody(entry, now, false));
 }
 
-// Deletes on the account, then reads the list again: only a row that is really gone counts as deleted.
+
 async function deleteEntry(request, entry, now = Date.now(), options = {}) {
   if (!readId(entry?.series_id)) throw new Error('这部剧无法从手机历史移除');
   await request('POST', UPDATE_PATH, {}, updateBody(entry, now, true));
@@ -136,11 +136,11 @@ async function deleteEntry(request, entry, now = Date.now(), options = {}) {
 const HONGGUO_ID = /^\d{6,30}$/;
 const SAME_MS = 1000;
 
-// Two-way merge of this computer's records with the account's. Nothing is dropped because one side
-// lacks it: a record only here is sent up, a record only in the account is added here, and for a
-// drama on both sides the newer progress wins. The only removal is a drama confirmed in this account
-// before (cloudSynced) that the account no longer lists: it was deleted on the other side. An empty
-// account list is never read as "everything was deleted". Records of other sources stay local.
+
+
+
+
+
 function reconcileHistory({ playback, cloudRows, userId }) {
   const next = { ...(playback || {}) };
   const toUpload = [];
@@ -163,7 +163,7 @@ function reconcileHistory({ playback, cloudRows, userId }) {
     } else if (mine.updatedAt > row.updatedAt + SAME_MS) {
       toUpload.push(row.series_id);
     } else if (row.vid_index === mine.vid_index) {
-      // A refreshed account snapshot also repairs completion metadata saved by an older version.
+
       if (row.completed) merged.completedEpisode = row.vid_index;
       else delete merged.completedEpisode;
     }
@@ -179,7 +179,7 @@ function reconcileHistory({ playback, cloudRows, userId }) {
     } else if (!record.cloudSynced) {
       toUpload.push(id);
     }
-    // Confirmed in another account: stays here and is not sent to this one.
+
   }
   return {
     playback: next, toUpload, removed,

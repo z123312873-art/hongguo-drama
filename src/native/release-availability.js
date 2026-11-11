@@ -38,7 +38,7 @@ function visibleUpcoming(items, { now = Date.now(), gone = new Set() } = {}) {
     const id = String(item?.series_id || item?.id || '');
     if (!id || gone.has(id)) return false;
     const day = taipeiDay(item?.online_time);
-    // A date before today stays off the wall. A failed check is not proof the show launched.
+
     if (day && today && day < today) return false;
     return true;
   });

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ubuntu + mingw-w64 cross-build; no prebuilt third-party media libraries.
+
 set -euo pipefail
 ROOT=${1:?Usage: build-ffmpeg-source-win.sh BUILD_DIRECTORY [JOBS]}
 JOBS=${2:-4}
@@ -14,7 +14,7 @@ X264_TAR_SHA256=df62afece4eecef8ddf196f115dfec6e936a21b04ec2117a0f4e412de29b20e5
 mkdir -p "$ROOT"/{archives,sources,build-x264,build-ffmpeg,prefix,logs,artifacts/bin,corresponding-source}
 FFMPEG_ARCHIVE="$ROOT/archives/ffmpeg-$FFMPEG_VERSION.tar.xz"
 X264_ARCHIVE="$ROOT/archives/x264-$X264_COMMIT.tar.gz"
-# Debian's orig tarball is the same upstream release. ffmpeg.org is often unreachable from CI.
+
 if [[ ! -f "$FFMPEG_ARCHIVE" ]]; then
   curl -fL --connect-timeout 20 --retry 1 --silent --show-error "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" -o "$FFMPEG_ARCHIVE" \
     || { rm -f "$FFMPEG_ARCHIVE"; curl -fL --connect-timeout 20 --retry 2 --silent --show-error "https://deb.debian.org/debian/pool/main/f/ffmpeg/ffmpeg_${FFMPEG_VERSION}.orig.tar.xz" -o "$FFMPEG_ARCHIVE"; }
@@ -26,7 +26,7 @@ if [[ ! -f "$X264_ARCHIVE" ]]; then
   git -C "$FETCH_DIR" archive --format=tar --prefix="x264-$X264_COMMIT/" FETCH_HEAD | gzip -n > "$X264_ARCHIVE"
 fi
 printf '%s  %s\n' "$FFMPEG_SHA256" "$FFMPEG_ARCHIVE" | sha256sum -c -
-# Verify exact tar bytes: BSD and GNU gzip may encode identical source differently.
+
 [[ $(gzip -dc "$X264_ARCHIVE" | sha256sum | cut -d' ' -f1) == "$X264_TAR_SHA256" ]] || { echo 'x264 source tar checksum mismatch' >&2; exit 1; }
 echo 'x264 source tar SHA256: OK'
 [[ -d "$ROOT/sources/ffmpeg-$FFMPEG_VERSION" ]] || tar -xf "$FFMPEG_ARCHIVE" -C "$ROOT/sources"
@@ -34,7 +34,7 @@ echo 'x264 source tar SHA256: OK'
 export PKG_CONFIG_PATH=
 export PKG_CONFIG_LIBDIR="$ROOT/prefix/lib/pkgconfig"
 cd "$ROOT/build-x264"
-# shortcut: portable C implementation; enable NASM when software-encoding speed needs tuning.
+
 "../sources/x264-$X264_COMMIT/configure" --prefix=../prefix --host=x86_64-w64-mingw32 \
   --cross-prefix=x86_64-w64-mingw32- --enable-static --disable-asm --disable-cli \
   --disable-opencl --disable-avs --disable-swscale --disable-lavf --disable-ffms \
@@ -53,12 +53,12 @@ cd "$ROOT/build-ffmpeg"
   > "$ROOT/logs/ffmpeg-configure.log" 2>&1
 make -j "$JOBS" ffmpeg.exe ffprobe.exe > "$ROOT/logs/ffmpeg-build.log" 2>&1
 cp ffmpeg.exe ffprobe.exe "$ROOT/artifacts/bin/"
-# librempeg decodes the newer bvc2 tag. Its CLI is GPL-3; the configure entry also
-# names the AGPL flag only so avfilter_thread_frame turns on. That flag is removed
-# before configure. Never pass --enable-agpl.
-# Keep the assembler here. Turning it off leaves out the x86 init objects while the
-# C callers still reference them, and the Windows link fails. The ffmpeg 9.0.2
-# build above still turns its assembler off.
+
+
+
+
+
+
 LIBREMPEG_COMMIT=a0fafc5c42dbd7fce25b141c071277fb016a65c5
 LIBREMPEG_DIR=librempeg-a0fafc5c42db
 LIBREMPEG_TAR_SHA256=dfdabbc0b0f6dbfea60d4e3469d84dbcacdefc01a5d89a0b95716f97c508a41c
@@ -115,7 +115,7 @@ cp ffmpeg.exe "$ROOT/artifacts/bin/librempeg.exe"
 cd "$ROOT"
 for tool in "$ROOT/artifacts/bin/"*.exe; do
   x86_64-w64-mingw32-objdump -p "$tool" > "$ROOT/logs/$(basename "$tool").imports.txt"
-  # Reject accidental MinGW, pthread, codec or package-manager DLL dependencies.
+
   python3 - "$ROOT/logs/$(basename "$tool").imports.txt" <<'PY'
 import re,sys
 text=open(sys.argv[1]).read()

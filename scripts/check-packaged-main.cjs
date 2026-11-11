@@ -1,5 +1,5 @@
-// The installed app loads the main process from app.asar. Node's ESM loader
-// cannot resolve imports inside that archive, so startup must stay on require().
+
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

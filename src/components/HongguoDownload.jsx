@@ -12,14 +12,14 @@ import { readLocalLibrary, saveLocalSeries, subscribeLocalLibrary } from '../loc
 function HongguoDownload({ onNavigate, active = true }) {
   const { sources: mediaSources, revision: sourceRevision } = useMediaSources();
   const { notice: playbackNotice, showNotice: showPlaybackNotice } = usePlaybackNotice();
-  const [tab, setTab] = useState('search'); // 'search' | 'input'
+  const [tab, setTab] = useState('search');
   const [inputUrl, setInputUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // 短剧解析结果
-  const [seriesData, setSeriesData] = useState(null); // { series_id, series_title, cover, total, episodes: [...] }
+
+  const [seriesData, setSeriesData] = useState(null);
   const [selectedVids, setSelectedVids] = useState(new Set());
   const [rangeInput, setRangeInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +68,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(new Set());
   };
 
-  // 搜索选中一部剧后仍留在搜索页，复用既有的选集下载界面。
+
   const handleSeriesFromSearch = (data) => {
     if (searchVersion !== resolveRequest.current) return;
     resolveRequest.current++;
@@ -96,7 +96,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     }
   };
 
-  // 解析红果短剧
+
   const handleResolve = async () => {
     if (!inputUrl.trim()) {
       setErrorMsg('请输入红果短剧分享链接或剧集 ID');
@@ -131,7 +131,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     }
   };
 
-  // 勾选/取消勾选单集
+
   const toggleVid = (vid) => {
     if (!seriesData?.episodes.some((ep) => ep.vid === vid && !ep.locked)) return;
     const next = new Set(selectedVids);
@@ -143,13 +143,13 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(next);
   };
 
-  // 全选
+
   const handleSelectAll = () => {
     if (!seriesData) return;
     setSelectedVids(new Set(seriesData.episodes.filter((ep) => !ep.locked).map((ep) => ep.vid)));
   };
 
-  // 反选
+
   const handleInvertSelect = () => {
     if (!seriesData) return;
     const next = new Set();
@@ -161,12 +161,12 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(next);
   };
 
-  // 清空选择
+
   const handleDeselectAll = () => {
     setSelectedVids(new Set());
   };
 
-  // 快捷集数选择
+
   const handleQuickSelect = (type) => {
     if (!seriesData || !seriesData.episodes) return;
     const eps = seriesData.episodes;
@@ -182,7 +182,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     setSelectedVids(new Set(targetEps.filter((ep) => !ep.locked).map((ep) => ep.vid)));
   };
 
-  // 根据区间字符串应用筛选 (如 "1-30" 或 "1,5,10-20")
+
   const handleApplyRange = () => {
     if (!seriesData?.episodes) return;
     try {
@@ -209,7 +209,7 @@ function HongguoDownload({ onNavigate, active = true }) {
     }
   };
 
-  // 提交批量下载
+
   const handleBatchDownload = async () => {
     if (!seriesData || selectedVids.size === 0) {
       setErrorMsg('请至少勾选一集欲下载的短剧');
@@ -241,7 +241,7 @@ function HongguoDownload({ onNavigate, active = true }) {
   return (
     <div className="hongguo-container">
       {playbackNotice && <div key={playbackNotice.id} className="record-toast playback-toast" role="status" aria-live="polite">{playbackNotice.text}</div>}
-      {/* 头部 Banner 区 */}
+      {                 }
       <div className="hongguo-hero">
         <div className="hero-icon">
           <Film size={32} />
@@ -252,7 +252,7 @@ function HongguoDownload({ onNavigate, active = true }) {
         </div>
       </div>
 
-      {/* 方式切换 */}
+      {          }
       <div className="mode-tabs">
         <button
           className={`mode-tab ${tab === 'search' ? 'active' : ''}`}
@@ -279,7 +279,7 @@ function HongguoDownload({ onNavigate, active = true }) {
         />
       </div>
       {tab === 'input' && (
-        /* 解析输入卡片 */
+
         <div className="hongguo-card">
           <div className="card-header-title">
             <Link2 size={18} />
@@ -326,7 +326,7 @@ function HongguoDownload({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 搜索模式下的提示信息（解析卡片被替换了，这里单独显示） */}
+      {                                 }
       {tab === 'search' && (errorMsg || successMsg) && (
         <div className="hongguo-card" style={{ marginTop: 0 }}>
           {errorMsg && <div className="alert alert-error" role="alert">{errorMsg}</div>}
@@ -334,10 +334,10 @@ function HongguoDownload({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 剧集列表与选择控制 */}
+      {               }
       {seriesData && (
         <div className="hongguo-card episode-section">
-          {/* 短剧元信息 */}
+          {           }
           <div className="series-header">
             <div className="series-info">
               {seriesData.cover ? (
@@ -406,7 +406,7 @@ function HongguoDownload({ onNavigate, active = true }) {
 
           {seriesData.episodes.some((ep) => ep.locked) && <p className="settings-hint">锁定集需在来源平台解锁，本应用不提供解锁；全选和范围选择会自动跳过。</p>}
 
-          {/* 筛选与操作栏 */}
+          {            }
           <div className="controls-row">
             <div className="select-buttons">
               <button className="btn-chip" onClick={handleSelectAll}>全选</button>
@@ -433,7 +433,7 @@ function HongguoDownload({ onNavigate, active = true }) {
             </div>
           </div>
 
-          {/* 剧集网格列表 */}
+          {            }
           <div className="episode-grid">
             {seriesData.episodes.map((ep) => {
               const isChecked = selectedVids.has(ep.vid);

@@ -34,7 +34,7 @@ function macFixture() {
   f.updater.closeServerIfExists = () => {};
   f.updater.handleUpdateDownloaded = MacUpdater.prototype.handleUpdateDownloaded;
   f.updater.quitAndInstall = MacUpdater.prototype.quitAndInstall;
-  // Match the listeners registered by the real MacUpdater constructor.
+
   native.on('error', error => f.updater.emit('error', error));
   native.on('update-downloaded', () => { f.updater.squirrelDownloadedUpdate = true; });
   native.checkForUpdates = () => { checks++; };

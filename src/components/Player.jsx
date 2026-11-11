@@ -5,9 +5,9 @@ import PlayerControls from './PlayerControls';
 import CommentDanmaku, { useCommentDanmaku } from './CommentDanmaku';
 import OfficialDanmaku, { useOfficialDanmaku } from './OfficialDanmaku';
 import { useDanmakuWarmup } from './danmakuWarmup.mjs';
-// 时间轴弹幕在 danmaku.js / OfficialDanmaku；本集评论在 episode-comments.js / CommentDanmaku。
-// 两条通路不要并成同一次请求。时间轴优先，不足约 25 条才补本集评论；时间轴播放最多 35 条。
-// 时间轴失败说明保持原样，不能说成本集没有弹幕。下一集在当前集读完后先预载时间轴。
+
+
+
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
 import SequelFinder from './SequelFinder';
@@ -18,7 +18,7 @@ import { Play, Film, Download, Check, RefreshCw, Layers, X, Trash2, ChevronDown,
 import { matchesText } from '../chineseScript.mjs';
 import { resolveEpisodeSeekTarget, writeSessionEpisodeTime } from './playerSessionProgress.js';
 
-// Fragmented streams report an empty range, so a seek would restart them from zero.
+
 const hasSeekableRange = video => {
   try { return video.seekable.length > 0 && video.seekable.end(video.seekable.length - 1) > 0.5; }
   catch { return false; }
@@ -26,14 +26,14 @@ const hasSeekableRange = video => {
 const localMediaKey = (seriesId, episode) => JSON.stringify([seriesId, episode?.vid, episode?.fileUrl, episode?.fileSize, episode?.taskId]);
 const SEASON_WAIT_MS = 8000;
 
-/**
- * Player —— 内置播放器
- *
- * 设计要点：
- *  - 直接播本地 file:// 文件（实测支持 seek），无需流服务器
- *  - 「边下边看」：下一集若还在下载，显示等待态并轮询，下完自动接上
- *  - 断点续播：按 series_id 记住看到第几集、第几秒
- */
+
+
+
+
+
+
+
+
 function Player({ target, onNavigate, onSeriesSelected, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
   const enhancement = useVideoEnhancement();
   const [shortcuts, setShortcuts] = useState(readShortcuts);
@@ -57,7 +57,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     try { window.localStorage.setItem(`hongguo:picture-mode:${activeSeriesId}`, mode); }
     catch { showToast('画面模式已切换，但未能保存；下次打开可能恢复默认'); }
   };
-  const [detail, setDetail] = useState(null); // { series_title, episodes: [...], total, completedCount }
+  const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState('');
   const [currentIndex, setCurrentIndex] = useState(1);
   const [autoNext, setAutoNext] = useState(true);
@@ -72,40 +72,40 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const supportsOnlineQuality = !/^(xifan|hema|custom):/.test(activeSeriesId);
   const onlineQuality = supportsOnlineQuality ? onlineQualityChoice : 'auto';
   const [qualityLoading, setQualityLoading] = useState(true);
-  const [waitingFor, setWaitingFor] = useState(null); // 正在等待下载的集号
+  const [waitingFor, setWaitingFor] = useState(null);
   const [toast, setToast] = useState(null);
   const [rateNotice, setRateNotice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [merging, setMerging] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);   // 剧集选择面板
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
 
-  // 在线播放（按需流式或临时准备后缓存）
+
   const [onlineVid, setOnlineVid] = useState(null);
   const [onlineUrl, setOnlineUrl] = useState('');
   const [mediaBuffering, setMediaBuffering] = useState(false);
   const [sawPicture, setSawPicture] = useState(false);
-  const [onlineProgress, setOnlineProgress] = useState(null); // {percent, phase}
+  const [onlineProgress, setOnlineProgress] = useState(null);
   const [onlineTranscoding, setOnlineTranscoding] = useState(false);
   const [cacheInfo, setCacheInfo] = useState({ count: 0, bytes: 0 });
   const [downloadedRevision, setDownloadedRevision] = useState(0);
-  const [downloadedMap, setDownloadedMap] = useState({}); // series_id -> {completed,total}
-  const [storageMap, setStorageMap] = useState({});       // series_id -> {files,bytes}
+  const [downloadedMap, setDownloadedMap] = useState({});
+  const [storageMap, setStorageMap] = useState({});
   const [storageTotal, setStorageTotal] = useState({ files: 0, bytes: 0 });
-  const [autoDelete, setAutoDelete] = useState(false);    // 看完自动删本地文件
-  const [confirmAsk, setConfirmAsk] = useState(null);     // {title, message, danger, onOk}
+  const [autoDelete, setAutoDelete] = useState(false);
+  const [confirmAsk, setConfirmAsk] = useState(null);
 
-  // 兼容模式：本机解不了 HEVC 时转码为 H.264
+
   const [autoCompat, setAutoCompat] = useState(true);
-  const [compatMap, setCompatMap] = useState({});         // vidIndex -> 转码后 url
-  const [compatProgress, setCompatProgress] = useState(null); // {vidIndex, percent}
+  const [compatMap, setCompatMap] = useState({});
+  const [compatProgress, setCompatProgress] = useState(null);
   const [compatError, setCompatError] = useState('');
-  const [decodeFailed, setDecodeFailed] = useState(false);    // 当前集解不出画面
+  const [decodeFailed, setDecodeFailed] = useState(false);
   const [playbackError, setPlaybackError] = useState('');
   const [playbackVersion, setPlaybackVersion] = useState(0);
   const [playbackRequested, setPlaybackRequested] = useState(false);
   const [compatCache, setCompatCache] = useState({ files: 0, bytes: 0 });
-  const [mergeAsk, setMergeAsk] = useState(false);            // 合并格式选择
+  const [mergeAsk, setMergeAsk] = useState(false);
 
   const videoRef = useRef(null);
   const stageRef = useRef(null);
@@ -114,7 +114,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const playbackRateRef = useRef(1);
   const toastTimer = useRef(null);
   const rateNoticeTimer = useRef(null);
-  const pendingSeekRef = useRef(0); // 切集后要跳转的秒数
+  const pendingSeekRef = useRef(0);
   const pendingAutoplayRef = useRef(false);
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -156,7 +156,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const rejectedLocalRef = useRef(null);
   const sessionEpisodeTimesRef = useRef(new Map());
 
-  // 只有收到当前片源的 metadata 后才保存，避免旧元素的 pause 覆盖新集断点。
+
   const persistPosition = useCallback((force = false, ended = false) => {
     const media = loadedMediaRef.current;
     if (!media?.played || media.version !== mediaVersion.current) return;
@@ -171,7 +171,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
   useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(payload => {
     const media = loadedMediaRef.current;
-    // A retained hidden player must not recreate a record removed on the history page.
+
     if (media && String(media.seriesId) === payload?.removedSeriesId) media.played = false;
   }), []);
 
@@ -297,14 +297,14 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     }
   }, []);
 
-  // 载入已登记的剧集列表
+
   const loadSeriesList = useCallback(async () => {
     const list = (await window.electronAPI.getSeriesList()) || [];
     setSeriesList(list);
     return list;
   }, []);
 
-  // 载入某剧的分集状态
+
   const loadDetail = useCallback(async (seriesId) => {
     if (!seriesId) return null;
     const version = selectionVersion.current;
@@ -353,7 +353,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       const latest = data?.episodes.find(item => item.vid_index === intent.vidIndex && item.vid === intent.vid);
       if (!latest || latest.locked) throw new Error(latest?.locked ? '该集已锁定，请在来源平台确认' : '无法刷新本集状态，请重试');
       if (usableLocal(latest, intent.seriesId)) { resumeLocal(latest, intent.seekTo, intent.autoplay); return; }
-      // Empty or unreadable App data will fail a download the same way. Stay on online retry.
+
       if (options.download === false) {
         intent.submitting = false;
         fallbackRef.current = null;
@@ -369,7 +369,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         ? (['1080p', '720p'].includes(settings?.download_quality) ? settings.download_quality : 'auto') : stateRef.current.downloadQuality;
       fallbackAttemptRef.current = key;
       setPlaybackError(''); setWaitingFor(intent.vidIndex);
-      // Enqueue validates quality and reuses an existing task; cancelling playback never stops that shared download.
+
       const result = await window.electronAPI.downloadSingleEpisode(intent.seriesId, intent.vidIndex, quality);
       if (!isCurrentFallback(intent)) return;
       if (!result?.success) throw new Error(result?.error || '下载加入失败');
@@ -446,7 +446,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (s) {
         setAutoDelete(s.auto_delete_watched === true);
         setCacheNext(s.cache_next_episode !== false);
-        setAutoCompat(s.compat_mode !== false); // 默认开启
+        setAutoCompat(s.compat_mode !== false);
       }
     });
     window.electronAPI.compatCacheStatus().then((r) => {
@@ -501,7 +501,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     }
   };
 
-  // 打开剧集面板或删除文件后，补全各剧的下载进度。
+
   useEffect(() => {
     if (!pickerOpen) return;
     let cancelled = false;
@@ -536,7 +536,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     });
   }, []);
 
-  // 事件合并后才核对文件；等待下载本身不触发磁盘扫描。
+
   useEffect(() => {
     if (!activeSeriesId || !active) return;
     let busy = false, dirty = true;
@@ -565,7 +565,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (wf != null) {
         const ep = d.episodes.find((e) => e.vid_index === wf);
         if (usableLocal(ep, String(activeSeriesId)) && (!recovery || ep.vid === recovery.vid)) {
-          // 等待中的下一集下好了 -> 自动切过去
+
           setWaitingFor(null);
           const sameEpisode = wf === stateRef.current.currentIndex;
           const seekTo = recovery ? recovery.seekTo : sameEpisode ? currentPosition() : 0;
@@ -580,7 +580,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       }
     }, 2000);
     return () => { clearInterval(timer); unsubscribe.forEach(off => off?.()); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [active, activeSeriesId, waitingFor, loadDetail, currentPosition, isCurrentFallback, usableLocal, resumeLocal]);
 
   const episodes = detail ? detail.episodes : [];
@@ -594,17 +594,17 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   const isOnlinePlaying = onlineVid && current && current.vid === onlineVid && onlineUrl;
   const canPlay = !!(playbackRequested && !playbackError && !onlineProgress && current && !current.locked && (compatUrl || usableLocal(current, String(activeSeriesId)) || isOnlinePlaying));
   const playableSource = compatUrl || (isOnlinePlaying ? onlineUrl : current?.fileUrl) || '';
-  // 原生全屏依附于 video 节点。准备下一集时保留结束帧，换源不换节点。
+
   if (canPlay) lastVideoSrcRef.current = playableSource;
   const videoSrc = !playbackRequested || compatProgress ? '' : lastVideoSrcRef.current;
-  // 换清晰度会短暂卸下当前地址。弹幕跟这一集走，不跟这一次片源地址走。
+
   const danmakuActive = active && showDanmakuControls && playbackRequested && Boolean(current?.vid) && !current.locked;
-  // 时间轴弹幕：OfficialDanmaku / getEpisodeDanmaku，带 offset_time。时间到了才出现，这里不改它的投放。
-  // 本集评论：时间轴落地后，不足约 25 条才读取。时间轴超过 35 条时只播放 35 条。评论不绑固定秒数。
+
+
   const showEpisodeComments = danmakuActive;
   const commentDanmaku = useCommentDanmaku({ seriesId: activeSeriesId, episodeId: current?.vid, active: showEpisodeComments });
   const officialDanmaku = useOfficialDanmaku({ seriesId: activeSeriesId, vid: current?.vid, active: danmakuActive, preferences: commentDanmaku });
-  // 时间轴还在读、或读失败且一条都没有时，设置面板仍表示时间轴，方便重试。空档仍补评论。
+
   const timelineReady = Boolean(officialDanmaku.feed?.loaded) && !officialDanmaku.loading;
   const timelineFailedEmpty = timelineReady && officialDanmaku.comments.length === 0 && Boolean(officialDanmaku.feed?.error);
   const danmaku = !showEpisodeComments || !timelineReady || timelineFailedEmpty
@@ -621,14 +621,14 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     const previous = lastLoadRef.current;
     lastLoadRef.current = { source: videoSrc, version: playbackVersion };
     v.defaultPlaybackRate = playbackRateRef.current;
-    // 相同地址的显式重试不会触发 src 变更，用原生 load 重置媒体即可。
+
     if (previous?.source === videoSrc && previous.version !== playbackVersion) { v.src = videoSrc; v.load(); }
     v.playbackRate = playbackRateRef.current;
   }, [loading, canPlay, videoSrc, playbackVersion]);
 
   const playableCount = episodes.filter((e) => e.status === 'completed').length;
 
-  /** 转码当前集为 H.264 后播放（解决本机无法解码 HEVC 的黑屏问题） */
+
   const startCompatPlay = useCallback(
     async (vidIndex, force = false) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
@@ -644,7 +644,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       persistPosition(true);
       videoRef.current?.pause();
       loadedMediaRef.current = null;
-      // Windows must release the failed cache before FFmpeg replaces it. Keep the fullscreen node.
+
       videoRef.current?.removeAttribute('src');
       videoRef.current?.load();
       compatRequestRef.current = request;
@@ -664,7 +664,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         compatRequestRef.current = null;
         if (res && res.success) {
           loadedMediaRef.current = null;
-          // A fast same-URL result can be batched with the loading state; restore the DOM source explicitly.
+
           if (videoRef.current) { videoRef.current.src = res.url; videoRef.current.load(); }
           setCompatMap((prev) => ({ ...prev, [vidIndex]: res.url }));
           setDecodeFailed(false);
@@ -723,8 +723,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     } catch (e) { showToast('清理转码缓存失败: ' + e.message); }
   };
 
-  // 播放中若始终解不出画面（videoWidth 一直为 0），判定为解码不兼容。
-  // 必须定义在早返回之前 —— hooks 不能出现在条件分支之后。
+
+
   const handlePlaying = useCallback((event) => {
     const media = loadedMediaRef.current;
     const element = event.currentTarget;
@@ -753,13 +753,13 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     }, 2600);
     const finale = nextSeason.seasonFinaleIndex?.(episodesRef.current) || 0;
     if (finale && idx === finale) lookupNextSeasonRef.current();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [currentIndex, tryAutoCompat, playbackVersion, canPlay, videoSrc, persistPosition]);
 
-  /**
-   * 在线播放：明文片源按需加载，加密片源准备后返回播放地址。
-   * 不占用下载目录；加密片源的准备文件会自动清理。
-   */
+
+
+
+
   const startOnlinePlay = useCallback(
     async (vidIndex, resumeAt, force = false, autoplay = true, swap = null) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
@@ -775,7 +775,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       const prefetched = swap || (!force && prefetchRef.current?.vid === ep.vid && prefetchRef.current?.seriesId === activeSeriesId && prefetchRef.current?.quality === quality ? prefetchRef.current : null);
       if (prefetched && prefetched === prefetchRef.current) prefetchRef.current = null;
       const ready = prefetched?.result?.success ? prefetched.result : null;
-      // 换成可跳转片源时，下一集的预取仍然有效，不能被这次换源释放。
+
       const keptPrefetch = swap ? prefetchRef.current : null;
       if (keptPrefetch) prefetchRef.current = null;
       resetPlayback(autoplay);
@@ -799,7 +799,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         refreshOnlineCacheInfo();
         if (res.notice) showToast(res.notice);
       };
-      // A finished prefetch swaps the source in this same update, so the next episode does not drop to the preparing screen.
+
       if (ready) { usePrepared(ready); return; }
       setOnlineProgress({ vid: ep.vid, percent: 0, phase: 'preparing' });
       setOnlineUrl('');
@@ -844,7 +844,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     return true;
   }
 
-  // 切集
+
   const goToEpisode = useCallback(
     (vidIndex, resumeAt) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
@@ -894,7 +894,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     if (playbackRequested && current && !current.locked) startOnlinePlay(currentIndex, seekTo, true, autoplay);
   };
 
-  // 找下一集（按集号顺序）
+
   const findNext = useCallback(
     (fromIndex) => {
       const idx = episodes.findIndex((e) => e.vid_index === fromIndex);
@@ -944,7 +944,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     queueNextPrefetchRef.current(currentIndex);
   };
 
-  // 末集开始播放时预先查找下一季；失败的查找不会被记住，播完时可以再试一次。
+
   lookupNextSeasonRef.current = () => {
     const { activeSeriesId: seriesId, currentIndex: idx, detail } = stateRef.current;
     const token = `${seriesId}:${idx}`;
@@ -959,7 +959,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (!current()) return null;
       const picked = nextSeason.immediateNextSeason?.({ series_id: seriesId, series_title: title }, result?.results || []);
       if (!picked) {
-        // 只有联网查询失败才允许重试；确认没有下一季时保持结论。
+
         if (!result?.success || result?.partial) seasonLookupRef.current = '';
         return null;
       }
@@ -974,7 +974,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           }]);
           if (confirmed) seasonReadyRef.current = confirmed;
         }
-      } catch (_) { /* 搜索结果已足够确认下一季 */ }
+      } catch (_) {                    }
       return current() ? seasonReadyRef.current : null;
     })().catch(() => {
       if (current()) seasonLookupRef.current = '';
@@ -984,7 +984,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     return promise;
   };
 
-  // 先交接下一集或释放当前媒体，再清理刚看完的文件和缓存。
+
   const handleEnded = useCallback(async () => {
     const { currentIndex: ci, autoNext: an, activeSeriesId: sid } = stateRef.current;
     const next = an ? findNext(ci) : null;
@@ -1002,7 +1002,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     let prepared = seasonReadyRef.current;
     let moved = false;
     if (!next && an && finale && ci === finale && !prepared?.series_id) {
-      // 查找还没结束或上次失败：先等它一会儿，而不是直接判定没有下一季。
+
       if (seasonPendingRef.current || seasonLookupRef.current !== `${sid}:${ci}`) showToast('正在查找下一季…');
       prepared = await Promise.race([lookupNextSeasonRef.current(), new Promise(resolve => setTimeout(() => resolve(null), SEASON_WAIT_MS))]);
       const now = stateRef.current;
@@ -1012,7 +1012,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       goToEpisode(next.vid_index, 0);
       setAutoAdvancing(true);
     } else if (moved) {
-      // 等待期间用户已经换集或关闭自动播放：只清理，不再改动当前播放。
+
     } else if (an && finale && ci === finale && prepared?.series_id) {
       setSeasonHandoff({ ...prepared, seconds: prepared.seconds || 5, phase: 'prompt' });
     } else {
@@ -1036,7 +1036,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     }
   }, [findNext, goToEpisode, showToast, autoDelete, episodes, refreshCacheInfo, loadDetail, persistPosition, resetPlayback, releaseOnline]);
 
-  // 离开页面、暂停和关闭窗口强制保存最后一秒。
+
   useEffect(() => {
     const timer = setInterval(persistPosition, 5000);
     const save = () => persistPosition(true);
@@ -1060,7 +1060,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     videoRef.current?.pause();
   }, [active, persistPosition]);
 
-  // 加密片源边下边播时是分片 MP4，浏览器无法跳转。用户跳转时换成已保存的完整文件，再落到目标位置。
+
   seekMediaRef.current = (value, relative = false) => {
     const video = videoRef.current;
     if (!video) return;
@@ -1169,14 +1169,14 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       if (document.fullscreenElement === stageRef.current) await document.exitFullscreen();
       else {
         const element = stageRef.current?.closest('.main-content');
-        // Fullscreen takes the player out of flow and can clamp the page's scrollTop to zero.
+
         if (element && !fullscreenScrollRef.current) fullscreenScrollRef.current = { element, top: element.scrollTop };
         await stageRef.current?.requestFullscreen();
       }
     } catch { restoreFullscreenScroll(); showToast('无法进入或退出全屏，请重试'); }
   }, [portrait, showToast, restoreFullscreenScroll]);
 
-  // Capture handled keys before media controls; cancel keyup too so focused buttons cannot toggle twice.
+
   useEffect(() => {
     if (!active || confirmAsk || mergeAsk || pickerOpen) return;
     const held = new Set();
@@ -1280,7 +1280,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     }
   }, [persistPosition, resetPlayback, loadDetail, showToast, onSeriesSelected, usableLocal]);
 
-  // 初次进入与浏览点播共用一次载入，避免两个初始化请求互相覆盖。
+
   useEffect(() => {
     let cancelled = false;
     const navigation = navigationVersion.current;
@@ -1318,7 +1318,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     startOnlinePlay(pending.vidIndex, pending.seekTo, false, pending.autoplay);
   }, [loading, detail, activeSeriesId, startOnlinePlay]);
 
-  // 从列表移除一部短剧（只取消登记，不删本地文件）
+
   const removeSeries = async (sid, title) => {
     const res = await window.electronAPI.forgetSeries(sid).catch(error => ({ success: false, error: error.message }));
     if (!res || !res.success) {
@@ -1391,7 +1391,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     showToast(firstError ? `${ok} 集提交成功，${missing.length - ok} 集失败：${firstError}` : `已把 ${ok} 集加入下载队列`);
   };
 
-  // 一键合并当前这部剧（弹出格式选择）
+
   const mergeThisSeries = async (compatible) => {
     setMerging(true);
     setMergeAsk(false);
@@ -1449,7 +1449,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     return () => clearTimeout(timer);
   }, [seasonHandoff, openNextSeason]);
 
-  // ===== 渲染 =====
+
   if (loading) {
     return <div className="player-container"><div className="player-empty">加载中…</div></div>;
   }
@@ -1716,7 +1716,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       )}
 
       <div className="player-viewing-layout">
-      {/* 播放区 */}
+      {         }
       <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} data-picture-mode={pictureMode} ref={stageRef}>
           {rateNotice !== null && <div className="player-rate-notice" role="status" aria-live="polite">{rateNotice}×</div>}
           {seasonHandoff?.phase === 'prompt' && (
@@ -1775,7 +1775,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               if (videoRef.current && event.currentTarget !== videoRef.current) return;
               if (event.currentTarget.currentSrc && event.currentTarget.currentSrc !== videoSrc) return;
               const errorCode = event.currentTarget.error?.code;
-              // Chromium also reports an unavailable HTTP stream as unsupported source (4).
+
               const unavailableOnline = errorCode === 4 && videoSrc === onlineUrl;
               if (unavailableOnline && reconnectOnce()) return;
               const failedDecode = [3, 4].includes(errorCode);
@@ -1894,7 +1894,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           </div>
         ))}
 
-        {/* 兼容模式浮层：解码失败提示 / 转码进度 */}
+        {                          }
         {compatProgress && compatProgress.vidIndex === currentIndex && (
           <div className="compat-overlay">
             <RefreshCw size={26} className="spin" />
@@ -1933,7 +1933,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
       <section className="player-episode-panel" id="player-episode-panel" aria-label="选集">
       <h3 className="portrait-episode-heading">选集</h3>
-      {/* 播放中的集信息 */}
+      {             }
       {current && (
         <div className="player-now">
           <span className="player-now-title">
@@ -1969,7 +1969,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
 
       {episodes.some((ep) => ep.locked) && <p className="player-tips">锁定集需在来源平台解锁，本应用不提供解锁；连播会跳过锁定集。</p>}
 
-      {/* 分集列表 */}
+      {          }
       <div className="player-episodes">
         {episodes.map((ep) => {
           const isCurrent = ep.vid_index === currentIndex;
@@ -2055,7 +2055,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
       </div>
       {toast && <div key={toast} className="record-toast playback-toast" role="status" aria-live="polite" onClick={() => setToast(null)}>{toast}</div>}
 
-      {/* 合并格式选择 */}
+      {            }
       {mergeAsk && (
         <div className="player-confirm-mask" onClick={() => setMergeAsk(false)}>
           <div className="player-confirm" role="dialog" aria-modal="true" aria-label={confirmAsk ? confirmAsk.title : '合并导出'} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
@@ -2081,7 +2081,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
         </div>
       )}
 
-      {/* 删除确认 */}
+      {          }
       {confirmAsk && (        <div className="player-confirm-mask" onClick={() => setConfirmAsk(null)}>
           <div className="player-confirm" role="dialog" aria-modal="true" aria-label={confirmAsk ? confirmAsk.title : '合并导出'} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="player-confirm-title">

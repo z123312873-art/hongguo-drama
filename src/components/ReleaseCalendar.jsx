@@ -40,7 +40,7 @@ export default function ReleaseCalendar({ onPlay, onUnavailable, opening = '', a
     let cancelled = false;
     window.electronAPI.getSeriesList().then(items => {
       if (!cancelled && Array.isArray(items)) setCatalogCovers(new Map(items.map(item => [String(item.series_id), item.cover || ''])));
-    }).catch(() => {}); // Missing local metadata leaves the poster placeholder available.
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [library.items]);
   const favorites = useMemo(() => library.items.filter(item => item.favorite).map(item => ({

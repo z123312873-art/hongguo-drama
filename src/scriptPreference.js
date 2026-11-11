@@ -17,7 +17,7 @@ function applyScript(script) {
   try {
     document.documentElement.lang = script === 'hant' ? 'zh-Hant' : 'zh-Hans';
     document.documentElement.dataset.script = script;
-  } catch { /* preference still works without a document */ }
+  } catch {                                                 }
   listeners.forEach((listener) => listener(script));
 }
 

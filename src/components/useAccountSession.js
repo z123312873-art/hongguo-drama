@@ -6,7 +6,7 @@ async function refreshStatus() {
     const refresh = window.electronAPI?.accountRefresh;
     if (typeof refresh !== 'function') return null;
     const value = await refresh();
-    // Only a real answer counts; an empty or malformed reply must not sign the sidebar out.
+
     return value && typeof value === 'object' && typeof value.loggedIn === 'boolean' ? normalizeStatus(value) : null;
   } catch {
     return null;
@@ -29,11 +29,11 @@ export default function useAccountSession() {
   const [draft, setDraft] = useState(initialLoginDraft);
   const draftRef = useRef(draft);
   draftRef.current = draft;
-  // Every sign-in or sign-out bumps this, so a slow profile read cannot bring back an older account.
+
   const sessionRef = useRef(0);
 
-  // The profile read can miss right after sign-in (slow or offline). Ask once more; when there is
-  // no session left in memory the saved name and picture stay as they are.
+
+
   const completeProfile = async (current) => {
     if (!current?.loggedIn || (current.nickname && current.avatarData)) return;
     const ticket = sessionRef.current;
@@ -78,11 +78,11 @@ export default function useAccountSession() {
     draftRef.current = snapshot;
     setDraft(snapshot);
     if (!snapshot.busy) return;
-    let result = { ok: false, error: '验证码暂时无法发送，请稍后再试' };
+    let result = { ok: false, error: '驗證碼暫時無法傳送，請稍後再試' };
     try {
       result = await window.electronAPI.accountSendCode({ countryCode: snapshot.countryCode, phone: snapshot.phone });
     } catch {
-      result = { ok: false, error: '验证码暂时无法发送，请稍后再试' };
+      result = { ok: false, error: '驗證碼暫時無法傳送，請稍後再試' };
     }
     setDraft(current => {
       const next = reduceLogin(current, { type: 'sent', result });
@@ -96,7 +96,7 @@ export default function useAccountSession() {
     draftRef.current = snapshot;
     setDraft(snapshot);
     if (!snapshot.busy) return;
-    let result = { ok: false, error: '登录没有完成，请重试' };
+    let result = { ok: false, error: '登入沒有完成，請重試' };
     try {
       result = await window.electronAPI.accountLogin({
         countryCode: snapshot.countryCode,
@@ -104,7 +104,7 @@ export default function useAccountSession() {
         code: snapshot.code,
       });
     } catch {
-      result = { ok: false, error: '登录没有完成，请重试' };
+      result = { ok: false, error: '登入沒有完成，請重試' };
     }
     setDraft(current => {
       const next = reduceLogin(current, { type: 'finished', result });
@@ -123,7 +123,7 @@ export default function useAccountSession() {
 
   const logout = async () => {
     sessionRef.current += 1;
-    try { await window.electronAPI?.accountLogout?.(); } catch { /* reread the saved state */ }
+    try { await window.electronAPI?.accountLogout?.(); } catch {                              }
     setStatus(await readStatus());
     setConfirming(false);
     setOpen(false);

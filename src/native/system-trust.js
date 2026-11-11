@@ -1,6 +1,6 @@
-// Node's bundled CA list does not include certificates that local filters (AdGuard, antivirus
-// or corporate proxies) install into the operating system store. Browsers trust that store,
-// so merging it keeps main-process requests consistent with what the user's machine already trusts.
+
+
+
 function trustSystemCertificates(tls = require('node:tls')) {
   if (typeof tls.getCACertificates !== 'function' || typeof tls.setDefaultCACertificates !== 'function') return { applied: false, reason: 'unsupported' };
   try {

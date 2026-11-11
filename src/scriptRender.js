@@ -1,4 +1,4 @@
-// Classic JSX still calls createElement. The Vite build uses src/script-jsx instead.
+
 import React from 'react';
 import { isTraditional } from './scriptPreference.js';
 import { convertConfig } from './script-jsx/convert.mjs';

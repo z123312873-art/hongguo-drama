@@ -1,4 +1,4 @@
-// In-memory records only. Never reads the user's local storage or Electron profile.
+
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -326,16 +326,16 @@ test('favorites with an account: merge once, follow phone removals, send local c
   assert.deepEqual(cloud.sort(), ['7300000000000000001', '7300000000000000002']);
   assert.equal(hook.favoriteSyncStatus().mode, 'cloud');
   assert.equal(library.readLocalLibrary().items.find(i => i.id === '7300000000000000002').title, '手机2');
-  // Removed on the phone (seen on the next sync).
+
   cloud = ['7300000000000000001'];
-  // Un-favorite here: recorded as a cancellation and sent.
+
   library.saveLocalSeries({ id: '7300000000000000001', title: '本机', favorite: false });
   await new Promise(r => setTimeout(r, 1700)); await settle();
   assert.deepEqual(sent.at(-1), ['7300000000000000001', false]);
   assert.ok(!cloud.includes('7300000000000000001'));
   assert.ok(favs().includes('7300000000000000005'), 'not-yet-online stays');
   assert.ok(!favs().includes('7300000000000000002'), 'the phone removal reached this computer');
-  // Account unreadable: nothing is cleared, the reason is shown.
+
   h.window.electronAPI.cloudFavorites = async () => ({ success: true, mode: 'local', error: '手机收藏暂时读不到' });
   library.saveLocalSeries({ id: '7300000000000000007', title: '新', favorite: true });
   await new Promise(r => setTimeout(r, 1700)); await settle();

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
+import { toTraditional } from '../chineseScript.mjs';
 import { ACCOUNT_REGIONS, accountActionLabel, accountLabel, avatarPicture, regionLabel } from '../accountProfile.mjs';
 
 function Avatar({ status, onClick }) {
-  const label = status.loggedIn ? '帐号头像' : '尚未登录';
-  // A picture that fails to load falls back to the default icon instead of a broken image.
+  const label = status.loggedIn ? '帳號頭像' : '尚未登入';
+
   const [failed, setFailed] = useState([]);
   const picture = avatarPicture(status, failed);
   return (
@@ -17,7 +18,7 @@ function Avatar({ status, onClick }) {
 
 export function AccountStrip({ status, onAvatar }) {
   const name = accountLabel(status);
-  // A real nickname is shown exactly as set in the app; only the built-in labels follow the 繁/简 switch.
+
   const own = Boolean(status?.loggedIn && status.nickname);
   return (
     <div className={status?.loggedIn ? 'account-strip' : 'account-strip is-out'}>
@@ -32,7 +33,7 @@ export function AccountStrip({ status, onAvatar }) {
 export function AccountAccess({ status, confirming, onLogin, onLogout, onConfirm, onCancel }) {
   if (status.loggedIn && confirming) {
     return (
-      <div className="account-confirm" role="group" aria-label="确认退出">
+      <div className="account-confirm" role="group" aria-label="確認退出">
         <button type="button" className="btn btn-danger-solid account-login" onClick={onConfirm}>退出</button>
         <button type="button" className="btn btn-outline account-login" onClick={onCancel}>取消</button>
       </div>
@@ -57,35 +58,35 @@ export function AccountDialog({ draft, onClose, onCountry, onPhone, onCode, onSe
     <div className="account-dialog-mask" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">
         <div className="account-dialog-head">
-          <h2 id="account-dialog-title">红果登录</h2>
-          <button type="button" className="btn btn-outline btn-sm" onClick={onClose}>关闭</button>
+          <h2 id="account-dialog-title">紅果登入</h2>
+          <button type="button" className="btn btn-outline btn-sm" onClick={onClose}>關閉</button>
         </div>
         {draft.step === 'phone' ? (
           <div className="account-fields">
-            <label className="account-field"><span>国家或地区</span>
-              <select className="input-field" aria-label="国家或地区" autoFocus value={draft.countryCode} onChange={event => onCountry(event.target.value)}>
+            <label className="account-field"><span>國家或地區</span>
+              <select className="input-field" aria-label="國家或地區" autoFocus value={draft.countryCode} onChange={event => onCountry(event.target.value)}>
                 {ACCOUNT_REGIONS.map(region => <option key={region.code} value={region.code}>{regionLabel(region.name)} {region.code}</option>)}
               </select>
             </label>
-            <label className="account-field"><span>手机号</span>
-              <input className="input-field" aria-label="手机号" inputMode="numeric" autoComplete="tel" value={draft.phone} onChange={event => onPhone(event.target.value)} onKeyDown={onPhoneKey} />
+            <label className="account-field"><span>手機號碼</span>
+              <input className="input-field" aria-label="手機號碼" inputMode="numeric" autoComplete="tel" value={draft.phone} onChange={event => onPhone(event.target.value)} onKeyDown={onPhoneKey} />
             </label>
-            <button type="button" className="btn btn-primary" disabled={draft.busy || draft.retryAfter > 0} onClick={onSend}>{draft.busy ? '发送中…' : draft.retryAfter > 0 ? `稍後再試（${draft.retryAfter} 秒）` : '发送验证码'}</button>
+            <button type="button" className="btn btn-primary" disabled={draft.busy || draft.retryAfter > 0} onClick={onSend}>{draft.busy ? '傳送中…' : draft.retryAfter > 0 ? `稍後再試（${draft.retryAfter} 秒）` : '傳送驗證碼'}</button>
           </div>
         ) : (
           <div className="account-fields">
-            <label className="account-field"><span>验证码</span>
-              <input className="input-field" aria-label="验证码" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={8} aria-describedby="account-code-help" placeholder="4～8 位驗證碼" value={draft.code} onChange={event => onCode(event.target.value)} onKeyDown={onCodeKey} />
+            <label className="account-field"><span>驗證碼</span>
+              <input className="input-field" aria-label="驗證碼" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={8} aria-describedby="account-code-help" placeholder="4～8 位驗證碼" value={draft.code} onChange={event => onCode(event.target.value)} onKeyDown={onCodeKey} />
             </label>
             <p id="account-code-help" className="page-description">請輸入簡訊中的完整驗證碼，支援 4～8 位數字；輸入後按「登入」。未收到簡訊時，請等候倒數結束再重試。</p>
-            <button type="button" className="btn btn-primary" disabled={draft.busy} onClick={onSubmit}>{draft.busy ? '登录中…' : '登录'}</button>
+            <button type="button" className="btn btn-primary" disabled={draft.busy} onClick={onSubmit}>{draft.busy ? '登入中…' : '登入'}</button>
             <div className="account-dialog-row">
-              <button type="button" className="btn btn-outline" disabled={draft.busy || draft.retryAfter > 0} onClick={onSend}>{draft.retryAfter > 0 ? `重新发送 ${draft.retryAfter}` : '重新发送'}</button>
-              <button type="button" className="btn btn-outline" disabled={draft.busy} onClick={onChangeNumber}>更换号码</button>
+              <button type="button" className="btn btn-outline" disabled={draft.busy || draft.retryAfter > 0} onClick={onSend}>{draft.retryAfter > 0 ? `重新傳送（${draft.retryAfter} 秒）` : '重新傳送'}</button>
+              <button type="button" className="btn btn-outline" disabled={draft.busy} onClick={onChangeNumber}>更換號碼</button>
             </div>
           </div>
         )}
-        {draft.error ? <div className="alert alert-error" role="alert">{draft.error}</div> : null}
+        {draft.error ? <div className="alert alert-error" role="alert">{toTraditional(draft.error)}</div> : null}
       </div>
     </div>
   );

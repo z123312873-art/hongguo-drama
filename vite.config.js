@@ -1,4 +1,4 @@
-// 红果短剧 3.3：前端构建配置，运行版本由 package.json 提供。
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
@@ -24,7 +24,7 @@ export default defineConfig({
   plugins: [traditionalJsx(), react(), {
     name: 'development-csp',
     apply: 'serve',
-    // React Refresh injects an inline preamble only in the development server.
+
     transformIndexHtml: html => html.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';")
       .replace("connect-src 'self'", "connect-src 'self' ws: wss:"),
   }],
@@ -36,8 +36,8 @@ export default defineConfig({
   build: {
     outDir: 'dist-react',
     emptyOutDir: true,
-    // The packaged page imports the account helpers. Vite only rewrites
-    // CommonJS inside node_modules unless these files are listed too.
+
+
     commonjsOptions: {
       include: [/node_modules/, /[/\\]src[/\\]native[/\\](?:account-(profile|session)|folder-rules)\.js$/],
     },

@@ -78,8 +78,6 @@
   border-top: 1px solid var(--border-muted);
   padding-top: 18px;
 }
-
-/* ===== 网络代理：设置页状态行 ===== */
 .proxy-status-row {
   display: flex;
   align-items: center;
@@ -129,8 +127,6 @@
   font-size: calc(13px * var(--font-scale, 1));
   flex-shrink: 0;
 }
-
-/* ===== 网络代理：配置弹窗 ===== */
 .proxy-modal-mask {
   position: fixed;
   inset: 0;

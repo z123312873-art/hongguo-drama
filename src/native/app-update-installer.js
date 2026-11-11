@@ -6,7 +6,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
   updater.allowDowngrade = false;
   updater.allowPrerelease = false;
   updater.disableWebInstaller = true;
-  // Release ZIPs are rebuilt after notarization; their old blockmaps are invalid.
+
   updater.disableDifferentialDownload = true;
   updater.logger = null;
   updater.setFeedURL({ provider: 'github', owner: 'z123312873-art', repo: 'hongguo-drama' });
@@ -40,7 +40,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
   function download(expectedVersion) {
     if (!isEnabled()) return Promise.resolve(fail('自动检测更新已关闭，请先在设置中开启。'));
     if (state.status === 'installing') return Promise.resolve(fail('正在安装更新。'));
-    // The updater shares request state; finish cancelled work before starting a retry.
+
     if (operation) {
       if (operationGeneration === generation) return operation;
       const queuedGeneration = generation;
@@ -63,7 +63,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
         update({ status: 'downloading' });
         await updater.downloadUpdate(cancellationToken);
         if (request !== generation || !isEnabled()) return fail('更新已取消。');
-        // Only this operation's verified completion can make the update installable.
+
         update({ status: 'downloaded', percent: 100, error: '', downloaded: true });
         return { success: true, state: getState() };
       } catch (_) {
@@ -86,7 +86,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
     try {
       if (updater.nativeUpdater && nativeReadyVersion !== state.version) {
         const version = state.version;
-        // MacUpdater's implicit deferred quit listener survives errors; own its lifetime instead.
+
         nativeInstallListener = () => { nativeReadyVersion = version; finishInstall(); };
         updater.nativeUpdater.once('update-downloaded', nativeInstallListener);
         updater.nativeUpdater.checkForUpdates();
@@ -101,7 +101,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
     const blocked = installBlocker();
     if (blocked) return fail(blocked);
     update({ status: 'installing', error: '' });
-    // Finish the IPC response before starting native preparation or quitting.
+
     setImmediate(finishInstall);
     return { success: true, state: getState() };
   }

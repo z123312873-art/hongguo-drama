@@ -23,7 +23,7 @@ window.testResult = (async () => {
   const advance = async count => { for (let i = 0; i < count; i++) await act(async () => {
     now += 100; const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(now));
   }); };
-  // The fixture omits application CSS; supply only the real overlay's geometry.
+
   const style = document.createElement('style');
   style.textContent = '.comment-danmaku,.player-controls{position:absolute;inset:0}.player-controls-bar{position:absolute;inset:auto 0 0;height:80px}.comment-danmaku-item{position:absolute;white-space:nowrap;line-height:1.25}';
   document.head.append(style);

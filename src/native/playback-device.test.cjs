@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Offline protocol checks for playback-device.js; all responses and identities are synthetic.
+
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const crypto = require('node:crypto');
@@ -284,12 +284,12 @@ test('registerDevice sends the reader identity without touching the Hongguo regi
     assert.equal(header.package, 'com.dragon.read');
     assert.equal(header.version_code, 74332);
     assert.equal(header.app_version, '7.4.3.32');
-    // Registering the reader device twice yields two independent attempts: rotation depends on this.
+
     let calls = 0;
     await api.registerDevice(async () => { calls++; return { device_id: '1', install_id: '2' }; }, api.READER_PROFILE);
     await api.registerDevice(async () => { calls++; return { device_id: '3', install_id: '4' }; }, api.READER_PROFILE);
     assert.equal(calls, 2);
-    // The default cache is still empty and the default header is still Hongguo's.
+
     let defaultRequest;
     await api.getPlaybackDevice(async (...args) => { defaultRequest = args; return { device_id: '7', install_id: '8' }; });
     assert.equal(defaultRequest[1].headers['x-ss-dp'], '8662');

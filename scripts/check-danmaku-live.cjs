@@ -1,4 +1,4 @@
-// Run with node; an optional argument supplies an existing node_modules directory.
+
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 if (process.argv[2] === '--renderer-test') {
   const { app, BrowserWindow } = require('electron');

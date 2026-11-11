@@ -1,4 +1,4 @@
-// Run: node scripts/check-cover-image.cjs. Renders CoverImage with in-memory hooks; no browser or network.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

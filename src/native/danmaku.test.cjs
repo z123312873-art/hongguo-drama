@@ -1,13 +1,13 @@
-// Adapted from dawei233/hongguo-drama (GPL-3.0), commit c884fab6c6e36ad38173e251738b9b35f958383f.
-// https://github.com/dawei233/hongguo-drama/tree/c884fab6c6e36ad38173e251738b9b35f958383f
+
+
 'use strict';
 
-/**
- * 官方弹幕抓取层测试。全部离线：传输层是注入的假实现，不打网络。
- *
- * 这里最要紧的一组断言是"失败语义"：源不可用与"本集真的没有弹幕"是两件事，
- * 任何情况下都不能互相冒充 —— 包括缓存命中的路径。
- */
+
+
+
+
+
+
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -41,7 +41,7 @@ const page = ({ rows = [], extra, info } = {}) => ({
   },
 });
 
-/** 固定时钟与 nonce，让测试完全确定。 */
+
 const fixedOptions = transport => ({
   transport,
   now: () => 1760000000000,
@@ -75,7 +75,7 @@ test('重启后复用本机匿名标识，避免上游重新分配少量弹幕�
     assert.ok(requests[0].every((value, i) => value === requests[1][i]), '重启不能更换匿名标识');
     assert.ok(fs.statSync(file).isFile());
     assert.ok(logs.every(line => requests[0].every(value => !line.includes(value))), '日志不得包含本机匿名标识');
-    // Windows does not expose POSIX permission bits through stat/chmod.
+
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   } finally { danmaku.setDeviceIdentityFile(null); fs.rmSync(folder, { recursive: true, force: true }); }
 });
@@ -220,7 +220,7 @@ test('连续空页提前停止，不会把整集翻满', async () => {
   let calls = 0;
   const transport = async () => {
     calls++;
-    // 一直声称"还有更多"，但一页都不给 —— 参考实现实测遇到过的上游行为
+
     return { data: JSON.stringify(page({ rows: [], extra: { next_query_danmaku_list_time: calls * 100000 } })) };
   };
   await danmaku.fetchDanmaku({ seriesId: SERIES, vid: VID, ...fixedOptions(transport) });

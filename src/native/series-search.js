@@ -18,11 +18,11 @@ function nextSeasonQueries(base, season, samples = []) {
   const digits = '零一二三四五六七八九';
   const chinese = season < 10 ? digits[season] : `${season < 20 ? '' : digits[Math.floor(season / 10)]}十${season % 10 ? digits[season % 10] : ''}`;
   const wrapped = samples.some(item => /[（(]第[^）)]+[季部][）)]/.test(canonicalTitle(item?.series_title || '')));
-  // Keep two supplements. Bracketed titles such as （第一季） also ask for （第N季）.
+
   return wrapped ? [`${base}（第${chinese}季）`, `${base}第${chinese}季`] : [`${base}第${chinese}季`, `${base}第${season}季`];
 }
 
-// One primary search plus at most two supplements; never recursively expand upstream results.
+
 async function searchSeries(keyword, search, knownSeries = [], { afterSeason = 1 } = {}) {
   const kw = String(keyword || '').trim();
   if (!kw || kw.length > 200) return { success: false, results: [], error: '请输入 1 至 200 字的搜索词' };

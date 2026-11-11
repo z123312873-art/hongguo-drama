@@ -1,4 +1,4 @@
-// The Windows media build must ship the newer-codec tool without the AGPL configure flag.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,7 +12,7 @@ assert.match(script, /cp ffmpeg\.exe "\$ROOT\/artifacts\/bin\/librempeg\.exe"/);
 assert.match(script, /ffmpeg_deps="avcodec avfilter avformat threads agpl"/);
 const invoked = script.split('\n').filter(line => /--enable-/.test(line) && !line.trim().startsWith('#') && !line.includes('was not used'));
 assert.equal(invoked.some(line => line.includes('--enable-agpl')), false, invoked.filter(line => line.includes('agpl')).join('\n'));
-const [ffmpegPart, librempegPart] = script.split('# librempeg decodes');
+const [ffmpegPart, librempegPart] = script.split('LIBREMPEG_COMMIT=');
 assert.match(ffmpegPart, /--disable-x86asm/);
 assert.equal(librempegPart.includes('--disable-x86asm'), false);
 assert.match(fs.readFileSync(path.join(root, '.github/workflows/windows.yml'), 'utf8'), /\bnasm\b/);

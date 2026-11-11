@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-// Keep focus inside the currently open dialog and return it to its trigger.
+
 export default function useDialogKeyboard(open, close, selector) {
   const closeRef = useRef(close);
   closeRef.current = close;

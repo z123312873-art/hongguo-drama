@@ -1,4 +1,4 @@
-// Optional signed App search (hongguoTV reference) with website API fallback.
+
 const { signedSearchRequest, parseSearchInteger, requestJson } = require('./app-source');
 const { getPlaybackDevice } = require('./playback-device');
 const { compatibleCover } = require('./cover-url');
@@ -47,7 +47,7 @@ function parseSearchPayload(payload, { page = 1 } = {}) {
   for (const cell of Array.isArray(tab.data) ? tab.data : []) {
     const video = (Array.isArray(cell?.video_data) ? cell.video_data : [])
       .find(item => /^\d{1,30}$/.test(String(item?.series_id || '')));
-    // Header/ad/search-suggestion cells have no video_data; their book_id is not a drama.
+
     if (!video) continue;
     const seriesId = String(video.series_id);
     const title = cleanTitle(cell?.search_high_light?.title?.text || video.title || cell?.cell_name || '');
@@ -90,7 +90,7 @@ async function searchApp(keyword, { page = 1, cursor = null, deadline = 0, reque
   }
   const budget = Number(deadline) > 0 ? deadline : Date.now() + DEFAULT_TIMEOUT_MS;
   if (budget <= Date.now()) throw appError('App 搜索超时，已回退官网', 'APP_TIMEOUT');
-  // Custom request stubs skip device registration so offline tests stay local.
+
   let identity = null;
   if (request === defaultRequest) {
     try { identity = await getPlaybackDevice(requestJson); } catch (_) { identity = null; }

@@ -1,6 +1,6 @@
 const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 
-// Media parsing and sample decryption must not block Electron's cancellation IPC.
+
 function decryptInWorker(payload, { signal, cancelToken } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted || cancelToken?.reason) return reject(new Error('已取消'));
@@ -11,7 +11,7 @@ function decryptInWorker(payload, { signal, cancelToken } = {}) {
       settled = true;
       signal?.removeEventListener('abort', cancel);
       cancelToken?.unsubscribe?.(cancel);
-      // Wait for the writer to stop before the caller removes temporary files.
+
       await worker.terminate();
       if (error) reject(error);
       else resolve(result?.buffer ? Buffer.from(result.buffer) : undefined);

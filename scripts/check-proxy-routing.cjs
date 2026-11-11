@@ -1,4 +1,4 @@
-// Offline proxy routing checks: real main-process handlers, isolated env, no network/app data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

@@ -1,4 +1,4 @@
-// Offline FFmpeg discovery regression. Temporary files only; no app launch or user data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const source = path.resolve(__dirname, '../main.js');
 const main = fs.readFileSync(source, 'utf8');
 const discovery = main.slice(main.indexOf('function resolveFfmpeg('), main.indexOf('function probeDuration('));
-const decryption = main.slice(main.indexOf('async function decryptContentKeyFile('), main.indexOf('/** Encrypted sources and compatibility'));
+const decryption = main.slice(main.indexOf('async function decryptContentKeyFile('), main.indexOf('async function fetchDecryptedEpisode('));
 assert(discovery.startsWith('function resolveFfmpeg(') && decryption.startsWith('async function decryptContentKeyFile('));
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-ffmpeg-'));
 

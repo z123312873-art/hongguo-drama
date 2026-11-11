@@ -1,5 +1,5 @@
-// Main-process converter. Keep this CommonJS: Electron's asar package cannot
-// resolve ESM imports, and chineseScript.mjs is not shipped outside the renderer bundle.
+
+
 const OpenCC = require('opencc-js/t2cn');
 
 const toSimplifiedRaw = OpenCC.Converter({ from: 'twp', to: 'cn' });

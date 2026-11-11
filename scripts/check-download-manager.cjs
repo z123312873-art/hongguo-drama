@@ -1,4 +1,4 @@
-// No network, browser, media or real timers. Run: node scripts/check-download-manager.cjs [name].
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');

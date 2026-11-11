@@ -1,4 +1,4 @@
-// Keep the complete window inside the current display, including after unplugging a monitor.
+
 function fitWindowBounds(mode, current, workArea, previous) {
   if (!['portrait', 'landscape'].includes(mode)) throw new Error('Invalid window layout');
   const height = Math.min(mode === 'portrait' ? 940 : (previous?.height || 750), workArea.height);
@@ -13,13 +13,13 @@ function fitWindowBounds(mode, current, workArea, previous) {
     width, height,
   };
 }
-// Window resizing changes available space, never the user's chosen text size.
+
 function getWindowScale(value = 1) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.min(2, Math.max(0.5, value)) : 1;
 }
-// One size rule for Windows 10, Windows 11, and every DPI. Electron's work area
-// is already in device-independent pixels, so 100/125/150/175 percent and
-// 1366×768 through 4K do not need separate cases.
+
+
+
 function initialWindowSize(workArea) {
   const widthLimit = Math.max(1, Math.floor(Number(workArea?.width) || 1100));
   const heightLimit = Math.max(1, Math.floor(Number(workArea?.height) || 750));
@@ -33,8 +33,8 @@ function initialWindowSize(workArea) {
   };
 }
 
-// Show before maximize. On Windows 10 and 11, maximizing a hidden window leaves
-// the renderer unpainted at the current DPI, which looks like a blank white page.
+
+
 function revealMaximized(win) {
   if (!win || win.isDestroyed?.()) return [];
   const order = [];

@@ -1,8 +1,8 @@
 'use strict';
 
-// Fragmented MP4 piped out of FFmpeg starts playing at once but Chromium cannot seek it. While that stream plays,
-// the encrypted bytes it consumes are also kept on disk. When the download completes they are decrypted into one
-// ordinary MP4 with an index, which the player can switch to the first time a seek is asked for.
+
+
+
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
@@ -10,7 +10,7 @@ const { Readable, Writable, finished } = require('node:stream');
 const { feedContentKey } = require('./content-key-feed');
 
 const READ_SLICE = 256 * 1024;
-// The start of the episode is also kept in memory so the playing FFmpeg is fed without waiting on disk writes.
+
 const MEMORY_HEAD = 8 * 1024 * 1024;
 
 function cancelled() {
@@ -35,11 +35,11 @@ function writeAll(fd, chunk, position, done) {
   step();
 }
 
-/**
- * Downloads one encrypted episode to `directory`, hands its bytes to any number of FFmpeg readers while it grows,
- * and finally decrypts it into `video.mp4`. The caller owns `directory` after `adopt()`; until then the capture
- * removes it on failure or abort.
- */
+
+
+
+
+
 function createContentKeyCapture({ playInfo, request, maxBytes, directory, decrypt, feed = feedContentKey }) {
   const controller = new AbortController();
   const encryptedPath = path.join(directory, 'encrypted.mp4');
@@ -60,7 +60,7 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
   const closeFile = () => {
     if (fd === null) return;
     const handle = fd; fd = null;
-    try { fs.closeSync(handle); } catch (_) { /* The file is removed with the directory. */ }
+    try { fs.closeSync(handle); } catch (_) {                                               }
   };
   const fail = error => {
     if (!failure) failure = error;
@@ -91,7 +91,7 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
 
   const download = (async () => {
     await feed(playInfo, sink, controller.signal, { request, maxBytes });
-    // The feeder returns quietly when cancelled or when its writer closed; only a finished sink is a whole file.
+
     if (!sink.writableEnded) throw sink.errored || cancelled();
     await new Promise((resolve, reject) => finished(sink, error => error ? reject(error) : resolve()));
     if (controller.signal.aborted) throw cancelled();
@@ -142,9 +142,9 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
     signal: controller.signal,
     get settled() { return settled; },
     get failed() { return failure; },
-    /** True while the encrypted bytes are still on disk, so another FFmpeg may read them from the start. */
+
     get readable() { return sourceKept && !failure && !controller.signal.aborted; },
-    /** Stream of the encrypted file from byte 0 that waits for the download instead of ending early. */
+
     reader() {
       if (!this.readable) throw failure || cancelled();
       const stream = Readable.from((async function* read() {
@@ -189,9 +189,9 @@ function createContentKeyCapture({ playInfo, request, maxBytes, directory, decry
       stream.once('close', () => readers.delete(stream));
       return stream;
     },
-    /** The caller now owns `directory` and will remove it. */
+
     adopt() { adopted = true; },
-    /** Drop a finished capture nobody will use. */
+
     async discard() { await cleanup(); },
     abort() {
       if (settled) return;

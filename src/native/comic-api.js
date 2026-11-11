@@ -1,14 +1,14 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Reading-API client for picture comics: anonymous device, chapter content, directory, search, and the
-// decryption of the few images the public CDN does not serve in plain form.
-// Everything here is stateless; sessions and scheduling live in comic.js and comic-scheduler.js.
+
+
+
+
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { signedMetadataRequest, requestJson } = require('./app-source');
 const { registerDevice, READER_PROFILE } = require('./playback-device');
 const { comicCover } = require('./cover-url');
 
-// Public constant of the content-key exchange (the app ships the same bytes). Not a user credential.
+
 const KEY_EXCHANGE = Buffer.from('ac25c67ddd8f38c1b37a2348828e222e', 'hex');
 const READER_VERSION = '74332';
 const CALL_TIMEOUT_MS = 12000;
@@ -17,7 +17,7 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const IMAGE_HOSTS = ['byteimg.com', 'fqnovelpic.com'];
 const ID = /^\d{6,30}$/;
 const MD5 = /^[0-9a-f]{32}$/i;
-// Widths the image CDN is asked for. A small set keeps its cache effective; any value in between would work.
+
 const IMAGE_WIDTHS = Object.freeze([360, 540, 720, 900, 1080, 1440]);
 
 function le64(value) {
@@ -39,9 +39,9 @@ function exchangeKey(encoded) {
     return Buffer.concat([decipher.update(raw.subarray(16)), decipher.final()]);
 }
 
-// Ways to reach the reading service. The first is used until the service refuses a request; each later one
-// changes what the service can see (edge host, registration host, the region the device claims, a forwarded
-// client address) and is tried one at a time. Nothing here depends on a title.
+
+
+
 const ROUTES = Object.freeze([
     { id: 'default', host: 'api5-normal-sinfonlineb.fqnovel.com' },
     { id: 'domestic-lf', host: 'api5-normal-lf.fqnovel.com', region: 'cn-zj', registerHosts: ['log.snssdk.com'] },
@@ -50,7 +50,7 @@ const ROUTES = Object.freeze([
     { id: 'api3-forwarded', host: 'api3-normal-sinfonlinea.fqnovel.com', region: 'cn-yn', forwarded: true, registerHosts: ['log.snssdk.com'] },
 ].map((route) => Object.freeze(route)));
 
-// A public address in a mainland carrier block, different on every device. Only sent by the routes marked `forwarded`.
+
 const FORWARD_PREFIXES = Object.freeze([[36, 100], [58, 60], [111, 30], [114, 80], [117, 130], [120, 36], [123, 112], [183, 14], [221, 130], [223, 104]]);
 function forwardedAddress() {
     const [first, second] = FORWARD_PREFIXES[crypto.randomInt(FORWARD_PREFIXES.length)];
@@ -86,8 +86,8 @@ async function call(session, apiPath, values, payload, method = 'GET', stage = '
     return response;
 }
 
-// One registered anonymous device. The content key is only needed to read a chapter, so it is fetched on
-// first use: the directory and the search work with the device alone and must not depend on the key step.
+
+
 async function createSession({ register = registerDevice, transport = requestJson, route = ROUTES[0] } = {}) {
     const identity = await register(transport, READER_PROFILE, route.registerHosts ? { hosts: route.registerHosts } : undefined);
     return { identity: { ...identity }, route, key: null, keyver: 0, keyPending: null, createdAt: Date.now(), transport };
@@ -174,7 +174,7 @@ async function fetchDirectory(session, bookId) {
     }
     return episodes;
 }
-// A search needs the id of a general search first; the comic tab then pages with it.
+
 async function searchComicPage(session, query, { offset = 0, searchId = '', passback = '' } = {}) {
     const base = { query: String(query).slice(0, 40), count: '20', bookshelf_search_plan: '4', use_correct: 'true', user_is_login: '0' };
     let id = searchId;
@@ -197,7 +197,7 @@ async function searchComicPage(session, query, { offset = 0, searchId = '', pass
     return { books, hasMore: Boolean(tab?.has_more), nextOffset: Number(tab?.next_offset) || 0, searchId: tab?.search_id || id };
 }
 
-// Comics carry this genre type everywhere in the reading service (search, category pages, details).
+
 const COMIC_GENRE = '110';
 const DETAIL_BATCH = 20;
 
@@ -212,8 +212,8 @@ function categoriesOf(book) {
     return out;
 }
 
-// The directory call of any title also carries the title's own record. It answers wherever the directory does,
-// so it can stand in for the details call when that one comes back empty.
+
+
 async function fetchBookInfo(session, bookId) {
     if (!ID.test(String(bookId))) throw Object.assign(new Error('漫画编号无效'), { code: 'APP_INPUT' });
     const response = await call(session, '/reading/bookapi/directory/all_items/v/', {
@@ -224,7 +224,7 @@ async function fetchBookInfo(session, bookId) {
     return info && typeof info === 'object' ? info : null;
 }
 
-// Details of known titles. Their categories are how the category pages (below) are found.
+
 async function fetchBookDetails(session, ids) {
     const list = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter((id) => ID.test(id)))].slice(0, DETAIL_BATCH);
     if (!list.length) return [];
@@ -232,7 +232,7 @@ async function fetchBookDetails(session, ids) {
     return Array.isArray(response.data) ? response.data.filter((book) => book && typeof book === 'object') : [];
 }
 
-// One page of a comic category: ten titles and where the next page starts.
+
 async function fetchCategoryPage(session, categoryId, offset = 0) {
     if (!Number.isSafeInteger(Number(categoryId)) || Number(categoryId) <= 0) throw Object.assign(new Error('分类编号无效'), { code: 'APP_INPUT' });
     const response = await call(session, '/reading/bookapi/new_category/landing/v', {
@@ -263,7 +263,7 @@ function decryptImage(buffer, encryptKeyHex) {
     } catch (_) { throw Object.assign(new Error('图片解密失败'), { code: 'INVALID_RESPONSE' }); }
 }
 
-// Signed picture URLs live on a few CDN hosts only; the caller never supplies the URL.
+
 async function downloadImage(url, { fetcher, timeoutMs = 5000, attempts = 2 } = {}) {
     const checked = trustedImageUrl(url);
     if (!checked) throw Object.assign(new Error('图片地址不受信任'), { code: 'SECURITY_BLOCKED' });
@@ -281,7 +281,7 @@ async function downloadImage(url, { fetcher, timeoutMs = 5000, attempts = 2 } = 
         try { return await get(checked, timeoutMs); }
         catch (error) {
             last = error;
-            // A refusal is final; only timeouts and resets deserve a second try.
+
             if (error?.status && error.status < 500) break;
         }
     }

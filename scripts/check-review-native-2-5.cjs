@@ -1,4 +1,4 @@
-// Synthetic regression checks only: no playback, network or actual installation.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -6,7 +6,7 @@ const path = require('node:path');
 const { findSequels, sequelKeyword } = require('../src/native/watch-history');
 const { decryptMp4Buffer } = require('../src/native/hongguo');
 
-// Reuse the existing isolated updater and renderer fixtures without running their suites.
+
 function fixtureFrom(file, names) {
   const source = fs.readFileSync(path.join(__dirname, file), 'utf8').split('(async () => {')[0];
   const context = { require, __dirname, Buffer, console, setImmediate, exports: {} };

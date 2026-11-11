@@ -1,6 +1,6 @@
 #!/bin/bash
-# Rebuild our GPL FFmpeg helpers from the exact accompanying source archives.
-# Requires existing Apple Command Line Tools, make, git, curl and pkg-config.
+
+
 set -euo pipefail
 FFMPEG_VERSION=9.0.2
 FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
@@ -16,7 +16,7 @@ ROOT=$(cd "$ROOT" && pwd)
 ARCHIVES="$ROOT/archives"
 PREFIX="$ROOT/prefix"
 mkdir -p "$ARCHIVES" "$ROOT/sources" "$ROOT/build-x264" "$ROOT/build-ffmpeg" "$ROOT/logs" "$ROOT/artifacts/bin" "$ROOT/artifacts/licenses"
-# Use only system compiler tools. pkg-config is a discovery tool, not a linked library.
+
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export MACOSX_DEPLOYMENT_TARGET=13.0
 export PKG_CONFIG_PATH=
@@ -61,7 +61,7 @@ install -m 755 ffmpeg ffprobe "$ROOT/artifacts/bin/"
 cp "$ROOT/sources/ffmpeg-$FFMPEG_VERSION/"COPYING* "$ROOT/artifacts/licenses/"
 cp "$ROOT/sources/ffmpeg-$FFMPEG_VERSION/LICENSE.md" "$ROOT/artifacts/licenses/FFmpeg-LICENSE.md"
 cp "$ROOT/sources/x264-$X264_COMMIT/COPYING" "$ROOT/artifacts/licenses/x264-COPYING"
-# Verify architecture and reject any non-system dynamic dependency.
+
 for tool in "$ROOT/artifacts/bin/ffmpeg" "$ROOT/artifacts/bin/ffprobe"; do
   lipo "$tool" -verify_arch arm64
   otool -L "$tool" | tail -n +2 | awk '{print $1}' | while IFS= read -r dep; do

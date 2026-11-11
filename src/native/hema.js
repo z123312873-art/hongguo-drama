@@ -81,7 +81,7 @@ async function fetchList(options = {}) {
       genreCache = { items: saved, expires: Date.now() + 300000 };
     }
     if (refreshGenres || !genreCache || genreCache.expires <= Date.now()) {
-      // Pages of one window start together; they share a single directory request.
+
       directoryPending = directoryPending || request('/browse').finally(() => { directoryPending = undefined; });
       firstHtml = await directoryPending;
       const directory = pageData(firstHtml);
@@ -104,7 +104,7 @@ async function fetchList(options = {}) {
       throw new Error('河马返回的目录与请求不一致，请重试');
     }
     const results = normalizeBooks(data.bookList);
-    // shortcut: genre totals are unverified; follow observed next links until accurate totals are confirmed.
+
     const hasMore = results.length > 0 && new RegExp(`<a\\b[^>]*\\shref=["']/browse/${slug}/${pg + 1}["']`).test(html);
     return { success: true, results, page: pg, total: 0, totalPages: 0, hasMore,
       nextPage: hasMore ? pg + 1 : null, genres: genreCache.items,
@@ -165,7 +165,7 @@ async function fetchPlayUrlSingle(vid, sid) {
   try {
     const id = parseId(vid, true);
     if (sid != null && sid !== '' && parseId(sid).seriesId !== id.seriesId) throw new Error('河马分集不属于当前剧集');
-    // Re-read the public detail for every request: never reuse a cached free/paid decision.
+
     const result = await detail(id.seriesId);
     const episode = result.chapterList.find(item => String(item.chapterId) === id.chapterId);
     if (!episode) throw new Error('河马未找到该分集');

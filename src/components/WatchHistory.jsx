@@ -107,7 +107,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       } else {
         let result = await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
         if (!result?.success && version !== openingRequest.current) return;
-        // A drama watched only on the phone is not on this computer yet: load its episodes first.
+
         if (!result?.success && result?.code === 'SERIES_NOT_FOUND') {
           const detail = await window.electronAPI.searchResolve(row.series_id);
           if (version !== openingRequest.current) return;

@@ -113,8 +113,7 @@ Windows 安裝檔：`npm run build:installer`。步驟見 [發行說明](docs/RE
 
 ## 授權
 
-本專案延續 [jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama) 的 [GPL-3.0](LICENSE)。元件授權見 [第三方聲明](THIRD-PARTY-NOTICES.md)。
+本專案以 [GPL-3.0](LICENSE) 發佈。元件授權見 [第三方聲明](THIRD-PARTY-NOTICES.md)。
 
-更早的基礎包括 [327044572/hongguo-downloader](https://github.com/327044572/hongguo-downloader)、[zhenyong97/hongguo-downloader](https://github.com/zhenyong97/hongguo-downloader) 與 [dawei233/hongguo-drama](https://github.com/dawei233/hongguo-drama)。片源演算法來源見 [演算法來源聲明](src/native/licenses/NOTICE.txt)。
 
 開源授權只適用於這個軟體，不包含劇集內容。安裝檔裡沒有劇集影片。

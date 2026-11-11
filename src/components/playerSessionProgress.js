@@ -1,4 +1,4 @@
-/** In-memory per-episode positions for the current app session (not persisted to store). */
+
 
 export function sessionEpisodeKey(seriesId, vidIndex) {
   return `${String(seriesId)}:${Number(vidIndex)}`;
@@ -16,14 +16,14 @@ export function writeSessionEpisodeTime(map, seriesId, vidIndex, seconds) {
   map.set(sessionEpisodeKey(seriesId, vidIndex), seconds);
 }
 
-/**
- * @param {Map<string, number>} map
- * @param {string} seriesId
- * @param {number} vidIndex
- * @param {number|null|undefined} resumeAt explicit resume from caller
- * @param {number} currentIndex player current episode index
- * @param {() => number} currentPosition live element time for same episode
- */
+
+
+
+
+
+
+
+
 export function resolveEpisodeSeekTarget(map, seriesId, vidIndex, resumeAt, currentIndex, currentPosition) {
   if (resumeAt != null && Number.isFinite(resumeAt)) return Math.max(0, resumeAt);
   if (vidIndex === currentIndex) return Math.max(0, currentPosition());

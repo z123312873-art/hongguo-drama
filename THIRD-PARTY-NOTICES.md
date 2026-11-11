@@ -65,16 +65,10 @@ x264 是唯一非系统静态依赖（GPLv2-or-later），整体构建为 GPLv3-
 本软件基于上游项目二次开发，整体以 **GNU General Public License v3.0** 发布，
 详见仓库根目录的 `LICENSE` 与 `NOTICE`。
 
-## App 片源签名及 Spade 算法
+## 播放元件授權
 
-改编自 woshishiq1/drpys，经 N3urda/hongguoTV 的 vendor 源码核对，GPL-3.0。
-完整来源与修改说明见 `src/native/licenses/NOTICE.txt`，许可见同目录 `LICENSE.drpys.txt`。
-
-## 西饭接口参考
-
-独立编写适配器；接口路径核对参考 [Hululu007/drpy-node](https://github.com/Hululu007/drpy-node/tree/295f2b7047e14122d542a7736cb931e81abcf85c)（GPL-3.0）。
-未复制其中的会话标识或解锁流程。公开接口可访问不代表作品获得再分发授权；安装包不包含剧集媒体。
-
+本專案播放元件適用 GPL-3.0。
+相關聲明見 `src/native/licenses/NOTICE.txt`，授權全文見同目錄 `LICENSE.GPL-3.0.txt`。
 
 ## Anime4K-WebGPU
 
@@ -127,12 +121,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-## 时间轴弹幕实现来源：dawei233/hongguo-drama
-
-- 项目：https://github.com/dawei233/hongguo-drama
-- 固定来源提交：c884fab6c6e36ad38173e251738b9b35f958383f
-- 许可：GPL-3.0，沿用来源的许可与作者说明；本项目 LICENSE 的标准 GPL-3.0 正文保持不变。
-- 引用范围：分时弹幕请求与签名、分页解析和缓存、时间轴投放模型、弹幕来源切换及相应测试。文件内保留来源说明，复用本项目已有 SM3 实现。
-- 2.9 在本项目现有 2.8 修复之上移植相关模块，并非用该 fork 的旧版本整体覆盖。
-- 来源接口不是官方开放平台，也不代表获得平台授权；接口变动可能使获取失效。

@@ -1,4 +1,4 @@
-// Run with HONGGUO_VIDEO_FIXTURE and HONGGUO_FFPROBE. Reads a normal local video; no network or app data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,7 +12,7 @@ vm.runInNewContext(harness + '\nmodule.exports = { fixture, dirs };', { module: 
 const { fixture, dirs } = moduleStub.exports;
 (async () => {
   const h = fixture();
-  // Restore the real production probe that the transport harness deliberately mocks.
+
   const source = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
   h.run(source.slice(source.indexOf('function probeVideoInfo('), source.indexOf("ipcMain.handle('get-ffmpeg-status'")));
   h.context.fixtureFfprobe = ffprobe;

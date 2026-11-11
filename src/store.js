@@ -1,13 +1,13 @@
-/**
- * store.js - 红果短剧 3.2 持久化模块（沿用原资料格式）
- * 用单个 JSON 文件保存「设置」与「下载任务」，替代原项目里的 sql.js 数据库 + electron-store，
- * 减少依赖，方便独立打包。
- */
+
+
+
+
+
 const fs = require('fs');
 const path = require('path');
 
 let dataFile = null;
-let cache = null; // { settings, tasks }
+let cache = null;
 let durable = '{}';
 let errorHandler = null;
 let readError = null;
@@ -107,7 +107,7 @@ function saveTasks(tasks) {
   flush();
 }
 
-// ===== 短剧档案（让播放页在没有下载任务时也能列出完整分集）=====
+
 function getSeries() {
   const c = loadCache();
   if (!Array.isArray(c.series)) c.series = [];
@@ -119,7 +119,7 @@ function saveSeries(list) {
   flush();
 }
 
-// ===== 播放进度（断点续播）=====
+
 function getPlayback() {
   const c = loadCache();
   if (!c.playback || typeof c.playback !== 'object') c.playback = {};
@@ -131,7 +131,7 @@ function savePlayback(map) {
   flush();
 }
 
-// ===== 合并任务记录 =====
+
 function getMergeTasks() {
   const c = loadCache();
   if (!Array.isArray(c.mergeTasks)) c.mergeTasks = [];
@@ -164,7 +164,7 @@ function saveLoginDevice(device) {
   flush();
 }
 
-// The account session, already encrypted by the OS keychain (Electron safeStorage). Plain text never lands here.
+
 function getLoginSession() {
   const value = loadCache().loginSession;
   return typeof value === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length <= 64 * 1024 ? value : '';

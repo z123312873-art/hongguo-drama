@@ -1,4 +1,4 @@
-// Pure shortcut preferences and keyboard boundaries; no media, network, or app profile writes.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

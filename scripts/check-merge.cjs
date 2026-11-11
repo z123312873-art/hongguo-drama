@@ -1,4 +1,4 @@
-// Silent black-frame regression through the real merge IPC. No GUI or network.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -48,7 +48,7 @@ async function merge(label, files, compatible, mode = '') {
   assert.ok(Math.abs(Number(info.format.duration) - expected) < 0.4, 'lost episode duration');
   assert.equal(info.streams.find(s => s.codec_type === 'video').codec_name, 'h264');
   assert.equal(info.streams.find(s => s.codec_type === 'audio').codec_name, 'aac');
-  // Decode all synthetic frames; real files only decode across their join, never play them.
+
   const seek = process.argv.includes('--real') ? ['-ss', String(Math.max(0, Number(probe(files[0]).format.duration) - 1)), '-t', '2'] : [];
   const decoded = run('ffmpeg', ['-v', 'error', '-xerror', ...seek, '-i', started.output, '-progress', 'pipe:1', '-f', 'null', '-']);
   const frames = [...decoded.matchAll(/^frame=(\d+)/gm)].map(match => Number(match[1]));

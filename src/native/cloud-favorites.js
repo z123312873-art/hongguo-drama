@@ -1,8 +1,8 @@
 'use strict';
 
-// The account's favorites. Only dramas that can already be played are kept in the account; favorites
-// that are not online yet stay on this computer. A list that cannot be read completely is an error,
-// never an empty list.
+
+
+
 
 const LIST_PATH = '/reading/bookapi/bookshelf/video/list/v';
 const UPDATE_PATH = '/reading/bookapi/bookshelf/video/update/v';
@@ -15,7 +15,7 @@ function readId(value) {
   return '';
 }
 
-// Seconds or milliseconds; anything else is unknown (0).
+
 function stamp(value) {
   const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
   if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return 0;
@@ -23,7 +23,7 @@ function stamp(value) {
   return ms > 946684800000 && ms < 4102444800000 ? Math.floor(ms) : 0;
 }
 
-// Explicit category labels take precedence. Animated entries without an AI label are comic dramas.
+
 function readCategory(raw) {
   const kind = String(raw.video_category_type || '').toLowerCase();
   if (kind === 'ai_video') return 'ai';
@@ -62,7 +62,7 @@ function updateBody(id, on, now) {
   });
 }
 
-// Adds or cancels one favorite, then reads the list again: only a confirmed change counts.
+
 async function setFavorite(request, userId, id, on, now = Date.now()) {
   const sid = readId(id);
   if (!sid) throw new Error('这部剧无法同步到手机收藏');

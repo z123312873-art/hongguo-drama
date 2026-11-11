@@ -1,5 +1,5 @@
-// Adapted from dawei233/hongguo-drama, commit c884fab6c6e36ad38173e251738b9b35f958383f (GPL-3.0).
-// https://github.com/dawei233/hongguo-drama
+
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { commentIsBlocked, resizeDanmaku } from './danmakuModel.mjs';
 import { createOfficialFeed, appendOfficialPage, advanceTimedDanmaku, resolveDanmakuStatus, selectTimelinePlayback } from './danmakuOfficial.mjs';
@@ -7,14 +7,14 @@ import DanmakuLine from './DanmakuLine';
 import { syncDanmakuLayer, clearDanmakuLayer, foreignDanmaku, publishTimeline } from './danmakuSpace.mjs';
 import './CommentDanmaku.css';
 
-/**
- * 官方弹幕叠层：按视频时间投放。
- *
- * 与 `CommentDanmaku.jsx`（本集评论滚动条）是两个独立组件，不是同一个组件的
- * 分支。这样上游那套评论逻辑与其夹具测试完全不受影响，将来合并上游也不用解冲突。
- *
- * 视觉设置沿用同一个存储键，换源不会清掉用户调好的字号与屏蔽词。
- */
+
+
+
+
+
+
+
+
 
 export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
   const { enabled, settings, saveError, toggle, update, reset } = preferences;
@@ -35,7 +35,7 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
     return () => document.removeEventListener('visibilitychange', update);
   }, []);
 
-  // 正常只读取一次；失败或部分结果由用户手动重试，主进程复用短期缓存。
+
   useEffect(() => {
     if (!running || feed.loaded || feed.loading) return undefined;
     let cancelled = false;
@@ -72,8 +72,8 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
     return () => { cancelled = true; feed.loading = false; };
   }, [running, feed, requestVersion]);
 
-  // 状态文案只有这一个出口：失败、部分成功、加载中、空集都必须经由它，
-  // 否则某条路径会把"源坏了"显示成"本集没有弹幕"。
+
+
   const playback = useMemo(() => selectTimelinePlayback(feed.danmaku), [feed, feed.loaded, feed.danmaku.length]);
   const capped = feed.danmaku.length > playback.length;
   const status = resolveDanmakuStatus({
@@ -110,7 +110,7 @@ export function useOfficialDanmaku({ seriesId, vid, active, preferences }) {
       feed.error = '';
       feed.notice = '';
       feed.loaded = false;
-      feed.fresh = true; // 绕过主进程的失败缓存，否则重试只会拿到同一条失败
+      feed.fresh = true;
       retryRequest(value => value + 1);
     },
   };
@@ -139,7 +139,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     setItems([]);
   }, [feed, enabled, active, supported, settings.fontSize, settings.area, settings.density, reducedMotion]);
 
-  // 布局改变时重对齐；透明度、速度与屏蔽词调整保留当前轨迹。
+
   useEffect(() => {
     const state = feed.animation;
     state.items = state.items.filter(item => !commentIsBlocked(item.content, settings));
@@ -148,7 +148,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     const video = videoRef.current;
     if (!running || !available || !layer || !video) return undefined;
     let frame = 0;
-    // Retain geometry across suspended animation effects and layer remounts.
+
     let { width, height } = layoutRef.current || { width: layer.clientWidth, height: layer.clientHeight };
     layoutRef.current = { width, height };
     const controls = layer.parentElement?.querySelector('.player-controls-bar');
@@ -162,7 +162,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     const tick = now => {
       frame = 0;
       if (!canAnimate()) return;
-      // Wall time keeps existing comments smooth while a seek or buffer stalls the media clock.
+
       const delta = lastFrame === undefined ? 0 : Math.max(0, (now - lastFrame) / 1000) * video.playbackRate;
       lastFrame = now;
       const emitting = !video.seeking && video.readyState >= 2;
@@ -174,7 +174,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
     const start = () => { if (!frame && canAnimate()) frame = requestAnimationFrame(tick); };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; lastFrame = undefined; };
     const seek = () => { state.lastTime = undefined; start(); };
-    // 换清晰度会触发 emptied。已在屏上的弹幕留着，等新地址按同一进度重新对齐。
+
     const emptied = () => { stop(); state.lastTime = undefined; };
     const resize = () => {
       const nextWidth = layer.clientWidth;

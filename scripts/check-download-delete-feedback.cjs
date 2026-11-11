@@ -1,4 +1,4 @@
-// Real Player deletion feedback with isolated media/API fixtures; no network or files.
+
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { mount } = require('./check-player-resume.cjs');

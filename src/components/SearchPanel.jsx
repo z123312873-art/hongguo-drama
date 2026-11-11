@@ -24,10 +24,10 @@ export function rankSearchResults(results, keyword) {
   }).sort((a, b) => a.relevance - b.relevance);
 }
 
-/**
- * SearchPanel —— 按所选来源搜索短剧
- * 拿到 series_id 后交给父组件走既有的「拉全集 + 选集下载」流程。
- */
+
+
+
+
 function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = true }) {
   const [source, setSource] = useState('all');
   const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
@@ -42,7 +42,7 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestions = getSearchSuggestions(keyword, history);
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState(null); // null=未搜索, []=无结果
+  const [results, setResults] = useState(null);
   const [error, setError] = useState('');
   const [searchWarning, setSearchWarning] = useState('');
   const [pageTitle, setPageTitle] = useState('');
@@ -182,7 +182,7 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
     }
   };
 
-  // 选中某部剧 -> 拉取完整分集 -> 交给下载页
+
   const pick = async (item) => {
     const request = ++requestVersion.current;
     setPickingId(item.series_id);
