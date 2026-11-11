@@ -22,6 +22,8 @@ for (const draft of states) {
   else {
     assert.match(html, /驗證碼[\s\S]*重新傳送[\s\S]*更換號碼/);
     assert.match(html, /maxLength="8"/i);
+    assert.match(html, /class="account-code-help">收到驗證碼後，即可登入。/);
+    assert.doesNotMatch(html, /請輸入簡訊中的完整驗證碼|等候倒數結束再重試/);
     if (draft.code) assert.ok(html.includes('value="' + draft.code + '"'));
   }
 }

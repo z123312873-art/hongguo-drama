@@ -73,7 +73,11 @@ input::placeholder { color: var(--text-tertiary); }
 .account-dialog { width: min(420px, 100%); max-height: min(640px, calc(100vh - 48px)); overflow: auto; padding: 22px; border-radius: 16px; background: var(--bg-elevated); box-shadow: var(--shadow-lg); }
 .account-dialog-head, .account-dialog-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .account-dialog h2 { margin: 0; font-size: calc(18px * var(--font-scale, 1)); }
-.account-fields { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.account-fields { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.account-code-help { margin: 0 0 4px; color: var(--text-tertiary); font-size: calc(12px * var(--font-scale, 1)); line-height: 1.7; }
+.account-dialog-row { flex-wrap: wrap; align-items: stretch; }
+.account-dialog-row > .btn { flex: 1 1 145px; min-width: 0; min-height: 38px; white-space: normal; }
+.account-dialog .alert { margin-top: 16px; padding: 10px 12px; font-size: calc(12px * var(--font-scale, 1)); line-height: 1.7; overflow-wrap: anywhere; }
 .account-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .account-field span { color: var(--text-secondary); font-size: calc(12px * var(--font-scale, 1)); }
 .sidebar-group-label { font-size: calc(11px * var(--font-scale, 1)); font-weight: 600; color: var(--text-tertiary); padding: 0 12px 6px; }
