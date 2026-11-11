@@ -18,7 +18,7 @@ const NOW = Date.parse('2026-11-09T00:00:00+08:00');
 assert.equal(ACCOUNT_REGIONS.length, 14);
 assert.equal(DEFAULT_REGION, '+886');
 assert.equal(ACCOUNT_REGIONS[0].code, '+886');
-assert.deepEqual(ACCOUNT_REGIONS.slice(0, 4).map(region => region.name), ['台湾', '大陆', '香港', '澳门']);
+assert.deepEqual(ACCOUNT_REGIONS.slice(0, 4).map(region => region.name), ["臺灣", "大陸", '香港', "澳門"]);
 assert.ok(ACCOUNT_REGIONS.every(region => !region.name.startsWith('中国')));
 assert.equal(regionLabel('中国台湾'), '台湾');
 assert.equal(regionLabel('马来西亚'), '马来西亚');
@@ -26,7 +26,7 @@ assert.equal(new Set(ACCOUNT_REGIONS.map(region => region.code)).size, 14);
 
 const missing = preparePhone('', '13912345678');
 assert.equal(missing.ok, false);
-assert.equal(missing.error, '请选择国家或地区');
+assert.equal(missing.error, "請選擇國家或地區");
 assert.equal(missing.countryCode, undefined);
 
 assert.equal(preparePhone('+886', '912345678').ok, true);
@@ -34,7 +34,7 @@ assert.equal(preparePhone('+886', '0912345678').ok, true);
 assert.equal(preparePhone('+886', '91234567').ok, false);
 assert.equal(preparePhone('+886', '91234567890').ok, false);
 assert.equal(preparePhone('+86', '13912345678').ok, true);
-assert.equal(preparePhone('+86', '12345678901').error, '请检查手机号');
+assert.equal(preparePhone('+86', '12345678901').error, "請檢查手機號碼");
 assert.equal(preparePhone('+62', '8123456789012').ok, true);
 assert.equal(preparePhone('+62', '81234567890123').ok, false);
 assert.equal(preparePhone('+886', ' 912-345-678 ').phone, '912345678');
@@ -46,7 +46,7 @@ assert.equal(normalizeCode('12ab30').text, '1230');
 
 let draft = reduceLogin(initialLoginDraft(), { type: 'set-country', countryCode: '' });
 assert.equal(draft.countryCode, '+886');
-assert.equal(draft.error, '请选择国家或地区');
+assert.equal(draft.error, "請選擇國家或地區");
 draft = reduceLogin(draft, { type: 'set-phone', phone: '9123a45678' });
 assert.equal(draft.phone, '912345678');
 draft = reduceLogin(draft, { type: 'set-code', code: '0740' });
@@ -81,7 +81,7 @@ assert.equal(publicAccount(kept.record, NOW).nickname, '甲');
 const passportOnly = acceptLogin({ userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://example.com/a.jpg' }, NOW);
 assert.equal(passportOnly.record.nickname, '');
 assert.equal(publicAccount(passportOnly.record, NOW).nickname, '');
-assert.equal(accountLabel(publicAccount(passportOnly.record, NOW)), '已登录');
+assert.equal(accountLabel(publicAccount(passportOnly.record, NOW)), "已登入");
 // Sessions saved by the earlier 4.6 build kept screen_name; they keep the session and picture, not that name.
 const legacy = { userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', loggedInAt: NOW };
 assert.deepEqual(publicAccount(legacy, NOW), { loggedIn: true, nickname: '', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', avatarData: '' });
@@ -123,9 +123,9 @@ assert.equal(sessionStatus({ userId: '42', loggedInAt: NOW }, NOW + SESSION_MS).
 assert.equal(sessionStatus({ userId: '42', loggedInAt: NOW + 10 * 60 * 1000 }, NOW).loggedIn, false);
 assert.equal(sessionStatus({ userId: '42', loggedInAt: NOW + 60 * 1000 }, NOW).loggedIn, true);
 assert.equal(publicAccount(kept.record, NOW).userId, undefined);
-assert.equal(accountLabel({ loggedIn: false }), '尚未登录');
-assert.equal(accountLabel({ loggedIn: true, nickname: '' }), '已登录');
-assert.equal(accountActionLabel({ loggedIn: true }), '帐号登出');
+assert.equal(accountLabel({ loggedIn: false }), "尚未登入");
+assert.equal(accountLabel({ loggedIn: true, nickname: '' }), "已登入");
+assert.equal(accountActionLabel({ loggedIn: true }), "帳號登出");
 
 const calls = [];
 assert.equal((await sendLoginCode({ countryCode: '+886', phone: '912345678' })).ok, false);

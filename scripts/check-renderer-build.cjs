@@ -15,7 +15,7 @@ assert.equal(result.status, 0, 'The installer page must build');
 
 const assets = path.join(root, 'dist-react', 'assets');
 const built = fs.readdirSync(assets).map(name => fs.readFileSync(path.join(assets, name), 'utf8')).join('\n');
-for (const needle of ['尚未登录', '红果立即登录', '帐号登出', '台湾', '中国', 'is-out']) {
+for (const needle of ["尚未登入", "紅果立即登入", "帳號登出", "臺灣", '中国', 'is-out']) {
   assert.ok(built.includes(needle), `installer page is missing ${needle}`);
 }
 const css = fs.readFileSync(path.join(root, 'src', 'index.css'), 'utf8');

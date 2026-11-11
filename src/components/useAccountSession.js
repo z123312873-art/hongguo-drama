@@ -78,11 +78,11 @@ export default function useAccountSession() {
     draftRef.current = snapshot;
     setDraft(snapshot);
     if (!snapshot.busy) return;
-    let result = { ok: false, error: '验证码暂时无法发送，请稍后再试' };
+    let result = { ok: false, error: '驗證碼暫時無法傳送，請稍後再試' };
     try {
       result = await window.electronAPI.accountSendCode({ countryCode: snapshot.countryCode, phone: snapshot.phone });
     } catch {
-      result = { ok: false, error: '验证码暂时无法发送，请稍后再试' };
+      result = { ok: false, error: '驗證碼暫時無法傳送，請稍後再試' };
     }
     setDraft(current => {
       const next = reduceLogin(current, { type: 'sent', result });
@@ -96,7 +96,7 @@ export default function useAccountSession() {
     draftRef.current = snapshot;
     setDraft(snapshot);
     if (!snapshot.busy) return;
-    let result = { ok: false, error: '登录没有完成，请重试' };
+    let result = { ok: false, error: '登入沒有完成，請重試' };
     try {
       result = await window.electronAPI.accountLogin({
         countryCode: snapshot.countryCode,
@@ -104,7 +104,7 @@ export default function useAccountSession() {
         code: snapshot.code,
       });
     } catch {
-      result = { ok: false, error: '登录没有完成，请重试' };
+      result = { ok: false, error: '登入沒有完成，請重試' };
     }
     setDraft(current => {
       const next = reduceLogin(current, { type: 'finished', result });

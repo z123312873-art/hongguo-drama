@@ -4073,7 +4073,7 @@ ipcMain.handle('account-status', async () => {
 
 ipcMain.handle('account-send-code', async (_event, input) => {
   try { return await (await accountHandlers()).sendCode(input); }
-  catch { return { ok: false, error: '验证码暂时无法发送，请稍后再试' }; }
+  catch { return { ok: false, error: '驗證碼暫時無法傳送，請稍後再試' }; }
 });
 
 ipcMain.handle('account-login', async (_event, input) => {
@@ -4086,7 +4086,7 @@ ipcMain.handle('account-login', async (_event, input) => {
     }
     return result;
   }
-  catch { return { ok: false, error: '登录没有完成，请重试' }; }
+  catch { return { ok: false, error: '登入沒有完成，請重試' }; }
 });
 
 ipcMain.handle('account-refresh', async () => {

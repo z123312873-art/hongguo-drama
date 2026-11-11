@@ -2,8 +2,8 @@
 
 const { acceptLogin, httpsAvatar, mergeProfile, preparePhone, publicAccount, retryDelay, sessionStatus } = require('./account-profile');
 
-const CODE_UNAVAILABLE = '验证码暂时无法发送，请稍后再试';
-const LOGIN_INCOMPLETE = '登录没有完成，请重试';
+const CODE_UNAVAILABLE = '驗證碼暫時無法傳送，請稍後再試';
+const LOGIN_INCOMPLETE = '登入沒有完成，請重試';
 
 async function sendLoginCode(input, transport) {
   const phone = preparePhone(input?.countryCode, input?.phone);
@@ -23,7 +23,7 @@ async function finishLogin(input, transport, now) {
   const phone = preparePhone(input?.countryCode, input?.phone);
   if (!phone.ok) return phone;
   const code = String(input?.code ?? '');
-  if (!/^[0-9]{4,8}$/.test(code)) return { ok: false, error: '请输入 4 到 8 位验证码' };
+  if (!/^[0-9]{4,8}$/.test(code)) return { ok: false, error: '請輸入 4 到 8 位驗證碼' };
   if (typeof transport !== 'function') return { ok: false, error: LOGIN_INCOMPLETE };
   let result;
   try {

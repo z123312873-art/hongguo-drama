@@ -6,8 +6,8 @@ const { avatarCandidates } = require('./account-avatar');
 const { signFull, signInternational, encodeQuery } = require('./account-sign');
 
 const HOST = 'https://api5-normal-lq.fqnovel.com';
-const UNAVAILABLE = '验证码暂时无法发送，请稍后再试';
-const INCOMPLETE = '登录没有完成，请重试';
+const UNAVAILABLE = '驗證碼暫時無法傳送，請稍後再試';
+const INCOMPLETE = '登入沒有完成，請重試';
 const PROFILE_TIMEOUT_MS = 8000;
 
 function xorHex(value) {

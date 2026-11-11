@@ -1,20 +1,20 @@
 'use strict';
 
 const ACCOUNT_REGIONS = [
-  { code: '+886', name: '台湾', min: 9, max: 10 },
-  { code: '+86', name: '大陆', min: 11, max: 11 },
+  { code: '+886', name: '臺灣', min: 9, max: 10 },
+  { code: '+86', name: '大陸', min: 11, max: 11 },
   { code: '+852', name: '香港', min: 8, max: 8 },
-  { code: '+853', name: '澳门', min: 8, max: 8 },
-  { code: '+60', name: '马来西亚', min: 9, max: 10 },
+  { code: '+853', name: '澳門', min: 8, max: 8 },
+  { code: '+60', name: '馬來西亞', min: 9, max: 10 },
   { code: '+65', name: '新加坡', min: 8, max: 8 },
-  { code: '+62', name: '印度尼西亚', min: 10, max: 13 },
-  { code: '+95', name: '缅甸', min: 9, max: 10 },
-  { code: '+63', name: '菲律宾', min: 7, max: 10 },
+  { code: '+62', name: '印度尼西亞', min: 10, max: 13 },
+  { code: '+95', name: '緬甸', min: 9, max: 10 },
+  { code: '+63', name: '菲律賓', min: 7, max: 10 },
   { code: '+84', name: '越南', min: 9, max: 10 },
   { code: '+855', name: '柬埔寨', min: 8, max: 9 },
   { code: '+81', name: '日本', min: 9, max: 11 },
-  { code: '+82', name: '韩国', min: 8, max: 11 },
-  { code: '+971', name: '阿联酋', min: 9, max: 9 },
+  { code: '+82', name: '韓國', min: 8, max: 11 },
+  { code: '+971', name: '阿聯酋', min: 9, max: 9 },
 ];
 
 const DEFAULT_REGION = '+886';
@@ -54,13 +54,13 @@ function wirePhone(countryCode, phone) {
 
 function preparePhone(countryCode, value) {
   const region = regionByCode(countryCode);
-  if (!region) return { ok: false, error: '请选择国家或地区' };
+  if (!region) return { ok: false, error: '請選擇國家或地區' };
   const phone = String(value ?? '').replace(/\D/g, '');
-  if (!phone) return { ok: false, error: '请输入手机号' };
-  if (phone.length < region.min || phone.length > region.max) return { ok: false, error: '手机号位数不正确' };
+  if (!phone) return { ok: false, error: '請輸入手機號碼' };
+  if (phone.length < region.min || phone.length > region.max) return { ok: false, error: '手機號碼位數不正確' };
   const calling = region.code.slice(1);
-  if (calling.length + phone.length > 15) return { ok: false, error: '手机号位数不正确' };
-  if (region.code === '+86' && !/^1[3-9]\d{9}$/.test(phone)) return { ok: false, error: '请检查手机号' };
+  if (calling.length + phone.length > 15) return { ok: false, error: '手機號碼位數不正確' };
+  if (region.code === '+86' && !/^1[3-9]\d{9}$/.test(phone)) return { ok: false, error: '請檢查手機號碼' };
   return { ok: true, countryCode: region.code, phone };
 }
 
@@ -119,7 +119,7 @@ function sessionStatus(record, now) {
 
 function acceptLogin(payload, now) {
   const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
-  if (!userId || userId === '0') return { ok: false, error: '登录没有完成，请重试' };
+  if (!userId || userId === '0') return { ok: false, error: '登入沒有完成，請重試' };
   const fromProfile = payload?.profileFrom === PROFILE_FROM;
   return {
     ok: true,
@@ -183,12 +183,12 @@ function avatarPicture(status, failed) {
 }
 
 function accountLabel(status) {
-  if (!status?.loggedIn) return '尚未登录';
-  return status.nickname || '已登录';
+  if (!status?.loggedIn) return '尚未登入';
+  return status.nickname || '已登入';
 }
 
 function accountActionLabel(status) {
-  return status?.loggedIn ? '帐号登出' : '红果立即登录';
+  return status?.loggedIn ? '帳號登出' : '紅果立即登入';
 }
 
 function initialLoginDraft() {
@@ -200,7 +200,7 @@ function reduceLogin(state, action) {
   switch (action?.type) {
     case 'set-country': {
       const region = regionByCode(action.countryCode);
-      if (!region) return { ...current, error: '请选择国家或地区' };
+      if (!region) return { ...current, error: '請選擇國家或地區' };
       return {
         ...current,
         countryCode: region.code,
@@ -224,16 +224,16 @@ function reduceLogin(state, action) {
     }
     case 'sent': {
       const result = action.result || {};
-      if (!result.ok) return { ...current, busy: false, error: result.error || '验证码暂时无法发送，请稍后再试', retryAfter: result.retryAfter === undefined ? current.retryAfter : retryDelay(result.retryAfter) };
+      if (!result.ok) return { ...current, busy: false, error: result.error || '驗證碼暫時無法傳送，請稍後再試', retryAfter: result.retryAfter === undefined ? current.retryAfter : retryDelay(result.retryAfter) };
       return { ...current, step: 'code', code: '', error: '', busy: false, retryAfter: retryDelay(result.retryAfter) };
     }
     case 'submit': {
       if (current.busy || current.step !== 'code') return current;
-      if (!normalizeCode(current.code).ready) return { ...current, error: '请输入 4 到 8 位验证码' };
+      if (!normalizeCode(current.code).ready) return { ...current, error: '請輸入 4 到 8 位驗證碼' };
       return { ...current, error: '', busy: true };
     }
     case 'finished':
-      if (!action.result?.ok) return { ...current, busy: false, error: action.result?.error || '登录没有完成，请重试' };
+      if (!action.result?.ok) return { ...current, busy: false, error: action.result?.error || '登入沒有完成，請重試' };
       return initialLoginDraft();
     case 'change-number':
       return { ...current, step: 'phone', code: '', error: '', retryAfter: 0, busy: false };
