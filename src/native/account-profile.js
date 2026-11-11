@@ -70,6 +70,7 @@ function normalizeCode(value) {
 }
 
 function retryDelay(value) {
+  if (!['number', 'string'].includes(typeof value) || typeof value === 'string' && !value.trim()) return 60;
   if (value === 0) return 0;
   const number = Number(value);
   if (!Number.isInteger(number) || number < 0 || number > 3600) return 60;
@@ -216,14 +217,14 @@ function reduceLogin(state, action) {
       return { ...current, code: normalizeCode(action.code).text, error: '' };
     case 'send': {
       if (current.busy) return current;
-      if (current.step === 'code' && current.retryAfter > 0) return current;
+      if (current.retryAfter > 0) return current;
       const phone = preparePhone(current.countryCode, current.phone);
       if (!phone.ok) return { ...current, error: phone.error, busy: false };
       return { ...current, error: '', busy: true };
     }
     case 'sent': {
       const result = action.result || {};
-      if (!result.ok) return { ...current, busy: false, error: result.error || '验证码暂时无法发送，请稍后再试' };
+      if (!result.ok) return { ...current, busy: false, error: result.error || '验证码暂时无法发送，请稍后再试', retryAfter: result.retryAfter === undefined ? current.retryAfter : retryDelay(result.retryAfter) };
       return { ...current, step: 'code', code: '', error: '', busy: false, retryAfter: retryDelay(result.retryAfter) };
     }
     case 'submit': {

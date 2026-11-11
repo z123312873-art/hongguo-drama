@@ -15,7 +15,7 @@ async function sendLoginCode(input, transport) {
   } catch {
     return { ok: false, error: CODE_UNAVAILABLE };
   }
-  if (!result?.ok) return { ok: false, error: typeof result?.error === 'string' && result.error ? result.error : CODE_UNAVAILABLE };
+  if (!result?.ok) return { ok: false, error: typeof result?.error === 'string' && result.error ? result.error : CODE_UNAVAILABLE, ...(result?.retryAfter !== undefined ? { retryAfter: retryDelay(result.retryAfter) } : {}) };
   return { ok: true, retryAfter: retryDelay(result.retryAfter) };
 }
 
