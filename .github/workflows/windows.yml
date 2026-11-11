@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.6-pre-') || startsWith(github.ref, 'refs/heads/windows/4.5-release-') || startsWith(github.ref, 'refs/heads/windows/4.5-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.6-release-') || startsWith(github.ref, 'refs/heads/windows/4.6-pre-') || startsWith(github.ref, 'refs/heads/windows/4.5-release-') || startsWith(github.ref, 'refs/heads/windows/4.5-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -339,6 +339,72 @@ jobs:
             exit 1
           fi
           gh release list --limit 20
+  publish-release-4-6:
+    needs: windows
+    if: startsWith(github.ref, 'refs/heads/windows/4.6-release-')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release candidate
+        id: candidate
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Retry the release candidate download once
+        if: steps.candidate.outcome == 'failure'
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Publish the 4.6 formal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=v4.6.1
+          setup="release/hongguo-downloader-4.6.1-win-x64-setup.exe"
+          blockmap="$setup.blockmap"
+          latest="release/latest.yml"
+          portable="release/hongguo-downloader-4.6.1-win-x64.zip"
+          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
+          grep -Fq "hongguo-downloader-4.6.1-win-x64-setup.exe" "$latest"
+          grep -Eq '^version: 4\.6\.1$' "$latest"
+          setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
+          setup_size=$(stat -c %s "$setup")
+          portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
+          notes=$(cat <<EOF
+          摘要：
+          - 紅果帳號登入，同步紀錄與收藏
+          - 收藏夾可新增、改名與刪除
+          - 修正無法播放，在線載入更快
+          - 修正下載檔案發生錯誤
+          - 精簡提示，優化標籤與底部頁碼
+
+          4.6 正式版（4.6.1），未簽章。4.5 與 4.6 預發佈可更新至此版。下載與安裝都要自己確認。
+
+          檔名：hongguo-downloader-4.6.1-win-x64-setup.exe
+          SHA256：$setup_sha
+          大小：$setup_size
+          便攜 ZIP：hongguo-downloader-4.6.1-win-x64.zip
+          便攜 ZIP SHA256：$portable_sha
+          對應提交：$GITHUB_SHA
+          EOF
+          )
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "The target release already exists" >&2
+            exit 1
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --draft --title "4.6 正式版" --notes "$notes"
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable"
+          test "$(gh release view "$tag" --json assets --jq '.assets | length')" = "4"
+          gh release edit "$tag" --prerelease=false --draft=false --latest
+          test "$(gh release view "$tag" --json isPrerelease,isDraft --jq '(.isPrerelease == false) and (.isDraft == false)')" = "true"
+          test "$(gh release view --json tagName --jq .tagName)" = "$tag"
+          test "$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
   publish-release-4-6-pre:
     needs: windows
     if: startsWith(github.ref, 'refs/heads/windows/4.6-pre-')

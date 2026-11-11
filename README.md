@@ -7,7 +7,7 @@
 <p align="center">在電腦上找劇、接著看、下載與合併。介面預設繁體，Windows 安裝檔由這個倉庫自己發行。</p>
 
 <p align="center">
-  <img alt="目前正式版 4.5" src="https://img.shields.io/badge/正式版-4.5-8b3a3a?style=flat-square">
+  <img alt="目前正式版 4.6" src="https://img.shields.io/badge/正式版-4.6-8b3a3a?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -26,23 +26,23 @@
 
 只發行 **Windows x64** 安裝檔。媒體工具已內建，不必另外安裝 Node.js 或 FFmpeg。
 
-**[下載 4.5 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.5/hongguo-downloader-4.5-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.5) 附 SHA256 與大小。
+**[下載 4.6 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.6.1/hongguo-downloader-4.6.1-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.6.1) 附 SHA256 與大小。
 
-也可使用 [4.5 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.5/hongguo-downloader-4.5-win-x64.zip)。
+也可使用 [4.6 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.6.1/hongguo-downloader-4.6.1-win-x64.zip)。
 
 - 依畫面安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
-- 安裝檔未簽章。請從 [4.5 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.5) 下載，並對照該頁的 SHA256。
+- 安裝檔未簽章。請從 [4.6 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.6.1) 下載，並對照該頁的 SHA256。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
 - 桌面與開始功能表的捷徑名稱是「紅果短劇」。
-- 已安裝的 4.3 會在程式裡看到更新摘要。下載與安裝都要自己確認。
+- 已安裝的 4.5 與 4.6 預發佈會在程式裡看到更新摘要。下載與安裝都要自己確認。
 
 自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
 
 ## 這個版本
 
-上面的下載仍是已發布的 4.5 正式版。這一輪是 4.6 預發佈，詳見 [4.6 更新說明](docs/release-4.6.md)。預發佈安裝檔在 [installer-4.6-traditional-pre](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.6-traditional-pre)，已安裝的 4.5 不會被導去這一版。已發布說明留在 [4.5 更新說明](docs/release-4.5.md)。
+目前為 4.6 正式版，內部版本為 4.6.1，詳見 [4.6 更新說明](docs/release-4.6.md)。4.5 與 4.6 預發佈可更新至此版；舊版說明留在 [4.5 更新說明](docs/release-4.5.md)。
 
-4.6 預發佈：
+4.6 正式版：
 
 - 紅果帳號登入，同步紀錄與收藏
 - 收藏夾可新增、改名與刪除
@@ -109,7 +109,7 @@ npm test
 npm run dev
 ```
 
-Windows 安裝檔：`npm run build:installer`。步驟見 [發行說明](docs/RELEASING.md)。自行建置不會自動簽章。已發行的安裝檔以 [4.5 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.5) 為準。
+Windows 安裝檔：`npm run build:installer`。步驟見 [發行說明](docs/RELEASING.md)。自行建置不會自動簽章。已發行的安裝檔以 [4.6 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.6.1) 為準。
 
 ## 授權
 

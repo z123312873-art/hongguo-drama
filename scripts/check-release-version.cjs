@@ -3,7 +3,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { availableRelease, releaseSummary } = require('../src/native/app-update');
 
-const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6'];
+const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1'];
 let checks = 0;
 for (let current = 0; current < ordered.length; current++) {
   for (let next = 0; next < ordered.length; next++) {
@@ -26,8 +26,8 @@ const pkg = require('../package.json');
 const lock = require('../package-lock.json');
 assert.equal(lock.version, pkg.version, 'Lockfile version must match the release');
 assert.equal(lock.packages[''].version, pkg.version, 'Lockfile root package must match the release');
-assert.match(pkg.version, /^\d+\.\d+\.0$/, 'Release versions use two public components and an internal zero patch');
-const publicVersion = pkg.version.replace(/\.0$/, '');
+assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'Release versions support nonzero patch upgrades');
+const publicVersion = pkg.version.replace(/^(\d+\.\d+)\.0$/, '$1');
 assert.equal(availableRelease({ tag_name: 'v2.0' }, '1.80.0').version, '2.0');
 assert.equal(availableRelease({ tag_name: 'v2.0' }, '2.0.0'), null);
 assert.equal(availableRelease({ tag_name: 'v3.1' }, '3.0.0').version, '3.1');
@@ -101,7 +101,7 @@ assert(formal.highlights.slice(0, 4).every(item => Array.from(item).length <= 24
 assert(formal.highlights.every(item => !/sha-?256|https?:/i.test(item)), 'Checksums and links never become summary lines');
 assert(!formal.moreCount, 'The formal notes fit in the update window');
 for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) {
-  assert(artifact.includes(`-${publicVersion}-`), 'Download filenames must contain the two-part release version');
+  assert(artifact.includes(`-${publicVersion}-`), 'Download filenames must contain the public release version');
   assert(!artifact.includes('${version}'), 'Raw internal versions must not leak into download filenames');
 }
 function bulletsAfter(text, marker) {
@@ -118,7 +118,7 @@ function bulletsAfter(text, marker) {
   return bullets;
 }
 const noteBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.6.md'), 'utf8'), '## 更新摘要');
-const readmeBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), '4.6 預發佈：');
+const readmeBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), '4.6 正式版：');
 const preJob = workflow.slice(workflow.indexOf('publish-release-4-6-pre:'), workflow.indexOf('publish-release:'));
 const preHeredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(preJob);
 assert(preHeredoc, 'The 4.6 pre-release job must build its notes from a heredoc');
@@ -135,3 +135,16 @@ assert.deepEqual(noteBullets, [
 ], 'The 4.6 summary is exactly these five lines, in this order');
 assert(noteBullets.every(item => Array.from(item).length <= 15), 'Each 4.6 summary line fits the large-font update window');
 console.log(`PASS ${checks} version pairs, equivalent versions, invalid versions and unpublished releases`);
+
+for (const current of ['4.5.0', '4.6.0']) assert.equal(availableRelease({ tag_name: 'v4.6.1' }, current).version, '4.6.1');
+assert.equal(availableRelease({ tag_name: 'v4.6.1' }, '4.6.1'), null);
+const officialJob = workflow.slice(workflow.indexOf('  publish-release-4-6:'), workflow.indexOf('  publish-release-4-6-pre:'));
+assert.match(officialJob, /tag=v4\.6\.1/);
+assert.match(officialJob, /--title "4\.6 正式版"/);
+assert.match(officialJob, /--prerelease=false --draft=false --latest/);
+assert.match(officialJob, /downloader-4\.6\.1-win-x64-setup\.exe/);
+assert.ok(officialJob.includes("'^version: 4\\.6\\.1$'"));
+assert.doesNotMatch(officialJob, /release delete|delete-asset|cleanup-tag/);
+const officialHeredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(officialJob);
+assert(officialHeredoc);
+assert.deepEqual(releaseSummary(officialHeredoc[1]).items, noteBullets);

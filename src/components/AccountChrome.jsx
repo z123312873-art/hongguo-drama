@@ -78,7 +78,7 @@ export function AccountDialog({ draft, onClose, onCountry, onPhone, onCode, onSe
             <label className="account-field"><span>驗證碼</span>
               <input className="input-field" aria-label="驗證碼" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={8} aria-describedby="account-code-help" placeholder="4～8 位驗證碼" value={draft.code} onChange={event => onCode(event.target.value)} onKeyDown={onCodeKey} />
             </label>
-            <p id="account-code-help" className="page-description">請輸入簡訊中的完整驗證碼，支援 4～8 位數字；輸入後按「登入」。未收到簡訊時，請等候倒數結束再重試。</p>
+            <p id="account-code-help" className="account-code-help">收到驗證碼後，即可登入。</p>
             <button type="button" className="btn btn-primary" disabled={draft.busy} onClick={onSubmit}>{draft.busy ? '登入中…' : '登入'}</button>
             <div className="account-dialog-row">
               <button type="button" className="btn btn-outline" disabled={draft.busy || draft.retryAfter > 0} onClick={onSend}>{draft.retryAfter > 0 ? `重新傳送（${draft.retryAfter} 秒）` : '重新傳送'}</button>
