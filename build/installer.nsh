@@ -1,6 +1,3 @@
-# Default install directory for a fresh setup. An upgrade keeps the directory
-# already recorded for this app, so the previous copy is replaced in place.
-
 !macro preInit
   !ifndef BUILD_UNINSTALLER
     ${If} ${UAC_IsAdmin}
@@ -19,8 +16,6 @@
   !endif
 !macroend
 
-# The assisted installer appends the app folder when the chosen path does not
-# already contain it. C:\hongguo is the requested root, so keep that path as entered.
 !macro customPageAfterChangeDir
   !undef MUI_PAGE_CUSTOMFUNCTION_PRE
   !define MUI_PAGE_CUSTOMFUNCTION_PRE KeepInstallDirectory

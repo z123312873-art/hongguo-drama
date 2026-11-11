@@ -1175,9 +1175,13 @@ async function mount(file, api, props = {}) {
     const code = ui.find(n => n.props['aria-label'] === '验证码');
     code.props.onChange({ target: { value: '0740' } }); ui.render();
     assert.equal(calls.filter(call => call[0] === 'login').length, 0, 'four digits do not submit by themselves');
+    assert.equal(code.props.maxLength, 8);
+    assert.equal(code.props['aria-describedby'], 'account-code-help');
+    ui.find(n => n.props['aria-label'] === '验证码').props.onChange({ target: { value: '074012' } }); ui.render();
+    assert.equal(calls.filter(call => call[0] === 'login').length, 0, 'six digits also wait for explicit submission');
     ui.find(n => n.props['aria-label'] === '验证码').props.onKeyDown({ key: 'Enter', preventDefault() {} });
     await ui.flush();
-    assert.equal(calls.filter(call => call[0] === 'login')[0][1].code, '0740');
+    assert.equal(calls.filter(call => call[0] === 'login')[0][1].code, '074012');
     assert.ok(ui.button('帐号登出'));
     assert.ok(ui.text().includes('测试昵称'));
     assert.ok(ui.nodes().some(n => n.props.className === 'account-strip'), 'a signed-in account keeps its row');
@@ -1190,6 +1194,31 @@ async function mount(file, api, props = {}) {
     assert.ok(ui.button('红果立即登录'));
     assert.ok(ui.text().includes('尚未登录'));
     assert.ok(ui.nodes().some(n => n.props.className === 'account-strip is-out'));
+    ui.unmount();
+  });
+
+  await test('failed code requests retain cooldown on the phone step without automatic retry', async () => {
+    let sends = 0;
+    let resolveSend;
+    const ui = await mount('../App', { getAppInfo: async () => ({ version: '4.6.0' }), getWindowLayout: async () => 'landscape', accountStatus: async () => ({ loggedIn: false }), accountSendCode: () => { sends++; return new Promise(resolve => { resolveSend = resolve; }); } });
+    await ui.flush();
+    ui.button('红果立即登录').props.onClick(); ui.render();
+    ui.find(n => n.props['aria-label'] === '手机号').props.onChange({ target: { value: '912345678' } }); ui.render();
+    const pending = ui.button('发送验证码').props.onClick(); ui.render();
+    ui.find(n => n.props['aria-label'] === '手机号').props.onKeyDown({ key: 'Enter', preventDefault() {} }); await ui.flush();
+    assert.equal(sends, 1, 'Enter cannot duplicate a pending send');
+    resolveSend({ ok: false, error: '請稍後再試', retryAfter: 2 }); await pending; await ui.flush();
+    assert.equal(ui.button('稍後再試').props.disabled, true);
+    assert.equal(ui.find(n => n.props['aria-label'] === '验证码'), undefined);
+    ui.find(n => n.props['aria-label'] === '手机号').props.onKeyDown({ key: 'Enter', preventDefault() {} }); await ui.flush();
+    assert.equal(sends, 1);
+    ui.advanceTimers(1000); await ui.flush();
+    ui.advanceTimers(1000); await ui.flush();
+    assert.equal(sends, 1);
+    assert.equal(ui.button('发送验证码').props.disabled, false);
+    const retried = ui.button('发送验证码').props.onClick(); await ui.flush();
+    assert.equal(sends, 2);
+    resolveSend({ ok: false, error: '請稍後再試', retryAfter: 2 }); await retried; await ui.flush();
     ui.unmount();
   });
 

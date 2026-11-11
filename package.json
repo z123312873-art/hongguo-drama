@@ -49,7 +49,8 @@
     "appId": "io.github.jackotom.hongguo-drama-mac",
     "productName": "红果短剧",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "main.js",
@@ -104,6 +105,7 @@
       "artifactName": "${productName}-4.6-便携版.${ext}"
     },
     "nsis": {
+      "include": "installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "selectPerMachineByDefault": true,

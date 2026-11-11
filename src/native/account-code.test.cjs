@@ -27,6 +27,45 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
 }
 
 (async () => {
+  const { finishLogin, sendLoginCode } = require('./account-session');
+  const { initialLoginDraft, reduceLogin, retryDelay } = require('./account-profile');
+  for (const code of ['0123', '01234', '012345', '0123456', '01234567']) {
+    const variable = client(() => ({ status: 200, text: '{"message":"error"}', headers: {} }));
+    let draft = { ...initialLoginDraft(), phone: '912345678', step: 'code' };
+    for (let length = 1; length <= code.length; length++) {
+      draft = reduceLogin(draft, { type: 'set-code', code: code.slice(0, length) });
+      assert.equal(draft.busy, false);
+    }
+    assert.equal(draft.code, code);
+    assert.equal(reduceLogin(draft, { type: 'submit' }).busy, true);
+    await finishLogin({ countryCode: '+886', phone: draft.phone, code: draft.code }, input => variable.api.login(input), Date.now());
+    assert.equal(variable.calls.length, 1);
+    assert.equal(new URLSearchParams(variable.calls[0].body).get('code'), xorHex(code));
+  }
+  for (const code of ['', '123', '123456789', '1234a6', '１２３４５６']) {
+    let called = false;
+    assert.equal((await finishLogin({ countryCode: '+886', phone: '912345678', code }, async () => { called = true; }, Date.now())).ok, false);
+    assert.equal(called, false);
+  }
+  for (const retry of [undefined, null, '', ' ', true, -1, 3601, NaN]) assert.equal(retryDelay(retry), 60);
+  for (const retry of [0, 30, 3600, '45']) assert.equal(retryDelay(retry), Number(retry));
+  const throttled = client(() => ({ status: 429, text: '', headers: {} }));
+  const rejected = await sendLoginCode({ countryCode: '+886', phone: '912345678', code: '012345' }, input => {
+    assert.deepEqual(Object.keys(input).sort(), ['countryCode', 'phone']);
+    return throttled.api.send(input);
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.retryAfter, 60);
+  let waiting = reduceLogin({ ...initialLoginDraft(), phone: '912345678' }, { type: 'sent', result: rejected });
+  assert.equal(waiting.step, 'phone');
+  assert.equal(waiting.retryAfter, 60);
+  assert.equal(reduceLogin(waiting, { type: 'send' }).busy, false);
+  for (let tick = 0; tick < 60; tick++) waiting = reduceLogin(waiting, { type: 'tick' });
+  assert.equal(reduceLogin(waiting, { type: 'send' }).busy, true);
+  const delayed = client(() => ({ status: 200, text: '{"message":"error","data":{"retry_time":120}}', headers: {} }));
+  assert.equal((await delayed.api.send({ countryCode: '+886', phone: '912345678' })).retryAfter, 120);
+  assert.equal(throttled.calls.length, 1);
+  console.log('PASS variable-length codes stay complete and preserve leading zeroes; failed sends retain bounded cooldown without automatic retries');
   const sent = client(() => ({
     status: 200,
     text: '{"message":"success","data":{"retry_time":60,"captcha":"","mobile_ticket":"ticket"}}',

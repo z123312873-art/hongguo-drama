@@ -73,6 +73,7 @@ export default function useAccountSession() {
   }, [open]);
 
   const send = async () => {
+    if (draftRef.current.busy) return;
     const snapshot = reduceLogin(draftRef.current, { type: 'send' });
     draftRef.current = snapshot;
     setDraft(snapshot);

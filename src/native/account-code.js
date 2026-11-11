@@ -1,7 +1,7 @@
 'use strict';
 
 const { HONGGUO_PROFILE, registerDevice } = require('./playback-device');
-const { cleanNickname, wirePhone } = require('./account-profile');
+const { cleanNickname, wirePhone, retryDelay } = require('./account-profile');
 const { avatarCandidates } = require('./account-avatar');
 const { signFull, signInternational, encodeQuery } = require('./account-sign');
 
@@ -284,9 +284,8 @@ function createCodeClient({
       if (typeof data.captcha === 'string' && data.captcha) return { ok: false, error: publicFailure(payload, UNAVAILABLE) };
       const code = errorCode(payload);
       const sent = payload.message === 'success' && (!code || code === '0');
-      if (!sent) return { ok: false, error: publicFailure(payload, UNAVAILABLE) };
-      const retry = Number(data.retry_time);
-      return { ok: true, retryAfter: Number.isInteger(retry) && retry >= 0 && retry <= 3600 ? retry : 60 };
+      if (!sent) return { ok: false, error: publicFailure(payload, UNAVAILABLE), ...(data.retry_time !== undefined ? { retryAfter: retryDelay(data.retry_time) } : {}) };
+      return { ok: true, retryAfter: retryDelay(data.retry_time) };
     },
     async login({ countryCode, phone, code } = {}) {
       generation++;

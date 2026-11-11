@@ -83,3 +83,6 @@ dist-local/
 HANDOFF.md
 
 .local/
+
+build/ffmpeg-essentials.zip
+build/_ffmpeg_tmp/
