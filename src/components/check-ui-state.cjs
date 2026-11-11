@@ -1,4 +1,4 @@
-// Run: node src/components/check-ui-state.cjs. No browser, network or media playback.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -576,7 +576,7 @@ async function mount(file, api, props = {}) {
     const ui = await mount('HongguoDownload', {});
     const searchResult = ui.find(n => n.props.onSelectSeries).props.onSelectSeries;
     ui.button('搜索剧集').props.onClick();
-    // React does not rerender when setTab receives the same value.
+
     searchResult(detail('A')); ui.render();
     assert.ok(ui.text().includes('《A》')); ui.unmount();
   });
@@ -1262,7 +1262,7 @@ async function mount(file, api, props = {}) {
     assert.equal(outName.props['data-script'], undefined, 'built-in labels follow the script switch');
     assert.ok(ui.nodes().some(n => n.props.className === 'account-strip is-out'));
 
-    // Profile still missing: the generic label stays, no loop of retries.
+
     refreshReply = { loggedIn: true, nickname: '', avatarUrl: '' };
     await signIn();
     assert.equal(refreshes, 2);

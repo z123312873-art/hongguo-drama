@@ -1,4 +1,4 @@
-// Signed-in watch history through main's IPC with a fake account server: no app data, network or keys.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -66,6 +66,7 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
   const offline = { search: async () => ({ success: true, results: [] }) };
   const overrides = { electron, './src/store': store, './src/native/account-code': { createCodeClient: () => fakeClient },
     './src/native/hongguo': { fetchEpisodeList: async id => { (cloud.catalogReads ||= []).push(id); if (cloud.availability === 'error') throw new Error('HTTP 500'); return cloud.availability === 'offline' ? { episodes: [] } : structuredClone(cloud.catalog || freshSeries.find(item => item.series_id === id) || freshSeries[0]); } }, './src/native/xifan': offline, './src/native/hema': offline };
+  overrides['./src/native/hongguo'].fetchSeriesMetadata = async id => ({ ...await overrides['./src/native/hongguo'].fetchEpisodeList(id), series_id: id });
   const context = vm.createContext({ Date: clock === null ? Date : class extends Date { static now() { return clock; } }, require: name => overrides[name] || req(name), __dirname: path.dirname(source), process, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController,
     setTimeout: (fn, ms) => { timers.push(fn); return timers.length; }, clearTimeout() {} });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
@@ -419,5 +420,32 @@ test('folder IPC verifies a new folder, forwards dynamic identity and disables m
       assert.equal(row.options.expectedUserId, U);
       assert.equal(row.options.retry, !row.apiPath.includes('/update/'));
     }
+  } finally { h.cleanup(); }
+});
+
+test('zero-episode favorites keep title and poster, and metadata failures never remove favorites', async () => {
+  const title = '尚未上線的短劇', cover = 'https://example.com/poster.jpg';
+  const h = load({ server: { favorites: [TWO], catalog: { series_id: TWO, series_title: title, cover, total: 0, episodes: [] } } });
+  try {
+    const first = await h.call('cloud-favorites');
+    assert.equal(first.rows.length, 1);
+    assert.equal(first.rows[0].title, title);
+    assert.equal(first.rows[0].cover, cover);
+    h.cloud.availability = 'error';
+    const second = await h.call('cloud-favorites');
+    assert.equal(second.rows[0].title, title);
+    assert.equal(second.rows[0].cover, cover);
+    assert.deepEqual(h.cloud.favorites, [TWO]);
+    assert.equal(h.cloud.requests.filter(request => request.apiPath === req('./src/native/cloud-favorites').UPDATE_PATH).length, 0);
+  } finally { h.cleanup(); }
+});
+
+test('missing metadata during an outage leaves every cloud favorite listed without any write', async () => {
+  const h = load({ server: { availability: 'error', favorites: [TWO, '7300000000000000099'] } });
+  try {
+    const result = await h.call('cloud-favorites');
+    assert.equal(result.rows.length, 2);
+    assert.equal(h.cloud.favorites.length, 2);
+    assert.equal(h.cloud.requests.filter(request => request.apiPath === req('./src/native/cloud-favorites').UPDATE_PATH).length, 0);
   } finally { h.cleanup(); }
 });

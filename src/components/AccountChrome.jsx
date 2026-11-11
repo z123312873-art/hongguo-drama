@@ -4,7 +4,7 @@ import { ACCOUNT_REGIONS, accountActionLabel, accountLabel, avatarPicture, regio
 
 function Avatar({ status, onClick }) {
   const label = status.loggedIn ? '帳號頭像' : '尚未登入';
-  // A picture that fails to load falls back to the default icon instead of a broken image.
+
   const [failed, setFailed] = useState([]);
   const picture = avatarPicture(status, failed);
   return (
@@ -18,7 +18,7 @@ function Avatar({ status, onClick }) {
 
 export function AccountStrip({ status, onAvatar }) {
   const name = accountLabel(status);
-  // A real nickname is shown exactly as set in the app; only the built-in labels follow the 繁/简 switch.
+
   const own = Boolean(status?.loggedIn && status.nickname);
   return (
     <div className={status?.loggedIn ? 'account-strip' : 'account-strip is-out'}>

@@ -1,5 +1,5 @@
-// The installer page is produced by Vite. Account helpers live in CommonJS so the
-// packaged main process can load them, and the page must still be able to import them.
+
+
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');

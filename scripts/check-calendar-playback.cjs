@@ -1,4 +1,4 @@
-// In-memory App -> real play-series IPC -> Player contract; no network or user files.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +9,7 @@ const createAppExtra = require('./app-view-shim.cjs');
 const { mount: mountPlayer } = require('./check-player-resume.cjs');
 const appSource = transformSync(fs.readFileSync(path.join(__dirname, '../src/App.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 const mainSource = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
-const playHandler = mainSource.slice(mainSource.indexOf("ipcMain.handle('play-series'"), mainSource.indexOf('// ===== 在线播放 ====='));
+const playHandler = mainSource.slice(mainSource.indexOf("ipcMain.handle('play-series'"), mainSource.indexOf('function playbackQuality('));
 assert.ok(playHandler.startsWith("ipcMain.handle('play-series'"), 'real playback IPC must be found');
 
 function fixture({ exists = true, dismissed = false, saveError = '', resolveError = '', playError = '', missingMessage = '', resolveGate } = {}) {

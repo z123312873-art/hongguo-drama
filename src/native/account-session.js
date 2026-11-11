@@ -37,7 +37,7 @@ async function finishLogin(input, transport, now) {
   return accepted;
 }
 
-// Downloads the first drawable picture; a failure leaves the address (or the default icon) in place.
+
 async function withPicture(target, candidates, avatarTransport) {
   if (typeof avatarTransport !== 'function' || !Array.isArray(candidates) || !candidates.length) return target;
   let picture = null;
@@ -63,8 +63,8 @@ function createAccountHandlers({ getAccount, saveAccount, now = () => Date.now()
       saveAccount(record);
       return { ok: true, status: sessionStatus(record, now()) };
     },
-    // Reads the app profile again with the session kept in memory. Without that session
-    // (for example after a restart) it leaves the saved name and picture as they are.
+
+
     refresh: async () => {
       const before = getAccount();
       if (!publicAccount(before, now()).loggedIn || typeof profileTransport !== 'function') return read();

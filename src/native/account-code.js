@@ -109,8 +109,8 @@ async function defaultGet(url, options) {
   return { status: response.status, text: typeof response.data === 'string' ? response.data : '', headers: response.headers || {} };
 }
 
-// The sign-in reply only carries the passport's default name and picture. The name and
-// picture people set in the app come from the reading profile, read with the same session.
+
+
 function readProfile(payload, userId = '') {
   if (!payload || typeof payload !== 'object') return null;
   if (payload.code !== undefined && String(payload.code) !== '0') return null;
@@ -118,7 +118,7 @@ function readProfile(payload, userId = '') {
   const owner = readId(data.user_id_str) || readId(data.user_id);
   if (userId && owner && owner !== userId) return null;
   const nickname = cleanNickname(data.user_name);
-  // A picture set in the app can sit in any of these fields, as a string or a url_list object.
+
   const pictures = avatarCandidates(data.avatar_url, data.expand_avatar_url, data.basic_info?.user_avatar,
     data.avatar_large, data.avatar_thumb, data.avatar_medium, data.user_avatar);
   const picture = pictures.map(avatarUrl).find(Boolean) || '';
@@ -185,7 +185,7 @@ function createCodeClient({
       Lc: '101',
     };
     if (method === 'POST') headers['Content-Type'] = contentType;
-    // Sign-in requests never carry an older session's token; account reads and writes do.
+
     if (!path.startsWith('/passport/mobile/') && token) headers['X-Tt-Token'] = token;
     if (cookies.size) headers.Cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
     const url = `${HOST}${path}?${signed.raw}`;
@@ -205,10 +205,10 @@ function createCodeClient({
       return null;
     }
   };
-  // Signed account request for the reading API. Resolves to the parsed body only when the
-  // server confirms it (code 0 and no nested error); anything else throws.
-  // Try the sign-in's own signature first; if the reply is refused, try the other one once and keep
-  // whichever worked for later calls.
+
+
+
+
   let readingSign = '';
   let generation = 0;
   const requestOnce = async (signAs, method, path, query, body, scope) => {
@@ -249,7 +249,7 @@ function createCodeClient({
     request,
     signedIn: () => Boolean(signedIn() && signedRegion && signedUser),
     user: () => signedUser,
-    // What has to be kept (encrypted) so the session still works after a restart.
+
     snapshot() {
       if (!signedIn() || !signedRegion || !signedUser) return null;
       return { userId: signedUser, region: signedRegion, token, cookies: Object.fromEntries(cookies) };
@@ -309,7 +309,7 @@ function createCodeClient({
       if (headerToken) token = headerToken;
       signedRegion = countryCode;
       signedUser = userId;
-      // screen_name is the passport default (用户 plus digits), not the name set in the app.
+
       const read = await profile();
       return {
         ok: true,

@@ -77,18 +77,18 @@ function retryDelay(value) {
   return number;
 }
 
-// Names come from the account, so drop invisible and control characters, then cap by characters, not UTF-16 units.
+
 function cleanNickname(value) {
   if (typeof value !== 'string') return '';
   return [...value.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '').trim()]
     .slice(0, NICKNAME_LIMIT).join('').trim();
 }
 
-// Only names read from the app profile are shown. Sessions saved before that kept the
-// passport default name, so they show the generic signed-in label until the next sign-in.
+
+
 const PROFILE_FROM = 'user-info';
 
-// A picture the main process already downloaded and checked; it still draws after a signed address expires.
+
 const AVATAR_DATA = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[A-Za-z0-9+/]+={0,2}$/;
 const AVATAR_DATA_LIMIT = 700 * 1024;
 function avatarData(value) {
@@ -134,8 +134,8 @@ function acceptLogin(payload, now) {
   };
 }
 
-// A later profile read only updates the same, still-valid account; a sign-out or another sign-in in between wins.
-// Signed picture addresses change on every read; the image itself is the path before the size template.
+
+
 function pictureKey(url) {
   try {
     const path = new URL(url).pathname;
@@ -154,8 +154,8 @@ function mergeProfile(record, userId, profile, now) {
     ...record,
     nickname: nickname || (record.profileFrom === PROFILE_FROM ? cleanNickname(record.nickname) : ''),
     avatarUrl: avatarUrl || httpsAvatar(record.avatarUrl),
-    // Without a newly downloaded picture the older one stays only while it is the same image
-    // (a re-signed address of the same picture); a different picture must not show the old one.
+
+
     avatarData: picture || (!avatarUrl || pictureKey(avatarUrl) === pictureKey(record.avatarUrl) ? avatarData(record.avatarData) : ''),
     profileFrom: nickname || record.profileFrom === PROFILE_FROM ? PROFILE_FROM : '',
   };
@@ -173,9 +173,9 @@ function normalizeStatus(value) {
   return { loggedIn: true, nickname, avatarUrl: httpsAvatar(value.avatarUrl), avatarData: avatarData(value.avatarData) };
 }
 
-// The picture to draw, or '' for the default icon: signed out, no picture, or this picture failed to load.
-// The picture to draw, or '' for the default icon. The downloaded copy comes first, then the address;
-// anything in failed (one address or a list) already failed to load in this window.
+
+
+
 function avatarPicture(status, failed) {
   if (!status?.loggedIn) return '';
   const skip = new Set((Array.isArray(failed) ? failed : [failed]).filter(Boolean));

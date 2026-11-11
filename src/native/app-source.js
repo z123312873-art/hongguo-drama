@@ -1,11 +1,12 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Signing and Spade algorithms adapted from woshishiq1/drpys
-// commit 22261adfa31435e3b3ef5a730b8a2a75bcaf1715, spider/js/红果果[短].js,
-// via N3urda/hongguoTV eea73e6a45569a2cbbb9440f7cd5290c459b0b70.
-// Changes: per-request synthetic IDs; no captured device identity; pure JS SM3;
-// bounded HTTPS transport; exact episode matching; supported codec selection.
-// Crypto tables and SDK protocol constants below are not user credentials.
+
+
+
+
+
+
+
 const crypto = require('node:crypto');
+const playerSigning = require('./player-signing');
 const { takePlaybackDevice, armPlaybackPool } = require('./playback-device');
 const sm3 = require('./sm3');
 const { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality } = require('./download-quality');
@@ -16,9 +17,9 @@ const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomByte
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
 const PROCESS_STARTED = Date.now();
 const VIDEO_PATH = '/novel/player/multi_video_model/v1/';
-// Edge hosts that answer the same signed request. The one that answered last is asked first.
+
 const VIDEO_HOSTS = Object.freeze(['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-hl.fqnovel.com']);
-const videoApi = host => `https://${host || VIDEO_HOSTS[0]}${VIDEO_PATH}`;
+const videoApi = (host, apiPath = VIDEO_PATH) => `https://${host || VIDEO_HOSTS[0]}${apiPath}`;
 let preferredHost = 0;
 const VIDEO_UA = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const DEVICE = {
@@ -32,7 +33,7 @@ const DEVICE = {
 function str(value, fallback = '') { return String(value == null ? fallback : value).trim(); }
 function cleanUrl(value) { return str(value).replace(/\\\//g, '/').replace(/\\u0026/g, '&').replace(/&amp;/g, '&'); }
 function jsonBody(value) { try { return JSON.parse(value); } catch { return null; } }
-// 签名对 query 字节级敏感：python urllib.parse.quote 的 ['!'*'()'] 兜底编码行为须保持一致
+
 function pythonUrlEncode(values) {
     return Object.entries(values).map(([key, value]) => {
         const encode = (item) => encodeURIComponent(String(item == null ? '' : item))
@@ -133,14 +134,24 @@ function helios(khronos, aid = '8662') {
 }
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
-function signedVideoRequest(payload, identity, host) {
-    // A registered device is signed with its own ids. Tests and the last-resort path keep a synthetic identity.
+function signedVideoRequest(payload, identity, host, apiPath = VIDEO_PATH) {
+
     const registered = identity && [identity.device_id, identity.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value));
     const device = { ...DEVICE, iid: registered ? identity.iid : localId(), device_id: registered ? identity.device_id : localId(),
         ...(registered && identity.cdid ? { cdid: identity.cdid } : {}) };
+    if (apiPath === VIDEO_PATH) {
+        const ticket = Date.now(), body = Buffer.from(payload);
+        const query = pythonUrlEncode({ ...device, ts: String(Math.floor(ticket / 1000)), _rticket: String(ticket) });
+        const url = `${videoApi(host)}?${query}`;
+        return { url, body, headers: playbackHeaders(url, body, {
+            'User-Agent': VIDEO_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf',
+            'Content-Type': 'application/json; charset=UTF-8', 'x-xs-from-web': '0', 'x-tt-request-tag': 't=0;n=0',
+            'sdk-version': '2', 'passport-sdk-version': '50561', 'x-vc-bdturing-sdk-version': '3.7.2.cn',
+        }) };
+    }
     const khronos = Math.floor(Date.now() / 1000); const body = Buffer.from(payload); const ticketBase = Date.now(); let requestTicket = ticketBase; let query = ''; let url = '';
-    // branch 1 的签名变体服务端不认：抖动 _rticket 找一个可用的 branch（最多试 32 秒偏移）
-    for (let offset = 0; offset < 32; offset += 1) { requestTicket = ticketBase + offset; const values = { ...device, ts: String(khronos), _rticket: String(requestTicket) }; query = pythonUrlEncode(values); url = `${videoApi(host)}?${query}`; if (branchOf(url, body, khronos) !== 1) break; }
+
+    for (let offset = 0; offset < 32; offset += 1) { requestTicket = ticketBase + offset; const values = { ...device, ts: String(khronos), _rticket: String(requestTicket) }; query = pythonUrlEncode(values); url = `${videoApi(host, apiPath)}?${query}`; if (branchOf(url, body, khronos) !== 1) break; }
     const random = Math.floor(Math.random() * 65536); const headers = {
         'User-Agent': VIDEO_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf', 'Content-Type': 'application/json; charset=UTF-8',
         'x-xs-from-web': '0', 'x-ss-req-ticket': String(requestTicket), 'x-tt-request-tag': 't=0;n=0', 'sdk-version': '2', 'passport-sdk-version': '50561',
@@ -149,6 +160,10 @@ function signedVideoRequest(payload, identity, host) {
         'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, device), 'x-tt-dt': '',
     };
     return { url, headers, body };
+}
+function playbackHeaders(url, body, headers) {
+    const omitted = new Set(['x-gorgon', 'x-helios', 'x-medusa', 'x-argus', 'x-ladon', 'x-khronos', 'x-ss-stub', 'x-ss-req-ticket', 'x-medias', 'x-tt-dt']);
+    return { ...Object.fromEntries(Object.entries(headers).filter(([key]) => !omitted.has(key.toLowerCase()))), ...playerSigning.headers(url, body) };
 }
 const SEARCH_API = 'https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/search/tab/v';
 const SEARCH_UA = 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)';
@@ -161,8 +176,8 @@ function signedSearchRequest({ keyword, page = 1, cursor = null, identity } = {}
     const pg = parseSearchInteger(page);
     if (pg === null || pg < 1 || pg > 50) throw Object.assign(new Error('App 搜索页码需为 1 至 50 的整数'), { code: 'APP_INPUT' });
     const registered = identity && [identity.device_id, identity.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value));
-    // Search uses the hongguoTV 7.2.2.32 profile and only hash branch 0.
-    // A registered anonymous identity is used when playback registration succeeded; tests may omit it.
+
+
     const device = { ...DEVICE, version_code: '72232', version_name: '7.2.2.32', manifest_version_code: '72232',
         update_version_code: '72232', pv_player: '72232',
         iid: registered ? identity.iid : localId(),
@@ -197,11 +212,12 @@ function signedSearchRequest({ keyword, page = 1, cursor = null, identity } = {}
 
 function playbackRequest(payload, identity, host) {
     const query = pythonUrlEncode({ ...DEVICE, device_id: identity.device_id, iid: identity.iid, cdid: identity.cdid, _rticket: String(Date.now()) });
-    return { url: `${videoApi(host)}?${query}`, body: Buffer.from(payload), headers: {
+    const url = `${videoApi(host)}?${query}`, body = Buffer.from(payload);
+    return { url, body, headers: playbackHeaders(url, body, {
         'User-Agent': 'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)',
         Accept: 'application/json; charset=utf-8,application/x-protobuf',
         'Content-Type': 'application/json; charset=UTF-8',
-    } };
+    }) };
 }
 
 const metadataDevice = { ...DEVICE, version_code: '73532', version_name: '7.3.5.32', manifest_version_code: '73532',
@@ -211,8 +227,8 @@ const HONGGUO_METADATA_PATHS = ['/reading/distribution/category/landpage/v/', '/
 const METADATA_HOSTS = Object.freeze(['api5-normal-hl.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-sinfonlineb.fqnovel.com']);
 const VIDEO_TAB_PATH = '/reading/bookapi/video_tab/multi_video_model/v1/';
 let bytevc2Ready = false;
-// The reading profile shares the signing algorithm with the Hongguo one and differs only in its
-// application identity. Its device is always a registered one (see comic-api.js).
+
+
 const READER_PROFILE = {
     aid: '1967', appName: 'novelapp', version: '74332', versionName: '7.4.3.32',
     paths: ['/reading/crypt/registerkey', '/reading/reader/full/v/', '/reading/bookapi/directory/all_items/v/',
@@ -237,6 +253,15 @@ function signedMetadataRequest(apiPath, values = {}, payload = null, options = {
         : playback ? { ...metadataDevice, iid: options.identity.iid, device_id: options.identity.device_id,
             ...(options.identity.cdid ? { cdid: options.identity.cdid } : {}) } : metadataDevice;
     const body = payload === null ? null : Buffer.from(JSON.stringify(payload));
+    if (playback) {
+        const ticket = Date.now();
+        const query = pythonUrlEncode({ ...values, ...device, ts: String(Math.floor(ticket / 1000)), _rticket: String(ticket) });
+        const url = `https://${options?.host || 'api5-normal-sinfonlineb.fqnovel.com'}${apiPath}?${query}`;
+        const headers = { 'User-Agent': VIDEO_UA.replace('71332', '73532'), Accept: 'application/json', 'Accept-Encoding': 'identity',
+            'x-xs-from-web': '0', 'sdk-version': '2', 'x-ss-dp': device.aid, 'x-tt-store-region': 'cn', 'x-tt-store-region-src': 'did' };
+        if (body) headers['Content-Type'] = 'application/json; charset=utf-8';
+        return { url, headers: playbackHeaders(url, body, headers), body };
+    }
     const khronos = Math.floor(Date.now() / 1000), ticketBase = Date.now();
     let query, url, requestTicket;
     for (let n = 0; n < 128; n += 1) {
@@ -335,7 +360,7 @@ async function requestJson(url, options, deadline, signal) {
                 ? 'App 片源请求超时' : 'App 片源网络请求失败，请稍后重试'), { code });
         }
         if ([301, 302, 303, 307, 308].includes(response.status)) {
-            // Do not resend a signed body to a redirect destination.
+
             if (options.method === 'POST' || !response.headers.location) throw Object.assign(new Error('App 接口发生不支持的跳转'), { code: 'SECURITY_BLOCKED' });
             url = checkedUrl(new URL(response.headers.location, url).href, ['fqnovel.com', 'snssdk.com']);
             continue;
@@ -385,7 +410,7 @@ async function readVideoTab(vid, deadline, signal, identity) {
             const raw = json?.data?.video_model_data?.[vid]?.video_model;
             if (typeof raw !== 'string' && (!raw || typeof raw !== 'object')) continue;
             return { code: 0, data: { [vid]: { video_model: typeof raw === 'string' ? raw : JSON.stringify(raw) } } };
-        } catch { /* the next catalog host, then the registered playback request */ }
+        } catch {                                                                   }
     }
     return null;
 }
@@ -403,13 +428,11 @@ async function fetchAppPlayUrl(vid, options = {}) {
         mixed_video_id_map: { '1004': episodeIds },
     });
     const postModel = (signed) => requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
-    // The service answers a device for one lookup, so every lookup takes its own device. A signed request goes
-    // first; some networks only accept the unsigned style, and an empty answer costs well under a second.
     const readModel = async (identity, host) => {
-        const attempts = identity ? [signedVideoRequest(payload, identity, host), playbackRequest(payload, identity, host)] : [signedVideoRequest(payload, undefined, host)];
+        const attempts = identity ? [() => signedVideoRequest(payload, identity, host), () => playbackRequest(payload, identity, host)] : [() => signedVideoRequest(payload, undefined, host)];
         let lastError;
-        for (const signed of attempts) {
-            try { return await postModel(signed); }
+        for (const makeRequest of attempts) {
+            try { return await postModel(makeRequest()); }
             catch (error) {
                 lastError = error;
                 if (error?.code !== 'EMPTY_RESPONSE') throw error;
@@ -450,15 +473,15 @@ async function fetchAppPlayUrl(vid, options = {}) {
     const meets = row => requestedQuality === 'auto' || meetsDownloadQuality(row, requestedQuality);
     const compatibleMatch = compatible.filter(meets);
     const newerMatch = bytevc2Ready ? newer.filter(meets) : [];
-    // A copyable stream wins when it meets the request. Auto keeps every H.264/HEVC tier
-    // ahead of a newer encode, so a larger bytevc2 is not transcoded while those can play.
+
+
     const preferred = requestedQuality === 'auto'
         ? (compatible.length ? compatible : newerMatch)
         : (compatibleMatch.length ? compatibleMatch : newerMatch);
     const sizedCompatible = compatible.filter(row => row.width > 0 && row.height > 0);
     const limited = requestedQuality !== 'auto' && !allowLowerQuality && !preferred.length && sizedCompatible.length > 0;
-    // Download may keep every lower copyable tier after the one that meets the request.
-    // Strict playback stays on the streams that meet it, and does not walk those lower tiers.
+
+
     const pool = allowLowerQuality
         ? (compatible.length ? compatible : (bytevc2Ready ? newer : []))
         : preferred.length ? preferred : limited ? sizedCompatible : [];
@@ -531,9 +554,9 @@ async function fetchAppPlayUrl(vid, options = {}) {
     try {
         result = await variantsFrom(await readModel(identity, VIDEO_HOSTS[firstHost]));
     } catch (error) {
-        // An empty body, or a model that still cannot be played, gets one fresh device on the next
-        // edge host. A newer encode that can be transcoded stays on the device that returned it.
-        // A wrong episode, a rejected request, or a key that will not parse stays put.
+
+
+
         const retryable = error?.code === 'EMPTY_RESPONSE' || error?.code === 'NO_COMPATIBLE_CODEC';
         if (!retryable) throw error;
         let fresh = null;
@@ -549,7 +572,35 @@ async function fetchAppPlayUrl(vid, options = {}) {
     return result;
 }
 
-// Keeps unused playback devices ready so the next lookup does not wait for a registration.
+
 function warmPlayback() { armPlaybackPool(requestJson); }
 
-module.exports = { fetchAppPlayUrl, warmPlayback, setBytevc2Ready, NEWER_CODEC_UNREADY, VIDEO_HOSTS, METADATA_HOSTS, signedSearchRequest, signedMetadataRequest, requestMetadata, parseSearchInteger, requestJson };
+async function fetchAppSeriesMetadata(seriesId) {
+    const id = String(seriesId || '');
+    if (!/^\d{1,30}$/.test(id)) throw Object.assign(new Error('短劇編號無效'), { code: 'APP_INPUT' });
+    const identity = await takePlaybackDevice(requestJson);
+    const payload = JSON.stringify({ biz_param: { detail_page_version: 0, disable_digg_stat: false, disable_video_relate_book: false,
+        need_all_video_definition: false, need_mp4_align: false, screen_width_px: '900', source: 7, use_os_player: false, use_server_dns: false },
+        dr_scene: 'preload', series_id: id });
+    const deadline = Date.now() + 8000, signal = AbortSignal.timeout(8000);
+    let lastError;
+    for (const host of VIDEO_HOSTS) {
+        try {
+            const signed = signedVideoRequest(payload, identity, host, '/novel/player/multi_video_detail/preload/v1');
+            const response = await requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+            const video = response?.data?.[id]?.video_data;
+            if (response?.code !== 0 || !video || typeof video.series_title !== 'string' || !video.series_title.trim()) {
+                throw Object.assign(new Error('短劇資料暫時無法取得'), { code: 'MISSING_METADATA' });
+            }
+            const episodes = (Array.isArray(video.video_list) ? video.video_list : [])
+                .filter(item => /^\d{1,30}$/.test(String(item?.vid || '')) && (!item.series_id || String(item.series_id) === id))
+                .map(item => ({ vid: String(item.vid), vid_index: Number(item.vid_index) || 0, title: item.title || '',
+                    series_id: id, series_title: video.series_title, cover: video.series_cover || video.cover_url || item.cover_url || '' }))
+                .sort((a, b) => a.vid_index - b.vid_index);
+            return { series_id: id, series_title: video.series_title, cover: video.series_cover || video.cover_url || '',
+                total: episodes.length, episodes };
+        } catch (error) { lastError = error; }
+    }
+    throw lastError;
+}
+module.exports = { fetchAppSeriesMetadata, fetchAppPlayUrl, warmPlayback, setBytevc2Ready, NEWER_CODEC_UNREADY, VIDEO_HOSTS, METADATA_HOSTS, signedSearchRequest, signedMetadataRequest, requestMetadata, parseSearchInteger, requestJson };

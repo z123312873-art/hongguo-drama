@@ -77,22 +77,22 @@ const kept = acceptLogin({
 }, NOW);
 assert.deepEqual(Object.keys(kept.record).sort(), ['avatarData', 'avatarUrl', 'loggedInAt', 'nickname', 'profileFrom', 'userId']);
 assert.equal(publicAccount(kept.record, NOW).nickname, '甲');
-// A name that did not come from the app profile (the passport default) is never shown.
+
 const passportOnly = acceptLogin({ userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://example.com/a.jpg' }, NOW);
 assert.equal(passportOnly.record.nickname, '');
 assert.equal(publicAccount(passportOnly.record, NOW).nickname, '');
 assert.equal(accountLabel(publicAccount(passportOnly.record, NOW)), "已登入");
-// Sessions saved by the earlier 4.6 build kept screen_name; they keep the session and picture, not that name.
+
 const legacy = { userId: '42', nickname: '用户1690411710523', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', loggedInAt: NOW };
 assert.deepEqual(publicAccount(legacy, NOW), { loggedIn: true, nickname: '', avatarUrl: 'https://p6-novel.byteimg.com/a.jpeg', avatarData: '' });
-// Names of any length or script: trimmed, invisible characters dropped, capped at 32 characters without splitting emoji.
+
 assert.equal(cleanNickname('  用户名34908929  '), '用户名34908929');
 assert.equal(cleanNickname('長'.repeat(40)).length, 32);
 assert.equal([...cleanNickname('🐻'.repeat(40))].length, 32);
 assert.equal(cleanNickname('a\u0000b\u202ec\n'), 'abc');
 assert.equal(cleanNickname(42), '');
 assert.equal(normalizeStatus({ loggedIn: true, nickname: '\u200b' }).nickname, '');
-// Avatar: the picture when there is one; the default icon when signed out, missing, unsafe, or failed to load.
+
 const pic = 'https://p6-novel.byteimg.com/large/novel-static/a.jpeg';
 assert.equal(avatarPicture({ loggedIn: true, avatarUrl: pic }, ''), pic);
 assert.equal(avatarPicture({ loggedIn: true, avatarUrl: pic }, pic), '');
@@ -101,7 +101,7 @@ assert.equal(avatarPicture({ loggedIn: false, avatarUrl: pic }, ''), '');
 assert.equal(avatarPicture({ loggedIn: true, avatarUrl: '' }, ''), '');
 assert.equal(avatarPicture({ loggedIn: true, avatarUrl: 'javascript:alert(1)' }, ''), '');
 assert.equal(avatarPicture(undefined, ''), '');
-// A later profile read only fills in the same account that is still signed in.
+
 assert.equal(mergeProfile(legacy, '42', { nickname: '乙', avatarUrl: '' }, NOW).nickname, '乙');
 assert.equal(mergeProfile(legacy, '42', { nickname: '乙', avatarUrl: '' }, NOW).avatarUrl, legacy.avatarUrl);
 assert.equal(mergeProfile(legacy, '42', { nickname: '乙', avatarUrl: '' }, NOW).profileFrom, PROFILE_FROM);
@@ -158,8 +158,8 @@ clock = NOW + SESSION_MS;
 assert.deepEqual(await handlers.status(), { loggedIn: false });
 assert.equal(memory.record, null);
 
-// Refresh: fills in the profile when the session is still in memory; failures keep what is saved;
-// a sign-out or another account in the middle of the read wins.
+
+
 clock = NOW;
 let profileReply = null;
 let duringRead = () => {};
