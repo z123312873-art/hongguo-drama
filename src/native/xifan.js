@@ -59,7 +59,7 @@ async function genres(forceRefresh) {
   if (!forceRefresh && genreCache?.expires > Date.now()) return genreCache.items;
   const recent = forceRefresh ? null : savedGenres();
   if (recent) { genreCache = { expires: Date.now() + 300000, items: recent }; return recent; }
-  // Pages of one window start together; they share a single genre request.
+
   genrePending = genrePending || loadGenres().finally(() => { genrePending = undefined; });
   return genrePending;
 }
@@ -148,7 +148,7 @@ async function fetchPlayUrlSingle(vid, sid) {
   try {
     const id = parseId(vid, true);
     if (sid && String(sid) !== id.seriesId) throw new Error('西饭分集不属于当前剧集');
-    // Always re-read access state, even when an earlier address or episode list was cached.
+
     const result = await detail(id.seriesId);
     const episode = result.episodeList.find(item => String(item.episodeId) === id.episodeId);
     if (!episode) throw new Error('西饭未找到该分集');

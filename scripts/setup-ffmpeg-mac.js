@@ -1,4 +1,4 @@
-// Build from pinned source archives. See build/ffmpeg/MACOS-NOTICE.txt.
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');

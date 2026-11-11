@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { trustSystemCertificates } = require('./system-trust');

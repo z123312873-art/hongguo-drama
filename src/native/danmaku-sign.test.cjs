@@ -1,17 +1,17 @@
-// Adapted from dawei233/hongguo-drama (GPL-3.0), commit c884fab6c6e36ad38173e251738b9b35f958383f.
-// https://github.com/dawei233/hongguo-drama/tree/c884fab6c6e36ad38173e251738b9b35f958383f
+
+
 'use strict';
 
-/**
- * 弹幕签名器与参考实现的一致性测试。
- *
- * 签名算法没有官方文档，唯一能证明移植正确的办法是：拿已验证可用的参考实现
- * （`nas-backend/danmaku.py`，仓库外）在固定输入下的输出，逐字节比对。
- * 向量由 `scripts/gen-danmaku-sign-vectors.py` 生成，生成过程可复现。
- *
- * 这个测试是**离线**的：不需要网络，也不需要 Python。它一旦失败，说明签名器
- * 与参考实现已经不一致，此时不应该去联网碰运气 —— 先修这里。
- */
+
+
+
+
+
+
+
+
+
+
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -88,16 +88,16 @@ test('设备指纹是 19 位数字串，且两次生成不同', () => {
 });
 
 test('nonce 契约是 11 字节：长度不对会算出服务端拒绝的签名', () => {
-  // 这条断言是文档化的护栏：各段分别喂给不同算法，长度错了不会抛异常，
-  // 只会静默产生无效签名。调用方必须自己保证 11 字节。
+
+
   assert.equal(sign.NONCE_BYTES, 11);
   const short = Buffer.alloc(4);
   assert.doesNotThrow(() => sign.commentXGorgon('a=1', 1, short));
 });
 
 test('SM3 与标准向量一致，且与系统 Node 的 native 实现互为印证', () => {
-  // 标准向量（与 scripts/check-app-source.cjs 用的是同一组）。
-  // 长输入是必须的：它跨多个 64 字节分组，能抓出填充与消息扩展的边界错误。
+
+
   const vectors = [
     ['abc', '66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0'],
     ['abcd'.repeat(16), 'debe9ff92275b8a138604889c18e5a4d6fdb70e5387e5765293dcba39c0c5732'],
@@ -108,8 +108,8 @@ test('SM3 与标准向量一致，且与系统 Node 的 native 实现互为印�
     assert.equal(sign.sm3(Buffer.from(input, 'utf8')).toString('hex'), expected, `SM3("${input.slice(0, 12)}…") 与标准向量不一致`);
   }
 
-  // 与 native 实现在多种长度上比对。长度取 55/56/63/64/65 是因为它们正好压着
-  // "填充后是否多出一个分组"的分界，是这类实现最容易写错的地方。
+
+
   let native;
   try {
     native = require('node:crypto').createHash('sm3');
@@ -117,7 +117,7 @@ test('SM3 与标准向量一致，且与系统 Node 的 native 实现互为印�
     native = null;
   }
   if (!native) {
-    // Electron 的 BoringSSL 就是这种情况：没有 SM3，只能靠上面的标准向量。
+
     return;
   }
   for (const length of [0, 1, 55, 56, 57, 63, 64, 65, 127, 128, 1000]) {
@@ -129,16 +129,16 @@ test('SM3 与标准向量一致，且与系统 Node 的 native 实现互为印�
 });
 
 test('SM3 走仓库共用的实现，且不依赖运行时是否提供 sm3', () => {
-  // 回归护栏：如果有人把共用实现换回 createHash('sm3')，在系统 Node 上测不出来，
-  // 但应用里会让所有弹幕请求失败。
-  // 先剥掉注释 —— 实现里正解释"为什么不能用它"，注释里的字样不算违规。
+
+
+
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, 'danmaku-sign.js'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '');
   assert.doesNotMatch(source, /createHash\(['"]sm3['"]\)/, '不得依赖运行时的 sm3，Electron 的 BoringSSL 没有它');
   assert.match(source, /require\(['"]\.\/sm3['"]\)/, '应复用仓库里已有的 sm3.js，而不是再写一份');
 
-  // 共用实现本身也必须是对的：标准向量在前面那条测试里已覆盖。
+
   assert.equal(require('./sm3')(Buffer.from('abc')).toString('hex'),
     '66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0');
 });
@@ -149,8 +149,8 @@ test('签名结果随 query、时间戳与各自 nonce 段变化（防止退化�
   assert.notEqual(base, sign.commentXGorgon('a=2', 1760000000, nonce), 'query 变化必须改变 X-Gorgon');
   assert.notEqual(base, sign.commentXGorgon('a=1', 1760000001, nonce), '时间戳变化必须改变 X-Gorgon');
 
-  // nonce 是**分段**使用的：Gorgon 只用 [0:2]，Ladon 只用 [2:6]，Argus 只用 [6:11]。
-  // 改 nonce[0] 必须影响 Gorgon 且不影响 Ladon；改 nonce[10] 只影响 Argus。
+
+
   const flipHead = Buffer.from(nonce);
   flipHead[0] ^= 0x01;
   assert.notEqual(base, sign.commentXGorgon('a=1', 1760000000, flipHead), 'nonce[0] 参与 X-Gorgon');

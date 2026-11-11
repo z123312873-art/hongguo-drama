@@ -121,7 +121,7 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
   assert.equal(logged.calls[1].url.includes('/passport/mobile/sms_login/'), true);
   assert.equal(JSON.stringify(login).includes('header-token'), false);
 
-  // The session survives a restart only through snapshot/restore (main keeps it OS-encrypted).
+
   const snap = logged.api.snapshot();
   assert.equal(snap.userId, '1234567890123456');
   assert.equal(snap.region, '+886');
@@ -144,7 +144,7 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
     assert.equal(fresh.api.restore(broken), false);
     assert.equal(fresh.api.signedIn(), false);
   }
-  // A reply that is not a confirmed success is an error, never an empty list.
+
   for (const [reply, pattern] of [
     [{ status: 401, text: '', headers: {} }, /HTTP 401/],
     [{ status: 200, text: 'oops', headers: {} }, /BAD_BODY/],
@@ -155,7 +155,7 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
     failing.api.restore(snap);
     await assert.rejects(failing.api.request('GET', '/reading/bookapi/read_history/list/v', {}), pattern);
   }
-  // International sign-ins: when the reading API refuses that signature, the full one is tried once and kept.
+
   const switching = client(() => ({ status: 200, text: '{}', headers: {} }), (req) => (!req.headers['X-Medusa']
     ? { status: 200, text: '{"code":100,"message":"sign"}', headers: {} }
     : { status: 200, text: '{"code":0,"data":{"data_list":[]}}', headers: {} }));
@@ -175,7 +175,7 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
   assert.equal(posting.api.snapshot(), null);
   assert.equal(posting.api.signedIn(), false);
 
-  // The profile read fails or is slow: sign-in still succeeds, without the passport default name.
+
   for (const profileHandler of [
     () => ({ status: 500, text: '', headers: {} }),
     () => { throw new Error('timeout of 8000ms exceeded'); },
@@ -195,7 +195,7 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
     assert.equal(result.profileFrom, '');
   }
 
-  // A profile for another account is ignored.
+
   const other = client(() => ({
     status: 200,
     text: '{"message":"success","data":{"user_id_str":"1234567890123456"}}',
@@ -203,7 +203,7 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
   }), () => ({ status: 200, text: '{"code":0,"data":{"user_id_str":"9999999999999999","user_name":"别人"}}', headers: {} }));
   assert.equal((await other.api.login({ countryCode: '+886', phone: '912345678', code: '0740' })).nickname, '');
 
-  // Mainland numbers keep the full signature for the profile read too.
+
   const mainlandLogin = client(() => ({
     status: 200,
     text: '{"message":"success","data":{"user_id_str":"1234567890123456"}}',
@@ -214,18 +214,18 @@ function client(handler, profileHandler = () => ({ status: 200, text: PROFILE_OK
   assert.ok(mainlandLogin.gets[0].headers['X-Medusa']);
   assert.equal(mainlandLogin.gets[0].headers['X-Tt-Token'], undefined);
 
-  // Signing out drops the session, so a later profile read does not go out.
+
   assert.ok(await logged.api.profile());
   logged.api.reset();
   assert.equal(await logged.api.profile(), null);
   assert.equal(logged.gets.length, 2);
 
-  // Profile fields: a picture from any of the three fields, never the passport default, http, or an overlong address.
+
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', expand_avatar_url: 'https://p6-novel.byteimg.com/b.jpeg' } }).avatarUrl, 'https://p6-novel.byteimg.com/b.jpeg');
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', basic_info: { user_avatar: 'https://p6-novel.byteimg.com/c.jpeg' } } }).avatarUrl, 'https://p6-novel.byteimg.com/c.jpeg');
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: 'http://p6-novel.byteimg.com/c.jpeg' } }).avatarUrl, 'https://p6-novel.byteimg.com/c.jpeg', 'http on the image CDN is upgraded');
   assert.equal(readProfile({ code: 0, data: { user_name: 'A', avatar_url: 'http://example.com/c.jpeg' } }).avatarUrl, '', 'http elsewhere is dropped');
-  // A picture changed in the app: HEIC on a signed host, long signature, url_list object.
+
   const signed = `https://p3-novel-sign.fqnovelpic.com/novel-avatar/0123456789abcdef~tplv-resize:400:0.heic?x-expires=1800000000&x-signature=${'s'.repeat(700)}`;
   const custom = readProfile({ code: 0, data: { user_name: 'A', avatar_url: { url_list: [signed] } } });
   assert.equal(custom.avatarUrl, signed, 'long signed addresses are kept');

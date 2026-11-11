@@ -38,7 +38,7 @@ function writeCancels(userId, ids) {
   try {
     if (ids.length) window.localStorage.setItem(CANCEL_KEY, JSON.stringify({ userId, ids: [...new Set(ids)].slice(0, 500) }));
     else window.localStorage.removeItem(CANCEL_KEY);
-  } catch { /* retried on the next sync */ }
+  } catch {                                }
 }
 
 function cachedFolders(userId, incoming) {
@@ -189,7 +189,7 @@ export default function useFavoriteSync(loggedIn) {
     }
   };
 
-  // Changes made on this computer: remember cancellations of confirmed favorites, then sync soon.
+
   useEffect(() => subscribeLocalLibrary(library => {
     if (applying.current) return;
     const previous = before.current;

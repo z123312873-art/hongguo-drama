@@ -63,7 +63,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     let dragging = false;
     const hide = () => {
       if (available && !media.paused && !menuOpen && !danmakuOpen && !selectionPanel && !dragging && !controlsRef.current?.querySelector(':focus-visible')) {
-        // Clear pointer focus so the next playback key cannot highlight a hidden button.
+
         if (controlsRef.current?.contains(document.activeElement)) document.activeElement.blur();
         setControlsHidden(true);
       }
@@ -71,7 +71,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     const scheduleHide = () => {
       clearTimeout(timer);
       if (available && !media.paused && !menuOpen && !danmakuOpen && !selectionPanel && !dragging) {
-        // Fullscreen and source changes keep the deadline set by actual user activity.
+
         if (!idleDeadlineRef.current) idleDeadlineRef.current = Date.now() + 1000;
         timer = setTimeout(hide, Math.max(0, idleDeadlineRef.current - Date.now()));
       }
@@ -80,7 +80,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     const onPointerLeave = () => { pointerRef.current = null; clearTimeout(timer); hide(); };
     const onKey = event => {
       const physicalKey = event.code || event.key;
-      // Keep the release paired across source/effect changes, even if Shift is released first.
+
       if (event.type === 'keyup' && navigationKeysRef.current.delete(physicalKey)) return;
       if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return;
       if (event.key === 'Tab') { reveal(); return; }
@@ -91,20 +91,20 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
       if (action.id === 'play') { reveal(); return; }
       if (event.type === 'keydown') {
         navigationKeysRef.current.add(physicalKey);
-        // Keyboard-only playback actions must not extend pointer inactivity.
+
       }
     };
     const onPointerMove = event => {
       const previous = pointerRef.current;
       pointerRef.current = { x: event.screenX, y: event.screenY };
-      // Native fullscreen/source changes can dispatch a move without moving the pointer.
+
       if (previous ? previous.x === event.screenX && previous.y === event.screenY : !event.movementX && !event.movementY) return;
       reveal();
     };
     const startDrag = event => { dragging = !!event.target.closest?.('input[type="range"]'); reveal(); };
     const stopDrag = () => { if (dragging) { dragging = false; reveal(); } };
     const onFocus = event => {
-      // Tab and pointerdown reveal immediately; media focus churn is not user activity.
+
       if (controlsRef.current?.contains(event.target)) reveal();
       else scheduleHide();
     };
@@ -119,10 +119,10 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     window.addEventListener('pointercancel', stopDrag);
     const onBlur = () => { navigationKeysRef.current.clear(); stopDrag(); onPointerLeave(); };
     window.addEventListener('blur', onBlur);
-    // Source changes and automatic handoffs are not user activity.
+
     if (menuOpen || danmakuOpen || selectionPanel || (!continuing && !available)) reveal();
     else if (!continuing && media.paused && !(media.ended && autoContinue)) {
-      // A native pause can precede ended; explicit key/click pauses already reveal immediately.
+
       if (autoContinue && controlsHidden) pauseTimer = setTimeout(() => {
         if (videoRef.current?.paused && !videoRef.current.ended) reveal();
       }, 120);

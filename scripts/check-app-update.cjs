@@ -61,7 +61,7 @@ const ipc = (name, ...args) => handlers[name]({}, ...args);
   responses=[Error('HTTP 403'),{httpResponse:{status:302,headers:{location:'https://github.com/z123312873-art/hongguo-drama/releases/tag/v2.0'}}}];
   result=await ipc('check-app-update');
   assert.equal(result.release?.version,'2.0','this repository latest redirect must provide stable version without following the URL');
-  for (const location of ['https://evil.invalid/releases/tag/v2.0','https://github.com/other/repo/releases/tag/v2.0','https://github.com/jackotom/hongguo-drama/releases/tag/v2.0','https://github.com/z123312873-art/hongguo-drama/releases/tag/v2.0-beta.1','https://github.com/z123312873-art/hongguo-drama/releases/tag/v2.0?evil=1']) {
+  for (const location of ['https://evil.invalid/releases/tag/v2.0','https://github.com/other/repo/releases/tag/v2.0','https://github.com/legacy-owner/legacy-project/releases/tag/v2.0','https://github.com/z123312873-art/hongguo-drama/releases/tag/v2.0-beta.1','https://github.com/z123312873-art/hongguo-drama/releases/tag/v2.0?evil=1']) {
     responses=[Error('HTTP 403'),{httpResponse:{status:302,headers:{location}}}];
     assert.equal((await ipc('check-app-update')).release,null,'untrusted redirect rejected');
   }

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-// Reuse the existing isolated component harness, without running its test suite.
+
 const harness = fs.readFileSync(`${__dirname}/check-download-manager.cjs`, 'utf8').split('\n(async () => {')[0];
 const harnessModule = { exports: {} };
 vm.runInNewContext(`${harness}\nmodule.exports = { mount, task, rows };`, {

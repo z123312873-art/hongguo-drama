@@ -11,7 +11,7 @@ async function fetchEpisodeComments(options) {
       typeof episodeId !== 'string' || !/^\d{6,30}$/.test(episodeId) ||
       !Number.isInteger(limit) || limit < 1 || limit > 30) return { success: false, retryable: false, error: '评论请求编号或条数无效' };
   if (cursor !== null) return { success: false, retryable: false, source_limited: true, error: NOTICE };
-  // 评论列表能翻过公开页的 15 则，锁定分集也不会被 302 带到别集。失败时才退回公开页。
+
   const listed = await danmaku.fetchEpisodeCommentList({ seriesId, episodeId, limit });
   if (listed?.success) return listed;
   const details = await fetchPublicDetails(seriesId, episodeId);
@@ -19,14 +19,14 @@ async function fetchEpisodeComments(options) {
   const seen = new Set();
   const items = [];
   for (const review of details.episode_reviews?.items || []) {
-    // The public preview has no comment IDs; hash stable fields, excluding changing like counts.
+
     const id = createHash('sha256').update(JSON.stringify([seriesId, episodeId, review.author, review.created_at, review.content])).digest('hex');
     if (seen.has(id)) continue;
     seen.add(id);
     items.push({ id, content: review.content });
     if (items.length >= limit) break;
   }
-  // shortcut: anonymous SSR exposes a preview only; use real cursors when a public paging API exists.
+
   return { success: true, series_id: seriesId, episode_id: episodeId, items, next_cursor: null,
     has_more: false, total: details.episode_reviews?.total ?? null, source_limited: true, notice: NOTICE };
 }

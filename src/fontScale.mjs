@@ -21,7 +21,7 @@ export function getFontChoice() {
 
 function applyFontChoice(id) {
   const choice = fontChoice(id);
-  try { globalThis.document.documentElement.style.setProperty('--font-scale', String(choice.scale)); } catch { /* tests may have no document */ }
+  try { globalThis.document.documentElement.style.setProperty('--font-scale', String(choice.scale)); } catch {                                  }
   return choice;
 }
 

@@ -1,4 +1,4 @@
-// Offline lifecycle checks through the real main IPC; no real media/network/FFmpeg.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

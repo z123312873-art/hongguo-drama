@@ -1,8 +1,8 @@
 const dns = require('node:dns');
 const https = require('node:https');
 
-// Direct mode ignores a local filter's HTTP proxy. AdGuard and similar tools
-// often point the system proxy or DNS at themselves even when one app is excluded.
+
+
 let direct = false;
 const cache = new Map();
 const OFFICIAL = /(^|\.)((?:fqnovel|snssdk|hongguoduanju|qznovelvod|fqnovelvod|douyinvod)\.com)$/i;

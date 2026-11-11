@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// The scheduler runs against a fake chapter service that reproduces the measured limit: each device gets a
-// fixed number of calls per window and then answers with empty bodies. Time is compressed 100x.
+
+
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { ApiScheduler, PRIORITY } = require('./comic-scheduler');
@@ -114,7 +114,7 @@ test('queued work can be cancelled; running work is left alone', async () => {
 test('when every device is exhausted the caller gets a rate-limit error after a bounded number of tries', async () => {
     const service = fakeService({ alwaysEmpty: true });
     const scheduler = new ApiScheduler({ ...fast, maxRotations: 2, call: service.call, createSession: service.createSession });
-    // With maxRotations reached the scheduler waits 15 s per retry in production; keep the test short.
+
     scheduler.maxAttempts = 4;
     const outcome = scheduler.run('doomed', PRIORITY.click, 1);
     await assert.rejects(outcome, (error) => error.code === 'RATE_LIMITED' && /限流/.test(error.message));
@@ -194,7 +194,7 @@ test('the sustained rate never exceeds the configured token bucket', async () =>
     const started = Date.now();
     await Promise.all(Array.from({ length: 55 }, (_, index) => scheduler.run(`k${index}`, PRIORITY.background, index)));
     const elapsed = Date.now() - started;
-    // 5 burst + 50 more at 50/s needs about one second.
+
     assert.ok(elapsed >= 850, `elapsed ${elapsed}ms`);
 });
 

@@ -1,5 +1,5 @@
-// Discover-page banner. Rank 1 is the hottest item from the current hot-drama list.
-// Nothing here names a series; callers pass whatever the ranking returned.
+
+
 export const HERO_LIMIT = 10;
 export const HERO_INTERVAL_MS = 5000;
 export const HERO_RESERVED_ROWS = 2;
@@ -20,14 +20,14 @@ export function heroLineup(items, limit = HERO_LIMIT) {
     .slice(0, cap);
 }
 
-// One extra copy of the first slide lets the track move left onto it, then jump home.
+
 export function heroSlides(items) {
   const lineup = Array.isArray(items) ? items : [];
   if (lineup.length < 2) return lineup.slice();
   return [...lineup, lineup[0]];
 }
 
-// translateX percentages are relative to the track, which is N slides wide.
+
 export const DISCOVER_SHELF_KEY = 'hongguo:discover-shelf';
 
 function shelfCard(item) {
@@ -73,7 +73,7 @@ export function writeDiscoverShelf(storage, patch = {}) {
       ? (Array.isArray(patch.posters) ? patch.posters : []).map(shelfCard).filter(Boolean).slice(0, 40)
       : current.posters,
   };
-  try { storage.setItem(DISCOVER_SHELF_KEY, JSON.stringify(next)); } catch { /* the next open uses the network */ }
+  try { storage.setItem(DISCOVER_SHELF_KEY, JSON.stringify(next)); } catch {                                      }
 }
 
 export function heroOffsetPercent(index, slideCount) {

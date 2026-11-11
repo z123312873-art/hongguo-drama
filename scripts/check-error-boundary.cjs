@@ -1,4 +1,4 @@
-// Real React/Electron rendering in an isolated profile; no network or user data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

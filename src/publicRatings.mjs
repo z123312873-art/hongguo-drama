@@ -1,4 +1,4 @@
-// Confirmed scores and confirmed blanks are remembered. A failed lookup stays pending so the next pass can retry.
+
 export function applyPublicRatings(checkedAt, response, ids, now = Date.now()) {
   const pending = new Set((Array.isArray(response?.pending) ? response.pending : []).map(id => String(id)));
   const incoming = response?.ratings;

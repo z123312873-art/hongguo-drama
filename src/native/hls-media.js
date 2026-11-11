@@ -12,7 +12,7 @@ async function requestHls(url, { signal, headers }) {
     ...webMediaRequestOptions(url), signal, headers });
 }
 
-// The bundled FFmpeg has no HTTP transport: stage guarded HLS resources on disk and allow local protocols only.
+
 async function remuxHls({ url, output, ffmpeg, signal, cancelToken, request = requestHls, checkAccess = () => {}, headers = {}, onProgress }) {
   if (!ffmpeg) throw new Error('未找到 FFmpeg，无法准备 HLS 视频');
   webMediaRequestOptions(url);
@@ -59,7 +59,7 @@ async function remuxHls({ url, output, ffmpeg, signal, cancelToken, request = re
         webMediaRequestOptions(base);
         const chain = new Set([...ancestors,remote]);
         let lines = text.split(/\r?\n/);
-        // Keep one highest-bandwidth rendition; final media verification enforces the requested resolution.
+
         const variants = lines.map((line,index) => ({index,bandwidth:Number(/(?:^|,)BANDWIDTH=(\d+)/.exec(line.slice(line.indexOf(':')+1))?.[1]) || 0})).filter(item => lines[item.index].startsWith('#EXT-X-STREAM-INF:'));
         if (variants.length > 1) {
           const chosen = variants.reduce((a,b) => b.bandwidth > a.bandwidth ? b : a);

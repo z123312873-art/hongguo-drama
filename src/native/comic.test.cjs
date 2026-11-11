@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Data-layer checks against a fake reading API. No title, id or count below is specific to a real comic.
+
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const crypto = require('node:crypto');

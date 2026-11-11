@@ -1,4 +1,4 @@
-// Compare decoder configuration, not per-file statistics such as bitrate or duration.
+
 const VIDEO_FIELDS = ['codec_name', 'codec_tag_string', 'profile', 'level', 'width', 'height', 'pix_fmt', 'sample_aspect_ratio', 'r_frame_rate', 'extradata_hash', 'color_range', 'color_space', 'color_transfer', 'color_primaries', 'field_order'];
 const AUDIO_FIELDS = ['codec_name', 'profile', 'sample_rate', 'channels', 'channel_layout', 'extradata_hash'];
 const signature = (stream, fields) => stream ? JSON.stringify(fields.map(key => stream[key] ?? null)) : '';
@@ -23,7 +23,7 @@ function buildMergePlan(infos, { compatible = false } = {}) {
   const remux = infos.some(info => info.video.time_base !== first.video.time_base || info.audioStream?.time_base !== first.audioStream?.time_base);
   const [num, den = 1] = String(first.video.r_frame_rate || '30/1').split('/').map(Number);
   const fps = Math.min(60, Math.max(1, num / den || 30));
-  // ponytail: one bitrate for the pass keeps encoder headers consistent; per-scene quality tuning can follow measured demand.
+
   const sourceRate = infos.reduce((sum, info) => sum + (info.videoBitrate || info.w * info.h * fps * 0.04) * (info.codec === 'hevc' ? 1.8 : 1.25) * info.duration, 0) / totalDuration;
   const videoBitrate = Math.round(Math.min(20000000, Math.max(300000, sourceRate)) / 1000) * 1000;
   const audioBitrate = hasAudio ? 96000 : 0;

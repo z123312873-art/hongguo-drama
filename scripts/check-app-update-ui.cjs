@@ -1,4 +1,4 @@
-// Isolated renderer checks: no network, installed app, user data or actual timers.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');

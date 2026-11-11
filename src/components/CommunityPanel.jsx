@@ -35,7 +35,7 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, chil
     (async () => {
       try {
         if (!window.electronAPI?.getPublicDetails) throw new Error('当前环境暂不支持读取公开剧评');
-        // Series reviews come from the detail page. The player page answers locked episodes with HTTP 302.
+
         const data = await window.electronAPI.getPublicDetails(id);
         if (!data?.success) throw new Error(data?.error || '公开剧评暂时无法加载');
         let episodeReviews = null;

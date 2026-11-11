@@ -1,7 +1,7 @@
 'use strict';
 
-// The first window is written as it arrives so playback can start before the rest downloads.
-// Later windows are fetched together, then appended in order. A closed FFmpeg pipe must not surface write EOF.
+
+
 const FIRST_WINDOW = 1024 * 1024;
 const PARALLEL_MIN = 2 * 1024 * 1024;
 const WRITE_SLICE = 256 * 1024;

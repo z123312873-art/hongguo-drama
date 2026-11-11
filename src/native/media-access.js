@@ -18,7 +18,7 @@ function createMediaAccess(devUrl) {
     },
     corsHeaders(request) {
       const origin = request.headers.get('origin');
-      // Opaque origins are not identities: unguessable media capabilities remain mandatory.
+
       if ((origin && !allowed(origin)) || (request.initiatorOrigin && !allowed(request.initiatorOrigin))) return null;
       if (origin && request.initiatorOrigin && origin !== request.initiatorOrigin && !(origin === 'null' && request.initiatorOrigin === 'file://')) return null;
       return { 'Access-Control-Allow-Origin': origin || 'null', Vary: 'Origin', 'Cache-Control': 'no-store' };

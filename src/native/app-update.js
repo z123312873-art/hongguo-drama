@@ -1,4 +1,4 @@
-// 应用更新只看这个分叉仓库的正式版，不看 jackotom/hongguo-drama。
+
 const UPDATE_OWNER = 'z123312873-art';
 const UPDATE_REPO = 'hongguo-drama';
 const RELEASES_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases`;
@@ -21,7 +21,7 @@ const HIGHLIGHT_LIMIT = 20;
 const HIGHLIGHT_LENGTH = 72;
 const SUMMARY_HEAD = /^(?:摘要|更新说明|更新說明|更新内容|更新內容|summary)(?:\s*[:：]\s*(.*)|)$/i;
 const BULLET = /^(?:[-*+・•●▪◦]\s+|\d{1,2}(?:[.)]\s+|[、）]\s*)|[（(]\d{1,2}[)）]\s*)(.+)$/;
-// A heading after the summary that introduces file lists or checksums ends the list.
+
 const STOP_HEADING = /sha-?256|checksum|校验|校驗|下载|下載|download|assets|安装包|安裝包|文件|檔案|完整性|source/i;
 
 function clipHighlight(value) {
@@ -41,9 +41,9 @@ function plainText(body) {
     .replace(/\*\*|__/g, '');
 }
 
-// Formal notes use a "摘要：" header followed by a bullet list. Items are not capped by the
-// old four-line limit: the popup scrolls and `more` reports what did not fit. A single
-// sentence is not shown. Installed 3.4/4.0 read only the first four short bullets.
+
+
+
 function releaseSummary(body) {
   const items = [];
   let more = 0, capture = false, stop = false;
@@ -91,7 +91,7 @@ function availableRelease(data, currentVersion) {
   const { items: highlights, more } = releaseSummary(data.body);
   return {
     version: data.tag_name.replace(/^v/, '').replace(/^(\d+\.\d+)\.0$/, '$1'),
-    // Never open a remote-provided URL; only this project's release page.
+
     url: `${RELEASES_URL}/tag/${encodeURIComponent(data.tag_name)}`,
     ...(highlights.length ? { highlights } : {}),
     ...(highlights.length && more ? { moreCount: more } : {}),

@@ -67,8 +67,8 @@ function DownloadManager({ onNavigate, active = true }) {
   const [mergeSeriesId, setMergeSeriesId] = useState('');
   const [merging, setMerging] = useState(false);
   const [mergeTasks, setMergeTasks] = useState([]);
-  const [confirmAsk, setConfirmAsk] = useState(null); // 删除确认（可勾选删除本地文件）
-  const [mergeAsk, setMergeAsk] = useState(false);    // 合并格式选择
+  const [confirmAsk, setConfirmAsk] = useState(null);
+  const [mergeAsk, setMergeAsk] = useState(false);
   const [page, setPage] = useState(1);
   const [orderVersion, setOrderVersion] = useState(0);
   const [loadError, setLoadError] = useState('');
@@ -139,7 +139,7 @@ function DownloadManager({ onNavigate, active = true }) {
     } catch (_) {}
   }, []);
 
-  // 列表刷新改选另一部剧时，旧确认框不能继续提交。
+
   useEffect(() => { setMergeAsk(false); }, [mergeSeriesId]);
 
   const loadMergeTasks = useCallback(async () => {
@@ -259,11 +259,11 @@ function DownloadManager({ onNavigate, active = true }) {
     return v.toFixed(v >= 100 || i === 0 ? 0 : 1) + ' ' + u[i];
   };
 
-  /** 弹删除确认：默认只删记录，可勾选同时删除本地文件 */
+
   const askDelete = (list, label) => {
     const items = (list || []).filter(Boolean);
     if (!items.length) return;
-    // 用已下载字节数估算可释放空间（完成任务才有意义）
+
     const estBytes = items.reduce((s, t) => s + (t.totalBytes || t.receivedBytes || 0), 0);
     const withFile = items.filter((t) => t.status === 'completed').length;
     setConfirmAsk({
@@ -305,7 +305,7 @@ function DownloadManager({ onNavigate, active = true }) {
     }
   };
 
-  // 一键合并选中的短剧
+
   const doMerge = async (compatible) => {
     if (!mergeSeriesId) {
       showToast('请先选择要合并的短剧', 'error');
@@ -347,7 +347,7 @@ function DownloadManager({ onNavigate, active = true }) {
     await window.electronAPI.showInFolder(path);
   };
 
-  // 一键暂停：取消进行中的 + 清空等待队列
+
   const pauseAll = async () => {
     const res = await window.electronAPI.pauseAll();
     await refresh();
@@ -355,7 +355,7 @@ function DownloadManager({ onNavigate, active = true }) {
     showToast(res && res.success ? `已暂停 ${res.count} 个任务` : '暂停失败', res && res.success ? 'success' : 'error');
   };
 
-  // 一键启动：把所有已停止/失败/等待中的任务重新排队开跑
+
   const resumeAll = async () => {
     const res = await window.electronAPI.resumeAll();
     await refresh();
@@ -363,7 +363,7 @@ function DownloadManager({ onNavigate, active = true }) {
     showToast(res && res.success ? `已启动 ${res.count} 个任务` : '启动失败', res && res.success ? 'success' : 'error');
   };
 
-  // 重试失败/已停止的任务
+
   const retryAllFailed = async () => {
     const ids = tasks.filter(needsManualRetry).map((t) => t.id);
     if (ids.length === 0) return;
@@ -376,7 +376,7 @@ function DownloadManager({ onNavigate, active = true }) {
     }
   };
 
-  // 一键选中全部失败/已停止的任务（选中后可再点「重试选中」）
+
   const selectAllFailed = () => {
     const ids = tasks.filter(needsManualRetry).map((t) => t.id);
     if (ids.length === 0) {
@@ -393,7 +393,7 @@ function DownloadManager({ onNavigate, active = true }) {
     askDelete(done, '清空已完成任务');
   };
 
-  // Progress updates change row values, not the established series/episode order.
+
   const sortedIds = useMemo(() => sortTasks(tasks).map(task => task.id), [orderVersion]);
   const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
   taskIndex.current = taskById;
@@ -410,13 +410,13 @@ function DownloadManager({ onNavigate, active = true }) {
   );
   const failedCount = failedTasks.length;
 
-  // 可暂停的任务：正在下载、等待中、已停止（未跑完的都算）
+
   const pausableCount = useMemo(
     () => tasks.filter((t) => t.status !== 'completed').length,
     [tasks]
   );
 
-  // 已选中项里真正可重试的数量
+
   const retryableSelectedCount = useMemo(
     () =>
       Array.from(selected).filter((id) => {
@@ -543,7 +543,7 @@ function DownloadManager({ onNavigate, active = true }) {
 
       {seriesList.length > 0 && <p className="settings-hint dm-merge-hint">选择剧名后点“合并整部剧”，导出该剧全部已下载分集，无需勾选任务。</p>}
 
-      {/* 合并任务 */}
+      {          }
       {mergeTasks.length > 0 && (
         <div className="merge-list">
           {mergeTasks.map((m) => (
@@ -745,7 +745,7 @@ function DownloadManager({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 合并格式选择 */}
+      {            }
       {mergeAsk && (
         <div className="player-confirm-mask" onClick={() => setMergeAsk(false)}>
           <div className="player-confirm" role="dialog" aria-modal="true" aria-label={confirmAsk ? confirmAsk.title : '合并导出'} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
@@ -771,7 +771,7 @@ function DownloadManager({ onNavigate, active = true }) {
         </div>
       )}
 
-      {/* 删除确认（可选是否连本地文件一起删） */}
+      {                        }
       {confirmAsk && (
         <div className="player-confirm-mask" onClick={() => setConfirmAsk(null)}>
           <div className="player-confirm" role="dialog" aria-modal="true" aria-label={confirmAsk ? confirmAsk.title : '合并导出'} tabIndex={-1} onClick={(e) => e.stopPropagation()}>

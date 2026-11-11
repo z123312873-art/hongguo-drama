@@ -1,4 +1,4 @@
-// Offline boundary checks; only the explicit local test proxy opens a socket.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -64,7 +64,7 @@ function guardWithDns(addresses, answer = '8.8.8.8', resolver) {
   return context.module.exports;
 }
 
-// Run the real guarded lookup, then route an accepted public address to a local fixture server.
+
 function loopbackAfterGuard(options) {
   options.httpAgent.createConnection = (connection, callback) => {
     connection.lookup(connection.host, { all: true }, error => {

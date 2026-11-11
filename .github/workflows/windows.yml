@@ -1,4 +1,4 @@
-# Hongguo Drama 3.3: three-platform release candidate; publication is coordinated separately.
+
 name: Windows x64 release candidate
 on:
   workflow_dispatch:
@@ -176,7 +176,7 @@ jobs:
             fi
           done
           gh release view "$tag" --json isPrerelease,isDraft,assets --jq '{isPrerelease,isDraft,assets:[.assets[].name]}'
-          # The formal release is in place; only now are the pre-releases and their tags removed.
+
           for old in installer-4.2-traditional-pre installer-4.3-traditional-pre; do
             if gh release view "$old" > /dev/null 2>&1; then
               gh release delete "$old" --cleanup-tag --yes
@@ -395,7 +395,7 @@ jobs:
           EOF
           )
           if gh release view "$tag" > /dev/null 2>&1; then
-            # Move the reused pre-release tag to this commit so its source and notes match the installer.
+
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true > /dev/null
             gh release edit "$tag" --prerelease=true --latest=false --title "4.6 預發佈" --notes "$notes"
           else

@@ -1,9 +1,9 @@
 'use strict';
 
-// The account picture comes from the account profile. Account pictures can be HEIC
-// (Chromium cannot draw it), signed and short-lived, or plain http. The main process
-// therefore fetches the picture itself, keeps only formats a page can draw, and hands the
-// page a small data: URL that also survives a restart after the signed address expires.
+
+
+
+
 
 const MAX_URL = 2048;
 const MAX_BYTES = 512 * 1024;
@@ -35,12 +35,12 @@ function cleanUrl(value) {
   if (url.username || url.password) return null;
   if (url.protocol === 'http:' && IMAGE_CDN.test(url.hostname)) url.protocol = 'https:';
   if (url.protocol !== 'https:') return null;
-  // mosaic-legacy is the passport's built-in placeholder, not a picture the person chose.
+
   if (url.pathname.includes('mosaic-legacy')) return null;
   return url;
 }
 
-// Ordered addresses to try: what the profile gave, then JPEG renditions of the same image id.
+
 function avatarCandidates(...values) {
   const out = [];
   const push = (value) => { if (value && !out.includes(value) && value.length <= MAX_URL) out.push(value); };
@@ -52,7 +52,7 @@ function avatarCandidates(...values) {
     const marker = url.pathname.indexOf('~');
     const base = marker > 1 ? url.pathname.slice(0, marker) : url.pathname;
     if (!/^\/[^/]+\/.+/.test(base)) continue;
-    // A signed host checks the template in its signature; the unsigned host takes any size.
+
     if (!/-sign\./i.test(url.hostname)) push(`${url.origin}${base}~tplv-shrink:240:0.jpeg`);
     if (NOVEL_CDN.test(url.hostname)) push(`${PLAIN_NOVEL_HOST}${base.replace(/^\/large\//, '/')}~tplv-shrink:240:0.jpeg`);
   }
@@ -87,7 +87,7 @@ async function defaultGet(url) {
   return { status: response.status, body: Buffer.from(response.data || []) };
 }
 
-// Returns { data, url } for the first candidate that is a drawable picture, or null.
+
 async function fetchAvatar(candidates, get = defaultGet) {
   for (const url of Array.isArray(candidates) ? candidates.slice(0, MAX_CANDIDATES) : []) {
     let response;

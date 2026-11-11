@@ -7,7 +7,7 @@ function publishMergedOutput(source, destination) {
   try { fs.linkSync(source, destination); }
   catch (error) {
     if (!['ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'EXDEV', 'ENOSYS'].includes(error.code)) throw error;
-    // FAT/exFAT cannot hard-link. COPYFILE_EXCL refuses existing files; Node removes an incomplete destination on copy failure.
+
     fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
   }
 }
@@ -29,7 +29,7 @@ async function cleanupMergeTemps(directories) {
       if (!entry.isDirectory() || !/^\.merge-[A-Za-z0-9]{6}$/.test(entry.name)) continue;
       const temporary = path.join(directory, entry.name);
       const children = await fs.promises.readdir(temporary, { withFileTypes: true });
-      // Only remove our flat work files, never unrelated folders or symbolic links.
+
       if (children.some(child => !child.isFile() || !/^(?:\d+\.mp4|list\.ffconcat|output\.mp4)$/.test(child.name))) continue;
       await fs.promises.rm(temporary, { recursive: true, force: true, maxRetries: 2 });
     }
@@ -108,7 +108,7 @@ async function runMerge({ task, ordered, outDir, ffmpegPath, ffprobePath, probe,
         const started = Date.now(); let next = 0, failure;
         task.done = 0; task.progress = 0; task.encoder = encoder || 'copy';
         task.decoder = hardwareFrames ? 'videotoolbox' : 'software';
-        // Two hardware sessions avoid monopolising the device; software uses one bounded four-thread encoder.
+
         const concurrency = encoder && encoder !== 'libx264' ? 2 : 1;
         task.concurrency = concurrency; emit(true);
         const worker = async () => {
@@ -153,7 +153,7 @@ async function runMerge({ task, ordered, outDir, ffmpegPath, ffprobePath, probe,
         catch (error) {
           check();
           if (!encoder || encoder === 'libx264') throw error;
-          // Every child has closed. Restart the whole pass; never mix settings or encoders.
+
           for (let i = 0; i < ordered.length; i++) await fs.promises.rm(path.join(temporary, `${i}.mp4`), { force: true });
           if (hardwareFrames) {
             hardwareFrames = false;
@@ -164,7 +164,7 @@ async function runMerge({ task, ordered, outDir, ffmpegPath, ffprobePath, probe,
           }
         }
       }
-      // Even one encoder can choose a different header for different inputs. Never silently concatenate it.
+
       let reference;
       for (const file of files) {
         check();
@@ -189,7 +189,7 @@ async function runMerge({ task, ordered, outDir, ffmpegPath, ffprobePath, probe,
     const outputInfo = await probe(ffprobePath, tmpOutput, task);
     if (!outputInfo || Math.abs(outputInfo.duration - plan.totalDuration) > Math.max(0.5, ordered.length * 0.06)) throw new Error('合并输出时长校验失败，原始分集未改动');
     if (outputInfo.audio !== (plan.audioMode !== 'none') || (plan.videoMode === 'encode' && outputInfo.codec !== 'h264')) throw new Error('合并输出音视频轨道校验失败');
-    // Check head/tail and boundaries where original decoder configuration changes. Identical headers need no repeated decoder checks.
+
     const points = [0, Math.max(0, plan.totalDuration - 0.6)]; let boundary = 0;
     for (let i = 1; i < infos.length; i++) {
       boundary += infos[i - 1].duration;
@@ -202,7 +202,7 @@ async function runMerge({ task, ordered, outDir, ffmpegPath, ffprobePath, probe,
       if (result.frames < Math.max(1, Math.floor(duration * plan.fps * 0.5))) throw new Error(`拼接点画面校验失败（${start.toFixed(1)} 秒），原始分集未改动`);
     }
     check();
-    // Publish without replacing a file created while the merge was running.
+
     publishMergedOutput(tmpOutput, task.output);
     task.verified = `${outputInfo.codec} ${outputInfo.w}x${outputInfo.h} · 时长/拼接点已校验`;
     task.outputBytes = fs.statSync(task.output).size;

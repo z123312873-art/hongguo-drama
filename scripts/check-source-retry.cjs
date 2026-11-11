@@ -1,4 +1,4 @@
-// Isolated main-process checks for delayed source retries. No network, GUI or user data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -21,7 +21,7 @@ function fixture(initialTasks) {
   let settings = { root }, saved = initialTasks, ready, reportStorageError;
   Object.assign(app, { getVersion: () => 'test', getPath: () => root,
     commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true, whenReady: () => ({ then(fn) { ready = fn; } }) });
-  // Scheduled retries are fired manually; immediate recovery still uses short timers.
+
   const fakeSetTimeout = (fn, ms, ...args) => {
     if (ms < 10000) return setTimeout(fn, Math.min(ms, 5), ...args);
     const timer = { fn, ms, cleared: false, unref() { this.background = true; return this; } }; timers.push(timer); return timer;
@@ -54,7 +54,7 @@ function fixture(initialTasks) {
   const live = () => timers.filter(timer => !timer.cleared && !timer.background);
   return { run, handlers, state, timers, live, task, saved: () => saved,
     start: async () => {
-      // Keep the actual app.whenReady callback, loadDownloadTasks and retry scheduling.
+
       run(`rebuildSeriesRegistryFromTasks = () => {}; rescanDownloadsFromDisk = () => {};
         registerStreamProtocol = () => {}; registerLocalProtocol = () => {};
         applyProxySettings = async () => {}; createWindow = () => {}; refreshWatchHistory = async () => {};`);

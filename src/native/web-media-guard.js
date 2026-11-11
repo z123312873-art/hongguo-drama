@@ -7,7 +7,7 @@ function guardedAgent(Agent) {
   const agent = new Agent({ keepAlive: true });
   const getName = agent.getName;
   const proxyRoute = Symbol('proxyRoute');
-  // Explicit proxies may resolve privately; never lend their sockets to direct media requests.
+
   agent.addRequest = (request, options) => Agent.prototype.addRequest.call(agent, request,
     { ...options, [proxyRoute]: /^https?:\/\//i.test(request.path) });
   agent.getName = options => `${getName.call(agent, options)}:${options[proxyRoute] ? 'proxy' : 'direct'}`;
@@ -15,7 +15,7 @@ function guardedAgent(Agent) {
 }
 const httpAgent = guardedAgent(http.Agent);
 const httpsAgent = guardedAgent(https.Agent);
-// A trusted-DNS request must not reuse a socket opened through ordinary DNS.
+
 const trustedOfficialHttpsAgent = guardedAgent(https.Agent);
 
 const blocked = new BlockList();
@@ -51,15 +51,15 @@ function blockedAddress() {
   return Object.assign(new Error('官网片源及其跳转、解析结果必须指向公网'), { code: 'ERR_WEB_MEDIA_ADDRESS', mediaRetryable: true });
 }
 
-// The local VPN's Fake-IP route can return a different CDN result. Resolve only this
-// exact official TLS origin through fixed HTTPS resolvers; never connect to Fake-IP.
+
+
 let officialDnsCache;
 let officialDnsPending;
 function resolveOfficialAddress() {
   if (officialDnsCache?.expires > Date.now()) return Promise.resolve(officialDnsCache.addresses);
   if (officialDnsPending) return officialDnsPending;
   const requests = [];
-  // Race trusted resolvers so a blocked regional route cannot delay the usable one.
+
   officialDnsPending = Promise.any(['https://1.1.1.1/dns-query', 'https://223.5.5.5/resolve'].map(endpoint => new Promise((resolve, reject) => {
     const request = https.get(`${endpoint}?name=hongguoduanju.com&type=A`, {
       agent: new https.Agent({ keepAlive: false }), headers: { Accept: 'application/dns-json' },
@@ -106,7 +106,7 @@ function webMediaRequestOptions(value, { trustedOfficialDns = false } = {}) {
   const hosts = new Map([[initial.hostname.toLowerCase(), initial]]);
   return {
     maxRedirects: 5,
-    // Reuse only this guard's sockets; new connections still run the request's checked lookup.
+
     httpAgent,
     httpsAgent: trustedOfficialDns ? trustedOfficialHttpsAgent : httpsAgent,
     ...(trustedOfficialDns ? { proxy: false } : {}),
@@ -125,7 +125,7 @@ function webMediaRequestOptions(value, { trustedOfficialDns = false } = {}) {
       dns.lookup(hostname, { ...settings, all: true }, (error, addresses) => {
         if (error) return callback(error);
         const target = hosts.get(hostname.toLowerCase());
-        // Validate actual socket resolution; a separate preflight permits rebinding.
+
         if (target && (!addresses.length || addresses.some(item => !isPublicAddress(item.address)))) {
           const official = target.origin === 'https://hongguoduanju.com';
           const fakeOnly = addresses.length && addresses.every(item => isPublicAddress(item.address) ||
@@ -136,7 +136,7 @@ function webMediaRequestOptions(value, { trustedOfficialDns = false } = {}) {
           }
           return callback(blockedAddress());
         }
-        // User-selected proxies may be local; their remote DNS remains a trust boundary.
+
         finish(addresses);
       });
     },

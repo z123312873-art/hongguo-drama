@@ -2,14 +2,14 @@ import { alignedPageSize, posterColumns, posterSlots } from './catalogFill.mjs';
 import { uiScale } from './uiScale.mjs';
 
 export const COMIC_MAX = 300;
-// Renditions the image CDN is asked for (kept in step with native/comic-api.js).
+
 export const IMAGE_WIDTHS = Object.freeze([360, 540, 720, 900, 1080, 1440]);
 const MIN_ROWS = 3;
 const MAX_ROWS = 4;
 const EPISODE_GROUP = 50;
 
-// Poster page size from the window alone. Rows come from the window; the count is rounded up
-// to whole source pages so the drama categories show the same number of posters on page one.
+
+
 export function comicPageSize({ width, height, reservedRows = 0, sidebarWidth = 0 } = {}) {
   const viewport = Number(width);
   if (!(viewport > 0)) return { columns: 0, pageSize: 0 };
@@ -24,7 +24,7 @@ export function comicPageSize({ width, height, reservedRows = 0, sidebarWidth = 
   return { columns, pageSize: alignedPageSize(columns * rows) };
 }
 
-// Posters a drama list should open with: the comic page size, or the given minimum when that is larger.
+
 export function firstPagePosters({ minimum = 0, ...window } = {}) {
   const { columns, pageSize } = comicPageSize(window);
   if (!columns) return { columns: 0, slots: 0 };
@@ -54,7 +54,7 @@ export function clampPage(page, total, pageSize) {
   return Math.min(Math.max(1, Math.floor(Number(page)) || 1), pages);
 }
 
-// Empty cells shown behind the loaded posters of the last known page while more are still arriving.
+
 export function skeletonCount({ loaded, page, pageSize, expectedTotal, pending }) {
   if (!pending) return 0;
   const size = Math.floor(Number(pageSize));
@@ -65,7 +65,7 @@ export function skeletonCount({ loaded, page, pageSize, expectedTotal, pending }
   return Math.max(0, Math.min(size, target - (page - 1) * size) - Math.max(0, loaded - (page - 1) * size));
 }
 
-// Reader column: wide enough to read, never wider than a comfortable strip, at every window size.
+
 export function readerColumnWidth(viewportWidth) {
   const viewport = Number(viewportWidth);
   if (!(viewport > 0)) return 0;
@@ -73,7 +73,7 @@ export function readerColumnWidth(viewportWidth) {
   return Math.round(Math.min(viewport, Math.max(320, Math.min(viewport * 0.92, 860 * scale))));
 }
 
-// Device pixels the picture will occupy, as a width to ask the CDN for.
+
 export function desiredImageWidth(cssWidth, devicePixelRatio = 1) {
   const width = Number(cssWidth);
   const ratio = Number(devicePixelRatio);
@@ -83,12 +83,12 @@ export function desiredImageWidth(cssWidth, devicePixelRatio = 1) {
   return IMAGE_WIDTHS.find(step => step >= need) || IMAGE_WIDTHS[IMAGE_WIDTHS.length - 1];
 }
 
-// The rendition the reader asks for when it opens at this window width and pixel ratio.
+
 export function readerImageWidth(viewportWidth, devicePixelRatio = 1) {
   return desiredImageWidth(readerColumnWidth(viewportWidth), devicePixelRatio);
 }
 
-// Resizing only ever asks for a sharper rendition; shrinking keeps what is already on screen.
+
 export function nextImageWidth(current, wanted) {
   const have = Number(current) || 0;
   const want = Number(wanted) || 0;

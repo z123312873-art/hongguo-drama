@@ -1,18 +1,18 @@
-/**
- * scripts/dev.js - 开发模式启动器
- *
- * 启动前先检查端口是否被占用：
- *   - 端口空闲：直接使用
- *   - 端口被占用：自动改用下一个可用端口（并明确提示）
- * 然后启动 Vite 开发服务器，等待就绪后启动 Electron 窗口。
- */
+
+
+
+
+
+
+
+
 const { spawn } = require('child_process');
 const net = require('net');
 const path = require('path');
 
-const PREFERRED_PORT = 5173; // 与 vite.config.js 保持一致
+const PREFERRED_PORT = 5173;
 
-// 检查端口是否被占用（返回 true=占用）
+
 function checkPort(port) {
   return new Promise((resolve) => {
     const s = net.createConnection({ port, host: '127.0.0.1' });
@@ -21,14 +21,14 @@ function checkPort(port) {
   });
 }
 
-// 从 start 开始找下一个可用端口
+
 async function findFreePort(start) {
   let port = start;
   while (await checkPort(port)) port++;
   return port;
 }
 
-// 等待端口就绪（Vite 启动完成）
+
 function waitPortReady(port, timeoutMs = 30000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
@@ -56,7 +56,7 @@ async function main() {
     console.log(`\n[启动检查] 端口 ${PREFERRED_PORT} 空闲，正常启动\n`);
   }
 
-  // 1. 启动 Vite 开发服务器（strictPort 保证用我们选定的端口）
+
   const vite = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], {
     shell: true,
     stdio: 'inherit',
@@ -68,7 +68,7 @@ async function main() {
     process.exit(1);
   });
 
-  // 2. 等 Vite 就绪后启动 Electron
+
   try {
     await waitPortReady(port);
   } catch (e) {

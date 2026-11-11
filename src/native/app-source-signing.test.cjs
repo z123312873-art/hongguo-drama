@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Golden checks: with a frozen clock and a seeded random source, the Hongguo (aid 8662) request
-// signatures are byte-for-byte what they were before signing profiles were introduced.
-// A second profile must change only its own identity fields and never leak into the default one.
+
+
+
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const crypto = require('node:crypto');

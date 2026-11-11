@@ -1,4 +1,4 @@
-// Isolated main-process checks: exercise real task/IPC code without user data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

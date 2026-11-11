@@ -1,4 +1,4 @@
-// Reuse the playing window so media, stream sessions and playback position stay intact.
+
 function createStealthController({ screen, getWindow }) {
   let previous = null;
   let timer = null;
@@ -39,7 +39,7 @@ function createStealthController({ screen, getWindow }) {
       const outside = win.isMinimized() || p.x < b.x || p.x >= b.x + b.width || p.y < b.y || p.y >= b.y + b.height;
       if (outside === concealed) return;
       concealed = outside;
-      // Opacity keeps the hit region available; polling restores it even when no DOM hover fires.
+
       win.setOpacity(concealed ? 0 : 1);
       send(win);
     }, 100);

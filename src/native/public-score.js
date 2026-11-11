@@ -1,9 +1,9 @@
 'use strict';
 
-// Category lists do not carry a public score. Rank cards use scoreText ("评分9.4").
-// Detail pages print the same 0–10 score in the hero, then again as seriesSocialInfo.rating.
-// That rating may follow nested fields such as hot_score_data. hot_score_data itself is heat
-// ("6063万热度"), and ratings inside reviews belong to one comment, not the series.
+
+
+
+
 
 function normalizeScore(raw) {
   const number = Number(raw);
@@ -12,8 +12,8 @@ function normalizeScore(raw) {
 }
 
 const HERO_SCORE = /评分(?:<!--\s*-->|\s)*(\d+(?:\.\d+)?)(?![\d.])/;
-// The series rating, when the page has one, sits in the head of seriesSocialInfo.
-// Walking the whole review list would keep a no-score page open until the document ends.
+
+
 const SERIES_HEADER_LIMIT = 16 * 1024;
 
 function readSeriesRating(text) {

@@ -2,8 +2,8 @@ import { clipDanmakuText, measureDanmakuText } from './danmakuEmoji.mjs';
 
 export const DEFAULT_DANMAKU_SETTINGS = Object.freeze({ opacity: 80, fontSize: 22, speed: 1, area: 'half', density: 'normal', sensitiveFilter: true, blockedWords: '' });
 
-// 时间轴不够 25 条时，用本集评论补到大约 25 条。
-// 时间轴已经够 25 条就不再补；播放最多 35 条，避免一集里时间轴太密。
+
+
 export const DANMAKU_MIX_TARGET = 25;
 export const TIMELINE_PLAYBACK_CAP = 35;
 
@@ -55,7 +55,7 @@ export function commentFetchBlocked(feed, now, hidden) {
   return false;
 }
 
-// 超时、限流和空页面都先再试。确认过仍然没有，才停下来给用户重试。
+
 export function commentFailureAction(feed, data, now) {
   const message = typeof data?.error === 'string' ? data.error : '';
   const retryable = data == null || data.retryable === true;
@@ -111,7 +111,7 @@ export function appendCommentPage(feed, data, settings) {
   if (data.has_more === true && !feed.hasMore) feed.notice = '评论游标未前进，已停止加载';
   if (feed.hasMore) { feed.cursor = next; feed.cursors.add(next); }
   if (feed.hasMore && feed.emptyPages >= 5) feed.error = '连续多页没有可显示的新评论，可继续加载';
-  // shortcut: bound per-episode memory and requests; add queue compaction if a real viewing session reaches this limit.
+
   if (feed.pages >= 500) { feed.hasMore = false; feed.notice = '已达到本次评论加载上限'; }
 }
 
@@ -130,7 +130,7 @@ export function resizeDanmaku(state, before, after) {
     const x = after.reducedMotion ? 12 : after.width - (before.width - item.x) / (before.width + item.width) * (after.width + item.width);
     const lane = Array.from({ length: lanes }, (_, offset) => (item.lane + offset) % lanes).find(index =>
       !placed.some(other => other.lane === index && x < other.x + other.width + 24 && x + item.width + 24 > other.x));
-    if (lane === undefined) continue; // 缩小后放不下的条目才移除，保留时间光标与可见弹幕。
+    if (lane === undefined) continue;
     Object.assign(item, { x, lane, y: top + lane * lineHeight });
     placed.push(item);
   }
@@ -138,13 +138,13 @@ export function resizeDanmaku(state, before, after) {
   return true;
 }
 
-// 飞出画面就结束。不再放回复用队列，避免同一条在时间轴走完或评论很少时不停重播。
+
 export function retireDanmaku(state, reducedMotion) {
   state.items = state.items.filter(item => (reducedMotion ? item.age < 6 : item.x + item.width > 0));
 }
 
-// 本集评论没有视频时间点。节奏按这一集的种子打散，换集就换一套间隔、轨道和速度。
-// 时间轴弹幕走 advanceTimedDanmaku，不经过这里。
+
+
 export function danmakuSeed(seriesId, episodeId) {
   let hash = 2166136261;
   for (const char of `${seriesId}\0${episodeId}`) hash = Math.imul(hash ^ char.codePointAt(0), 16777619);
@@ -190,14 +190,14 @@ function commentLaneOpen(state, lane, y, lineHeight, x, textWidth) {
   });
 }
 
-// 后发的可以更慢，但不能比同道上已经在飞的更快，否则会从后面追上并盖住。
+
 function laneSpeedCap(state, lane) {
   let cap = 1.18;
   for (const item of state.items) if (item.lane === lane) cap = Math.min(cap, item.speed || 1);
   return cap;
 }
 
-// 时间轴弹幕没有自己的随机速度，缺省就是 1。同一行只要有它，评论就改成这个速度。
+
 function foreignSpeed(obstacles, y, lineHeight) {
   let speed = null;
   for (const other of obstacles || []) {
@@ -213,9 +213,9 @@ function foreignClear(obstacles, y, lineHeight, x, textWidth) {
     && x < other.x + other.width + 24 && x + textWidth + 24 > other.x);
 }
 
-// 本集评论让路。时间轴仍按自己的速度走，不改它的位置。
-// 同一行的评论改成和时间轴一样的速度：更快会追上它，更慢则会被它从后面盖住。
-// 已经叠在一起时，把评论推到时间轴后面，间距沿用同一条 24px。
+
+
+
 export function yieldToForeignDanmaku(state, obstacles, lineHeight, gap = 24) {
   if (!obstacles?.length) return;
   for (const item of state.items) {
@@ -321,7 +321,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
   }
   if (!open.length) return changed;
   state.cursor = nextCursor;
-  // 有空行时不要跟时间轴挤在同一行，评论才能用自己的速度。只有行都被占住才共行，并改成相同速度。
+
   const quiet = open.filter(lane => foreignSpeed(obstacles, top + lane * lineHeight, lineHeight) == null);
   const pool = quiet.length ? quiet : open;
   const lane = pool[Math.floor(roll(state) * pool.length)];
@@ -330,7 +330,7 @@ export function advanceDanmaku(state, comments, elapsed, { width, height, settin
   const speed = matched == null
     ? Math.min(0.68 + roll(state) * 0.64, laneSpeedCap(state, lane))
     : Math.min(matched, laneSpeedCap(state, lane));
-  // 从画面外进入。开播时不要把整批评论摆进画面。
+
   state.items.push({ id: state.nextId++, text, content, lane, x: width, y, width: textWidth, age: 0, speed });
   state.nextGap = state.clock + commentGap(settings.density, () => roll(state), duration, comments.length);
   return true;

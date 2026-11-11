@@ -3,7 +3,7 @@ import { commentFillCount } from './danmakuModel.mjs';
 
 const NUMERIC_ID = /^\d{6,30}$/;
 
-// 当前集的时间轴落地之后，才预载下一集。无效编号、未播放、或这一集已经预载过，都不发请求。
+
 export function planDanmakuWarmup({ enabled, timelineReady, seriesId, nextEpisodeId, warmed }) {
   if (!enabled || !timelineReady) return null;
   const series = String(seriesId || '');
@@ -28,11 +28,11 @@ export function useDanmakuWarmup({ seriesId, nextEpisodeId, enabled, timelineRea
     const plan = planDanmakuWarmup({ enabled, timelineReady, seriesId, nextEpisodeId, warmed: warmed.current });
     if (!plan) return undefined;
     let cancelled = false;
-    // 当前集刚读完，先等一下再碰下一集，避免和这一集的收尾请求叠在一起。
+
     const startTimer = setTimeout(() => {
       if (cancelled) return;
       warmed.current.add(plan.key);
-      // 下一集先读时间轴。够 25 条就不预载本集评论；不足的部分才按空档补。
+
       window.electronAPI?.getEpisodeDanmaku?.({ seriesId: plan.seriesId, vid: plan.episodeId, prefetch: true })
         ?.then?.(timeline => {
           if (cancelled) return 0;

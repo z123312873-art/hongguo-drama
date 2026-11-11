@@ -6,8 +6,8 @@ function romanValue(token) {
   return ROMAN[token] || ROMAN[String(token || '').toUpperCase()] || null;
 }
 
-// 后Ⅰ is the first sequel after an unnumbered original, so it is season 2.
-// A bare trailing 2, as in 老千2, is season 2 itself. Neither form may skip ahead.
+
+
 function trailingInstallment(text) {
   const marked = text.match(/^(.*?)后([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+|[ivx]{1,8}|\d{1,2})$/i);
   if (marked && marked[1].length >= 2) {
@@ -41,26 +41,26 @@ function seasonNumber(value) {
   return Number.isSafeInteger(season) && season >= 1 ? season : 0;
 }
 
-// Sentence punctuation after a title ("…福布斯了！") is not part of the series name, and must not
-// stop "…福布斯了第二季" from being recognised as the same series.
+
+
 const TAIL = /[\s!?.,;:~·…。、！？，；：～_—-]+$/u;
 const trimTail = text => text.replace(TAIL, '');
 const PUNCTUATION = /[\s\p{P}\p{S}]+/gu;
 
 function parseSeason(title) {
   const text = trimTail(canonicalTitle(title));
-  // （第一季）keeps 第N季 inside the brackets, so it is not a bare year like （2024）.
+
   const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两兩\d]+)[季部]|[（(]\s*第([一二三四五六七八九十百零两兩\d]+)[季部]\s*[）)]|[（(]([一二三四五六七八九十百零两兩\d]+)[）)]|season(\d+))$/i);
   if (!match) return trailingInstallment(text) || { base: text, season: 1, explicit: false };
   const value = match[2] || match[3] || match[4] || match[5];
   const season = seasonNumber(value);
-  // Bare bracket numbers above 99 are years or other title metadata, not seasons.
+
   if (match[4] && season > 99) return { base: text, season: 1, explicit: false };
   if (season < 1) return { base: text, season: 1, explicit: false, invalid: true };
   return { base: match[1], season, explicit: true };
 }
 
-// `key` ignores punctuation and symbols, so "名称：副标题" and "名称，副标题" name the same series.
+
 function seasonTitle(title) {
   const parsed = parseSeason(title);
   const base = trimTail(parsed.base);

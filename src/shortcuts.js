@@ -44,7 +44,7 @@ export function readShortcuts() {
   try {
     const stored = JSON.parse(window.localStorage.getItem(SHORTCUT_STORAGE_KEY));
     if (!validateShortcuts(stored)) return Object.fromEntries(SHORTCUT_ACTIONS.map(({ id }) => [id, stored[id]]));
-  } catch { /* Missing or damaged preferences use the complete default map. */ }
+  } catch {                                                                    }
   return { ...DEFAULT_SHORTCUTS };
 }
 
@@ -70,7 +70,7 @@ export function subscribeShortcuts(onChange) {
 export function ignoresPlaybackShortcut(target, key) {
   if (target?.isContentEditable || target?.closest?.('input, select, textarea, [contenteditable]:not([contenteditable="false"]), [data-shortcut-settings], [role="dialog"], [role="menu"], [role="menuitem"], [role="menuitemradio"], [role="listbox"]')) return true;
   if (target?.closest?.('[data-player-menu]')) {
-    // Escape/selection returns focus to the trigger; a closed menu must not keep swallowing playback keys.
+
     const closedTrigger = target.closest('button[aria-haspopup][aria-expanded="false"]') && target.closest('.player-container');
     if (!closedTrigger || !key || key === ' ' || key === 'Enter') return true;
   }

@@ -76,7 +76,7 @@ async function main() {
       await assert.rejects(resolveSeriesId(`http://share.example:${server.address().port}/`));
       assert.equal(reachedServer, false, 'private DNS must be rejected before opening a socket');
     } finally { dns.lookup = originalLookup; }
-    // An explicitly configured local proxy remains supported; it serves only this offline fixture.
+
     axios.get = (url, options) => original(url, { ...options,
       proxy: { protocol: 'http', host: '127.0.0.1', port: server.address().port } });
     await assert.rejects(resolveSeriesId('http://share.example/gzip'), /加载失败/);
@@ -94,7 +94,7 @@ async function main() {
     options.lookup(new URL(options.url).hostname, { all: true }, (error, addresses) => error ? reject(error) : resolve(addresses));
   });
   try {
-    // Synthetic responses use the supported official short-link and player URL shapes, without live traffic.
+
     axios.get = async (url, options) => {
       await lookup({ ...options, url }); connected.push(url);
       return url.includes('v.fqnovel.com')

@@ -1,21 +1,21 @@
-/**
- * setup-winCodeSign.js —— Windows 打包前置环境准备
- *
- * 背景：
- *   electron-builder 打包 Windows 时会下载 winCodeSign-2.6.0.7z，其中包含两个
- *   macOS 用的符号链接（darwin/10.12/lib/libcrypto.dylib、libssl.dylib）。
- *   7-Zip 在 Windows 上创建符号链接需要管理员权限或开启「开发者模式」，
- *   非管理员环境下 7za 会以退出码 2 结束，electron-builder 反复重试后中止打包。
- *
- * 本脚本做的事：
- *   借助 electron-builder 自带的 app-builder 把该压缩包解压到一个**固定目录**，
- *   之后配合 node_modules 里的小补丁（basename 会加入 .dsh-bak）即可跳过重复解压。
- *   注意：想重新生成时，请先把 .dsh-bak 备份改回原名。
- *
- * 用法：
- *   node scripts/setup-winCodeSign.js
- *   然后正常执行：npm run build
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -33,8 +33,8 @@ const MIRROR =
   process.env.ELECTRON_BUILDER_BINARIES_MIRROR ||
   'https://registry.npmmirror.com/-/binary/electron-builder-binaries/';
 const URL = `${MIRROR}winCodeSign-2.6.0/winCodeSign-2.6.0.7z`;
-// Official winCodeSign-2.6.0.7z from electron-userland/electron-builder-binaries.
-// SHA-256 matches app-builder-lib; SHA-512 is what app-builder download-artifact checks.
+
+
 const SHA256 = 'cdaec7154dda7cc31f88d886e2489379a0625a737d610b5ae7f62a12f16743a4';
 const SHA512 = '6LQI2d9BPC3Xs0ZoTQe1o3tPiA28c7+PY69Q9i/pD8lY45psMtHuLwv3vRckiVr3Zx1cbNyLlBR8STwCdcHwtA==';
 
@@ -95,7 +95,7 @@ download(URL, ARCHIVE).then(() => {
   return serveFile(ARCHIVE);
 }).then(({ server, url }) => {
   console.log('正在解压 winCodeSign（跳过 macOS 符号链接的报错不影响 Windows 文件）...');
-  // 只把已校验过的本地文件交给 app-builder，避免镜像在校验后被调包。
+
   const sevenZipDir = path.join(ROOT, 'node_modules', '7zip-bin', 'win', 'x64');
   const env = {
     ...process.env,
@@ -108,9 +108,9 @@ download(URL, ARCHIVE).then(() => {
     { cwd: ROOT, env },
     (err, stdout, stderr) => {
       server.close();
-    // 注意：那两个 macOS 符号链接会让 7za 返回退出码 2，app-builder 因此判定失败
-    // 并保留随机命名的临时目录；但 Windows 需要的文件其实已经解压完整。
-    // 所以这里不因 err 直接退出，而是按目录内容做校验。
+
+
+
     const parent = path.join(CACHE, 'winCodeSign');
     if (!fs.existsSync(parent)) {
       console.error('解压目录不存在，app-builder 输出：');
@@ -122,7 +122,7 @@ download(URL, ARCHIVE).then(() => {
       fs.existsSync(path.join(d, 'windows-10', 'x64', 'signtool.exe')) &&
       fs.existsSync(path.join(d, 'rcedit-x64.exe'));
 
-    // 随机目录名可能是纯数字，也可能是别的；统一按内容筛选
+
     const dirs = fs
       .readdirSync(parent, { withFileTypes: true })
       .filter((d) => d.isDirectory())

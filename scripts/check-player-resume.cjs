@@ -1,4 +1,4 @@
-// Run: node scripts/check-player-resume.cjs [name-filter]. In-memory media only; no playback/network/files.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -24,7 +24,7 @@ vm.runInNewContext(esm('src/native/next-season.mjs'), { module: nextSeasonModule
 const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 
 function mount({ local = false, saved = null, transcode, prepare, props = {}, episodeCount = 2, storage = new Map(), seriesId = 'A', settings = {}, lockedIndexes = [], apiOverrides = {}, realSeasons = false } = {}) {
-  // Playback fixtures model an explicit play command; target:null exercises passive library entry.
+
   props = { setEpisodesOpen() {}, ...((local || saved) ? { target: { seriesId, resume: true, ts: 1 } } : {}), ...props };
   const slots = [], effects = [], cleanups = [], saves = [], prepares = [], transcodes = [], cancelled = [];
   const releases = [], settingsSaved = [], historyListeners = new Set();
@@ -60,7 +60,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
     useCallback: (fn, deps) => react.useMemo(fn, deps),
     useEffect: (fn, deps) => { const i = cursor++; if (changed(slots[i], deps)) { slots[i] = deps; effects.push(() => { cleanups[i]?.(); cleanups[i] = fn(); }); } },
   };
-  // useCallback returns the callback, unlike useMemo.
+
   react.useCallback = (fn, deps) => react.useMemo(() => fn, deps);
   const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1).map(n => ({ vid_index: n, vid: `v${n}`, locked: lockedIndexes.includes(n), status: local ? 'completed' : 'missing', ...(local ? { fileUrl: `file:///mock-${n}.mp4`, savePath: `/mock-${n}.mp4` } : {}) }));
   const api = {
@@ -105,7 +105,7 @@ function mount({ local = false, saved = null, transcode, prepare, props = {}, ep
   };
   const flush = async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); render(); } };
   const metadata = () => { media.readyState = 1; media.currentSrc = media.src; find(n => n.type === 'video')?.props.onLoadedMetadata?.({ currentTarget: media }); mediaEvents.get('loadedmetadata')?.(); };
-  // Follow DOM propagation order; targetAction models a focused control's own listener.
+
   const dispatchKey = (type, init, targetAction) => {
     const event = { type, target: document.activeElement, defaultPrevented: false, propagationStopped: false,
       preventDefault() { this.defaultPrevented = true; },

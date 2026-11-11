@@ -82,7 +82,7 @@ async function checkBrowserTransport() {
 async function main() {
   await checkBrowserTransport();
   if (!fs.existsSync(file)) {
-    // Exercise the old real queue, with comic navigation stalled and real-drama ready.
+
     const code = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
     const context = { console: { log() {}, warn() {} }, searchWindowReady: null, SEARCH_TIMEOUT_MS: 1,
       SEARCH_SITE: 'https://hongguoduanju.com', SEARCH_UA: '', SNIFFER_JS: 'cards', BROWSE_META_JS: 'meta', setTimeout,

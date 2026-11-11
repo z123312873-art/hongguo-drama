@@ -42,7 +42,7 @@ function createAppExtra(react) {
     cache.set(relative, module.exports);
     return module.exports;
   }
-  // Favorite syncing has its own checks (check-record-controls); App views only need it to be inert.
+
   const favoriteSync = { __esModule: true, default: () => {}, useFavoriteSyncStatus: () => ({ mode: 'local' }) };
   return (name) => (name === './components/useFavoriteSync' ? favoriteSync : entries[name] ? load(entries[name]) : null);
 }

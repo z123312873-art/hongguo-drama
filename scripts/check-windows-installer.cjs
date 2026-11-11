@@ -1,4 +1,4 @@
-// Install only on disposable GitHub Windows CI; --config is safe on any host.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +9,7 @@ const setupName = `hongguo-downloader-${releaseVersion}-win-x64-setup.exe`;
 const previousRelease = {
   version: '1.80.0',
   url: 'https://github.com/jackotom/hongguo-drama/releases/download/v1.80/hongguo-downloader-1.80.0-win-x64-setup.exe',
-  // GitHub release asset 655494674, verified against the release API.
+
   sha256: '37b2b54f68648eff6d4b29f221f90681e55a304aaf5a6720ebfc83d702c29b06',
 };
 
@@ -71,7 +71,7 @@ async function runInstallerCheck() {
       appProcess.once('exit', onExit);
     });
     try {
-      // Closing destroys this context, so only process exit can reliably acknowledge the request.
+
       socket.send(JSON.stringify({ id: ++sequence, method: 'Runtime.evaluate', params: { expression: 'window.close()' } }));
       await exited;
       socket?.close(); socket = null;
@@ -83,7 +83,7 @@ async function runInstallerCheck() {
   }
 
   function install(installer = setup) {
-    // /D must be the final NSIS argument; this path belongs only to this CI run.
+
     execFileSync(installer, ['/S', '/currentuser', '/D=' + installDir], { timeout: 120000, windowsHide: true, stdio: 'pipe' });
     assert(fs.existsSync(exe), 'NSIS did not install the application at the isolated destination');
   }
@@ -168,7 +168,7 @@ async function runInstallerCheck() {
     await quitAppNormally();
     result.checks.push('Installed application opens before and after same-version reinstall; isolated settings, local storage and existing download remain');
 
-    // Clear only this disposable CI installation so the legacy baseline is a fresh install.
+
     execFileSync(path.join(installDir, `Uninstall ${pkg.build.productName}.exe`),
       ['/S', '/currentuser', '/KEEP_APP_DATA', '_?=' + installDir],
       { timeout: 120000, windowsHide: true, stdio: 'pipe' });

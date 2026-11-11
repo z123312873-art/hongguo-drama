@@ -1,4 +1,4 @@
-// Real normal-video HLS, routed through in-memory public-URL fixtures. No Internet or user data writes.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

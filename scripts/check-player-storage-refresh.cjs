@@ -1,4 +1,4 @@
-// Component-only playback bookkeeping; no decoding, real media, network or user data.
+
 const assert = require('node:assert/strict');
 const { mount } = require('./check-player-resume.cjs');
 

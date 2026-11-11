@@ -24,7 +24,7 @@ export function createVideoFrameUploader(video, queue, texture, width, height) {
           queue.copyExternalImageToTexture({ source: video }, { texture }, [width, height]);
           return;
         } catch (error) {
-          // Some HEVC decoders expose drawable frames without an importable GPU backing.
+
           if (error.name === 'SecurityError' || (error.name !== 'OperationError' && !/back resource/i.test(error.message || ''))) throw error;
           bridge = new OffscreenCanvas(width, height);
           context = bridge.getContext('2d', { alpha: false });
@@ -54,13 +54,13 @@ struct Vertex { @builtin(position) position: vec4f, @location(0) uv: vec2f }
   return vec4f(textureSample(image, imageSampler, input.uv).rgb, 1);
 }`;
 
-// Own the device so all library textures are released together on source changes.
+
 export async function createAnime4KRenderer(video, canvas, { signal, onError }) {
   if (!navigator.gpu) throw new Error('此运行环境未开放 WebGPU；已恢复原画，可使用锐化');
   const width = video.videoWidth;
   const height = video.videoHeight;
   if (!width || !height) throw new Error('视频画面尚未准备好，请稍后重新启用');
-  // shortcut: limit input to 1080p to bound GPU memory; expand after device-specific profiling.
+
   if (width * height > 1920 * 1080) throw new Error('Anime4K 暂支持 1080p 及以下片源；已恢复原画');
   const { CNNx2M } = await import('anime4k-webgpu');
   signal.throwIfAborted();

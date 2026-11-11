@@ -1,4 +1,3 @@
-/* Shared desktop design system. Native window controls occupy the first 48px on macOS. */
 :root {
   color-scheme: light;
   --bg: #faf9f7; --sidebar-bg: #f0eeeb; --sidebar-hover: #e7e4e0;
@@ -50,7 +49,6 @@ input::placeholder { color: var(--text-tertiary); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid var(--bg); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-/* Fill the window. Do not zoom this box: Chromium keeps the pre-zoom layout size, so a wide window shows empty bands on the right and bottom. */
 .app-layout { display: flex; height: 100vh; overflow: hidden; }
 .sidebar { width: 214px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
 .sidebar-window-drag { height: 24px; flex-shrink: 0; -webkit-app-region: drag; }
@@ -120,7 +118,6 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .cover-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); background: var(--bg-inset); }
-/* Empty states are quiet, useful destinations rather than decorative cards. */
 .search-welcome, .browse-error-state, .dm-empty, .player-empty { padding: 76px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; color: var(--text-tertiary); min-height: 340px; }
 .search-welcome > svg, .browse-error-state > svg, .dm-empty > svg, .player-empty > svg { color: var(--text-tertiary); margin-bottom: 6px; stroke-width: 1.2; }
 .search-welcome h3, .browse-error-state h3, .dm-empty > p:first-of-type, .player-empty > p:first-of-type { font-size: 19px; font-weight: 600; color: var(--text-primary); letter-spacing: -.02em; margin: 0; }
@@ -141,8 +138,6 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 @media (max-width: 1060px) { .sidebar { width: 190px; } .sidebar-brand { padding-left: 16px; padding-right: 12px; } .main-content { padding: 28px 26px 40px; } .window-toolbar { padding: 0 26px; } }
 @media (max-width: 760px) { .sidebar { width: 164px; } .brand-sub { display: none; } .sidebar-brand { gap: 8px; } .logo { width: 29px; height: 29px; } .sidebar-item { padding: 10px 8px; gap: 8px; } .main-content { padding: 24px 20px; } .window-toolbar { padding: 0 20px; } .folder-row, .input-group { flex-wrap: wrap; } .folder-row .input-field, .input-group .input-field { flex-basis: 100%; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
-
-/* Portrait mode keeps every destination accessible without spending width on a sidebar. */
 .toolbar-actions { display: flex; align-items: center; gap: 16px; }
 .script-toggle { -webkit-app-region: no-drag; }
 .layout-toggle { -webkit-app-region: no-drag; }
@@ -179,7 +174,6 @@ h2, .browse-title h2, .hero-text h2, .settings-header h2, .dm-title h2, .player-
 
 
 .layout-portrait.player-focused .compact-navigation, .layout-portrait.player-focused .toolbar-location { display: none; }
-/* Keep navigation below the toolbar: native select popups align the selected row above it. */
 .toolbar-page-picker { position: relative; flex: 1; width: 90px; max-width: 150px; min-width: 32px; -webkit-app-region: no-drag; }
 .toolbar-page-trigger { display: flex; align-items: center; justify-content: space-between; gap: 3px; width: 100%; min-height: 30px; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-primary); }
 .toolbar-page-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

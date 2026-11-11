@@ -48,11 +48,11 @@ export default function App() {
   const [visited, setVisited] = useState(['browse']);
   const [storageError, setStorageError] = useState('');
   const { notice: playbackNotice, showNotice: showPlaybackNotice, clearNotice: clearPlaybackNotice } = usePlaybackNotice();
-  const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
+  const [appInfo, setAppInfo] = useState(null);
   const [playerMounted, setPlayerMounted] = useState(false);
-  const [playerTarget, setPlayerTarget] = useState(null); // 浏览页点播 -> 播放页选中
+  const [playerTarget, setPlayerTarget] = useState(null);
   const rememberPlayerSeries = useCallback((seriesId) => {
-    // 保留命令时间戳避免重复初始化；重新挂载时只按当前系列的最新断点恢复。
+
     setPlayerTarget(target => ({ seriesId, resume: true, autoplay: false, ts: target?.ts }));
   }, []);
 
@@ -69,7 +69,7 @@ export default function App() {
     else setStorageError(data === null ? '' : data?.error || '数据保存失败，请检查磁盘空间和目录权限后重试。');
   }), []);
 
-  // 主进程发来的导航指令（例如浏览页点「立即播放」）
+
   useEffect(() => {
     if (!window.electronAPI.onNavigate) return undefined;
     return window.electronAPI.onNavigate((data) => {

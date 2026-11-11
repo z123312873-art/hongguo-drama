@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Protocol checks for comic-api.js with synthetic keys and responses.
+
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const crypto = require('node:crypto');

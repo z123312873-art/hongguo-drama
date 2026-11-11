@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// ttEncrypt and registration fields adapted from tsukiyo-zero/hongguoTV,
-// commit 388931852ddc614db8b00775a3dc54c5ede6307f,
-// kotlin-tv/core/src/main/kotlin/com/hongguotv/core/DeviceRegister.kt
-// (itself adapted from charlie901208/HGTV feat/phone-login, GPL-3.0-only).
-// Changes: fixed anonymous phone profile; process-only identity; no cookies or tokens.
+
+
+
+
+
+
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 
@@ -12,11 +12,11 @@ const REGISTER_HOSTS = ['log5-applog-lf.fqnovel.com', 'log5-applog-hl.fqnovel.co
 const registerUrls = hosts => hosts.map(host => `https://${host}/service/2/device_register/?${REGISTER_QUERY}`);
 const REGISTER_URLS = registerUrls(REGISTER_HOSTS);
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
-// A failed attempt registers nothing, so it is safe to try again once this window has passed.
-// Within the window every caller (prefetch, repeated clicks) still shares the one failure.
+
+
 const FAILURE_COOLDOWN_MS = 5000;
 const REGISTER_ATTEMPT_MS = 3500;
-// The device header is the only part that differs between applications. Hongguo stays the default.
+
 const HONGGUO_PROFILE = Object.freeze({
     displayName: '红果免费短剧', version: 73932, versionName: '7.3.9.32', aid: 8662, packageName: 'com.phoenix.read',
     userAgent: 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
@@ -36,7 +36,7 @@ function responseId(response, name) {
     return typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value) ? value : '';
 }
 
-// One uncached registration attempt. A failed attempt registers nothing, so the caller may retry.
+
 async function registerDevice(requestJson, profile = HONGGUO_PROFILE, options = {}) {
     let reason = 'UNKNOWN';
     try {
@@ -80,7 +80,7 @@ async function registerDevice(requestJson, profile = HONGGUO_PROFILE, options = 
         const urls = Array.isArray(options?.hosts) && options.hosts.length ? registerUrls(options.hosts) : REGISTER_URLS;
         for (const url of urls) {
             if (deadline <= Date.now()) break;
-            // One host that never answers must not use up the time the other hosts need.
+
             const attemptEnd = Math.min(deadline, Date.now() + REGISTER_ATTEMPT_MS);
             try {
                 response = await requestJson(url, { method: 'POST', headers, data }, attemptEnd, AbortSignal.timeout(Math.max(1, attemptEnd - Date.now())));
@@ -117,22 +117,22 @@ function getPlaybackDevice(requestJson) {
     return attempt;
 }
 
-// The signed video API now answers an unregistered device with an empty 200.
-// Drop a rejected or rejected-by-the-server identity so the next play can register once more.
+
+
 function refreshPlaybackDevice(requestJson) {
     if (refreshing) return refreshing;
     registration = null;
     failedAt = 0;
     const run = getPlaybackDevice(requestJson);
     refreshing = run;
-    // The caller handles `run`. This side chain only clears the single-flight slot.
+
     run.finally(() => { if (refreshing === run) refreshing = null; }).catch(() => {});
     return run;
 }
 
-// The video service lets one registered device ask for a single episode, then answers it with empty bodies.
-// Playback therefore takes a device of its own for every lookup. Registering takes about half a second, so a
-// few unused devices are kept ready and refilled in the background once playback has asked for the first one.
+
+
+
 const POOL_SIZE = 2;
 const POOL_TTL_MS = 5 * 60 * 1000;
 const POOL_FAILURE_PAUSE_MS = 15 * 1000;
@@ -163,22 +163,22 @@ function refillPool() {
     }
 }
 
-// Starts keeping devices ready. Nothing registers until playback (or a caller) asks for this.
+
 function armPlaybackPool(requestJson) {
     if (typeof requestJson !== 'function') return;
     poolRequest = requestJson;
     refillPool();
 }
 
-// A device that has not been used yet. Rejects like registerDevice does when registration is blocked.
-// `again` is the second device of one lookup: it asks the service even inside the pause that follows a failure.
+
+
 async function takePlaybackDevice(requestJson, { again = false } = {}) {
     if (!again && takeFailure && Date.now() - takeFailure.at < FAILURE_COOLDOWN_MS) throw takeFailure.error;
     takeFailure = null;
     if (!livePool().length && pending.size) await Promise.race([...pending]);
     const ready = livePool().shift();
     if (ready) { refillPool(); return ready.identity; }
-    // A background registration that has just been refused is the answer; asking again at once would only repeat it.
+
     if (poolFailure && Date.now() - poolFailedAt < 2000) { takeFailure = { at: Date.now(), error: poolFailure }; throw poolFailure; }
     try {
         const identity = await registerDevice(requestJson);
@@ -190,8 +190,8 @@ async function takePlaybackDevice(requestJson, { again = false } = {}) {
     }
 }
 
-// Network or proxy settings changed: a failure under the old route says nothing about the new one.
-// A registration that is still running or already succeeded is kept.
+
+
 function forgetFailedPlaybackDevice() {
     if (registration && failedAt) { registration = null; failedAt = 0; }
     takeFailure = null;

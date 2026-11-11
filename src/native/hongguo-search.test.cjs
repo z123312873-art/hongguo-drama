@@ -1,5 +1,5 @@
 'use strict';
-// 官网搜索接口解析、重试与缓存；全部离线，不访问真实站点。
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {

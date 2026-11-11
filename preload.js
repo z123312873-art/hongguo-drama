@@ -1,4 +1,4 @@
-// 红果短剧：桌面桥接入口。
+
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('stealth-state', listener);
     return () => ipcRenderer.removeListener('stealth-state', listener);
   },
-  // 应用信息 / 官网链接
+
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   openAppUpdate: () => ipcRenderer.invoke('open-app-update'),
   getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),
@@ -33,11 +33,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 
 
-  // 红果解析与下载
+
   hongguoResolve: (input) => ipcRenderer.invoke('hongguo-resolve', input),
   hongguoDownloadBatch: (payload) => ipcRenderer.invoke('hongguo-download-batch', payload),
 
-  // 搜索（内嵌浏览器嗅探）
+
   searchSeries: (keyword, options) => ipcRenderer.invoke('search-series', keyword, options),
   findSeriesSequels: (seriesId, options) => ipcRenderer.invoke('find-series-sequels', seriesId, options),
   searchResolve: (seriesId) => ipcRenderer.invoke('search-resolve', seriesId),
@@ -56,7 +56,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dismissedCount: () => ipcRenderer.invoke('dismissed-count'),
   rescanDownloads: () => ipcRenderer.invoke('rescan-downloads'),
 
-  // 在线播放（内存或临时磁盘缓存 + 自定义流协议）
+
   prepareOnlinePlay: (payload) => ipcRenderer.invoke('prepare-online-play', payload),
   releaseOnlinePlay: (payload) => ipcRenderer.invoke('release-online-play', payload),
   onlineCacheStatus: () => ipcRenderer.invoke('online-cache-status'),
@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('online-play-progress', listener);
   },
 
-  // 兼容模式（HEVC -> H.264 转码，解决「黑屏有声」）
+
   transcodeForPlayback: (payload) => ipcRenderer.invoke('transcode-for-playback', payload),
   cancelTranscodeForPlayback: (payload) => ipcRenderer.invoke('cancel-transcode-for-playback', payload),
   compatCacheStatus: () => ipcRenderer.invoke('compat-cache-status'),
@@ -79,7 +79,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('transcode-progress', listener);
   },
 
-  // 浏览（分类页）
+
   getCustomSources: () => ipcRenderer.invoke('get-custom-sources'),
   saveCustomSource: draft => ipcRenderer.invoke('save-custom-source',draft),
   deleteCustomSource: id => ipcRenderer.invoke('delete-custom-source',id),
@@ -111,7 +111,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('navigate', listener);
   },
 
-  // 播放器
+
   getSeriesEpisodes: (seriesId) => ipcRenderer.invoke('get-series-episodes', seriesId),
   downloadSingleEpisode: (seriesId, vidIndex, quality) =>
     ipcRenderer.invoke('download-single-episode', seriesId, vidIndex, quality),
@@ -119,7 +119,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('save-playback-position', seriesId, vidIndex, currentTime, metadata),
   getPlaybackPosition: (seriesId) => ipcRenderer.invoke('get-playback-position', seriesId),
 
-  // 观看记录
+
   getWatchHistory: () => ipcRenderer.invoke('get-watch-history'),
   deleteWatchHistory: (seriesId) => ipcRenderer.invoke('delete-watch-history', seriesId),
   refreshWatchHistory: () => ipcRenderer.invoke('refresh-watch-history'),
@@ -130,7 +130,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('watch-history-updated', listener);
   },
 
-  // 一键合并
+
   getFfmpegStatus: () => ipcRenderer.invoke('get-ffmpeg-status'),
   mergeSeries: (seriesId, outputName, options) => ipcRenderer.invoke('merge-series', seriesId, outputName, options),
   cancelMerge: (id) => ipcRenderer.invoke('cancel-merge', id),
@@ -157,7 +157,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('merge-failed', listener);
   },
 
-  // 设置
+
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getWindowLayout: () => ipcRenderer.invoke('get-window-layout'),
   setWindowLayout: (mode) => ipcRenderer.invoke('set-window-layout', mode),
@@ -177,16 +177,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('storage-error', listener);
   },
 
-  // 网络代理
+
   getProxyStatus: () => ipcRenderer.invoke('get-proxy-status'),
   testProxy: (draft) => ipcRenderer.invoke('test-proxy', draft),
 
-  // 下载管理
+
   getDownloadTasks: () => ipcRenderer.invoke('get-download-tasks'),
   deleteTask: (taskId) => ipcRenderer.invoke('delete-task', taskId),
   deleteTasks: (taskIds) => ipcRenderer.invoke('delete-tasks', taskIds),
 
-  // 文件清理
+
   deleteTaskWithFiles: (taskId, deleteFiles) => ipcRenderer.invoke('delete-task', taskId, { deleteFiles }),
   deleteTasksWithFiles: (taskIds, deleteFiles) => ipcRenderer.invoke('delete-tasks', taskIds, { deleteFiles }),
   deleteSeriesFiles: (seriesId, options) => ipcRenderer.invoke('delete-series-files', seriesId, options),
@@ -199,12 +199,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: (taskId) => ipcRenderer.invoke('open-folder', taskId),
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
 
-  // 一键启动 / 一键暂停 / 队列状态
+
   pauseAll: () => ipcRenderer.invoke('pause-all'),
   resumeAll: () => ipcRenderer.invoke('resume-all'),
   getQueueStatus: () => ipcRenderer.invoke('get-queue-status'),
 
-  // 事件监听
+
   onDownloadProgress: (cb) => {
     const listener = (_e, data) => cb(data);
     ipcRenderer.on('download-progress', listener);

@@ -1,5 +1,5 @@
-// Poster URLs differ per Hongguo endpoint. The App API serves HEIC variants that Chromium cannot decode;
-// the same image id is also published as a plain JPEG-compatible rendition on the public CDN.
+
+
 const CDN_HOST = /(^|\.)(fqnovelpic\.com|byteimg\.com)$/i;
 const COMPATIBLE_CDN = 'https://p3-novel.byteimg.com';
 const UNDECODABLE = /\.(?:heic|heif)$/i;
@@ -15,9 +15,9 @@ function compatibleCover(value) {
   return `${COMPATIBLE_CDN}${url.pathname.slice(0, marker)}~tplv-shrink:640:0.image`;
 }
 
-// Comic posters are served as small WebP renditions: about a fifth of the bytes of the site's own cover size.
-// Accepts the site's full URL, the search API's "<folder>/<md5>" path, or a bare md5. Covers live in one of two
-// image folders; each rendition is asked for in the folder the title's cover was published in.
+
+
+
 function comicCover(value, width = 320) {
   const raw = String(value ?? '').trim();
   const match = raw.match(/(?:^|\/)(novel-pic|novel-images)\/([0-9a-f]{32})(?:~|$)/i)

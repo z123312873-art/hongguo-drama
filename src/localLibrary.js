@@ -5,7 +5,7 @@ const category = value => CATEGORIES.includes(value) ? value : '';
 
 export const validPublishedAt = value => typeof value === 'number' && Number.isFinite(value) && value > 0 && !Number.isNaN(new Date(value).getTime());
 const usableOnlineTime = value => value == null ? null : validPublishedAt(value) ? value : null;
-// The account a favorite was last confirmed in; null when it lives only on this computer.
+
 const cloudUser = value => typeof value === 'string' && /^\d{1,30}$/.test(value) ? value : null;
 const stored = item => ({ id: item.id, title: item.title, published_at: item.published_at, favorite: item.favorite, favorited_at: validPublishedAt(item.favorited_at) ? item.favorited_at : null, cover: item.cover || '', online_time: usableOnlineTime(item.online_time), cloud_user: cloudUser(item.cloud_user), category: category(item.category) });
 
@@ -45,7 +45,7 @@ export function saveLocalSeries({ id, title, published_at, favorite, cover, onli
   };
   const items = [...current.items.filter(item => item.id !== seriesId), next];
   try {
-    // Persist public metadata and the heart-click time, never reviews.
+
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.map(stored)));
     window.dispatchEvent(new Event(CHANGE_EVENT));
     return { items, error: '' };
@@ -67,7 +67,7 @@ export function removeLocalSeries(id) {
   }
 }
 
-// Writes a whole list computed from the account (same checks as reading it back).
+
 export function replaceLocalLibrary(items) {
   const current = readLocalLibrary();
   if (current.error) return current;

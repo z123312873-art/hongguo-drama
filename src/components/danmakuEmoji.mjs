@@ -1,5 +1,5 @@
-// 红果弹幕把官方表情写成 [赞]、[送花] 这类代码。对照的是平台表情名，显示成通用 emoji。
-// 不认识的方括号原样留下，避免把普通标注当成表情。
+
+
 
 const EMOJI = {
   微笑: '😊', 偷笑: '🤭', 笑: '😄', 什么: '😳', 什麼: '😳', 害羞: '🥰',
@@ -34,7 +34,7 @@ function emojiCluster(char) {
   return code === 0x200d || code === 0xfe0f || code === 0xfe0e || /\p{Extended_Pictographic}/u.test(char);
 }
 
-// 表情往往比一个汉字宽。宽度估小了，后一条会在间距还没留够时出发。
+
 export function measureDanmakuText(value, fontSize) {
   const text = String(value || '');
   let units = 0;
@@ -43,7 +43,7 @@ export function measureDanmakuText(value, fontSize) {
     if (emojiCluster(char)) { units += 1.35; emoji = true; }
     else units += 1;
   }
-  // 没有表情时沿用原来的字宽，时间轴续发间距不变。表情按更宽的字形留空。
+
   if (!emoji) return (Array.from(text).length + 1) * fontSize;
   return Math.ceil((units + 0.4) * fontSize);
 }

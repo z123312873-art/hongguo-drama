@@ -1,24 +1,24 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Request scheduler for the per-device-limited comic chapter API.
-//
-// Measured behaviour of the service: one device may call the chapter endpoint about a hundred times per
-// 30-50 seconds. After that it answers with empty bodies until the window passes, while a fresh device has a
-// fresh allowance. This scheduler keeps a sustained rate well below that, backs off with jitter when an empty
-// body shows up anyway, and only then moves to a new device. It knows nothing about HTTP or comics: the
-// caller supplies `call(session, input)` and `createSession()`.
-//
-// Two further failure shapes are handled: a device the service refuses with a business code (not an empty
-// body) is replaced like an exhausted one, and every device is retired after a fixed number of calls so it
-// never reaches the point where the service starts refusing it.
+
+
+
+
+
+
+
+
+
+
+
+
 const EMPTY = 'EMPTY_RESPONSE';
 const REJECTED = 'BUSINESS_REJECTED';
-// Business codes that look like a property of the request (an unknown book). They can also be what a service
-// answers to a client it routes elsewhere, so they get a few fresh devices and routes before they are final.
+
+
 const PERMANENT_CODES = [101104];
 const PERMANENT_ATTEMPTS = 5;
-// A device that cannot even be registered is not retried for long: the person is waiting on a click.
+
 const REGISTRATION_ATTEMPTS = 3;
-// A request refused by this many different devices is not going to be served; say so instead of waiting.
+
 const REJECTED_ATTEMPTS = 3;
 const RETRYABLE_NETWORK = new Set(['ETIMEDOUT', 'ECONNABORTED', 'ECONNRESET', 'ERR_NETWORK', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE']);
 
@@ -60,7 +60,7 @@ class ApiScheduler {
         this.stats = { calls: 0, empties: 0, rejections: 0, rotations: 0, retired: 0, retries: 0, failures: 0 };
     }
 
-    // Same key while queued or running: share the result. A more urgent caller raises the priority.
+
     run(key, priority, input) {
         const existing = this.jobs.get(key);
         if (existing) {
@@ -72,7 +72,7 @@ class ApiScheduler {
         }
         const job = { key, priority, input, attempt: 0, cancelled: false, enqueuedAt: this.now() };
         job.promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
-        // A caller that gave up must not leave an unhandled rejection behind.
+
         job.promise.catch(() => {});
         this.jobs.set(key, job);
         this.queue.push(job);
@@ -81,7 +81,7 @@ class ApiScheduler {
         return job.promise;
     }
 
-    // Queued work can be withdrawn; a request already on the wire is allowed to finish.
+
     cancel(matcher) {
         const test = typeof matcher === 'function' ? matcher : (key) => key === matcher;
         let cancelled = 0;
@@ -158,7 +158,7 @@ class ApiScheduler {
         try { session = await this.currentSession(); }
         catch (error) { return this.retryWithoutSession(job, error); }
         session.calls += 1;
-        // Retire the device before the service has a reason to refuse it. This call still uses it.
+
         if (session.calls >= this.callsPerSession && this.session === session) {
             this.session = null;
             this.generation += 1;
@@ -184,7 +184,7 @@ class ApiScheduler {
         this.stats.rotations += 1;
     }
 
-    // Drop the current device so the next call registers a new one. Counted as a rotation only when asked.
+
     replaceSession(counted = false, reason = 'rejected') {
         this.session = null;
         this.generation += 1;
@@ -192,7 +192,7 @@ class ApiScheduler {
         if (counted) this.stats.rotations += 1;
     }
 
-    // Registering a device can fail for a moment (network, service). It is retried like any other call.
+
     retryWithoutSession(job, error) {
         job.attempt += 1;
         this.stats.retries += 1;
@@ -206,7 +206,7 @@ class ApiScheduler {
     requeue(job, delay) {
         const wait = delay * (0.75 + this.random() * 0.5);
         if (wait > 0) this.pausedUntil = Math.max(this.pausedUntil, this.now() + wait);
-        // Back of its priority class, not the head: other work must not starve behind a failing request.
+
         job.enqueuedAt = this.now() + wait;
         this.queue.push(job);
         this.sortQueue();
@@ -231,17 +231,17 @@ class ApiScheduler {
                 : fail('漫画服务连接失败，请检查网络后重试', network ? code : 'ERR_NETWORK', { cause: error }));
         }
         let delay = this.backoff[Math.min(job.attempt - 1, this.backoff.length - 1)];
-        // A device the service has only just registered may not be known everywhere yet. Give it a moment
-        // before deciding it is the problem.
+
+
         if (rejected && !permanent) delay = Math.max(delay, this.rejectionPauseMs);
         if (permanent) {
-            // Another device on another route right away; a stale answer from a retired device changes nothing.
+
             this.stats.rejections += 1;
             if (session.generation === this.generation) this.replaceSession(true);
             delay = 0;
         } else if (empty || rejected) {
             if (empty) this.stats.empties += 1; else this.stats.rejections += 1;
-            // Only the session that is still current counts: a late answer from a retired device means nothing.
+
             if (session.generation === this.generation) {
                 const streak = empty ? ++this.consecutiveEmpties : ++this.consecutiveRejections;
                 if (streak >= (empty ? this.emptiesToRotate : this.rejectionsToRotate)) {
@@ -252,7 +252,7 @@ class ApiScheduler {
                         this.stats.failures += 1;
                         return this.finish(job, null, error);
                     } else {
-                        // Too many devices already: wait out the window instead of registering more.
+
                         delay = Math.max(delay, 15000);
                     }
                 }

@@ -1,6 +1,6 @@
-// Session-scoped playlist cache for the discovery feed. It lives outside React so
-// leaving and re-entering the page can paint the last list immediately and then
-// revalidate against the source in the background.
+
+
+
 export const FEED_CACHE_LIMIT = 24;
 
 const cache = new Map();

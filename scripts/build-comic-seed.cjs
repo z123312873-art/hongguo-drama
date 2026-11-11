@@ -1,10 +1,10 @@
-// Refreshes src/native/comic-seed.json: the list of comics the app can fall back on when the live listings
-// (search, category pages, details) return nothing for a given network location.
-//
-//   node scripts/build-comic-seed.cjs [count]
-//
-// The sweep is the same one the app runs, so the same filters apply. Run it from a network the reading service
-// answers normally; the output only lists public titles (id, name, cover, episode count, tags).
+
+
+
+
+
+
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { createComicService } = require('../src/native/comic');
@@ -20,9 +20,9 @@ const want = Math.max(40, Math.min(1000, Number.parseInt(process.argv[2], 10) ||
     console.error(`No comics returned (${found.note || found.error?.message || 'unknown'}); the seed file was left unchanged.`);
     process.exit(1);
   }
-  // Titles already in the file stay, so a sweep that reaches fewer titles never shrinks the list.
+
   let previous = [];
-  try { previous = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch (_) { /* a first run has no file */ }
+  try { previous = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch (_) {                               }
   const seen = new Set();
   const list = [...found.items, ...(Array.isArray(previous) ? previous : [])]
     .filter((card) => !seen.has(card.series_id) && seen.add(card.series_id))

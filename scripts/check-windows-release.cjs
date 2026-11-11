@@ -1,4 +1,4 @@
-// Run the single-file portable EXE on disposable Windows CI with an isolated profile and CC0 footage.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -307,7 +307,7 @@ async function keyHandoff(key, code, expectedSource) {
     const result = { ended: false, sourceChanged: false, nextPlaying: false, frames: 0, visibleFrames: 0, fullscreenLost: false };
     const ended = () => { result.ended = true; };
     video.addEventListener('ended', ended, { once: true });
-    // Seeking near the end lets the real media ended event drive Player's automatic next-episode path.
+
     video.currentTime = video.duration - 0.3;
     const deadline = performance.now() + 8000;
     try {

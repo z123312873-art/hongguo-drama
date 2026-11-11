@@ -2,7 +2,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-// Legacy behavior checks use empty events; keep the real production IPC guard active.
+
 module.exports = function installTrustedIpc(context, handlers) {
   const window = vm.runInContext('mainWindow', context) || { webContents: {} };
   window.isDestroyed ||= () => false;

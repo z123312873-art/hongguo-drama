@@ -25,7 +25,7 @@ const checks = [
     vm.runInNewContext(extract('transcodeForPlayback'), context);
     const start = source.indexOf("ipcMain.handle('transcode-for-playback'");
     vm.runInNewContext(source.slice(start, source.indexOf('\n});', start) + 4), context);
-    // A cache is not a downloaded original; exercise the real access check before reading it.
+
     const payload = { seriesId: 'xifan:huabo:a', vidIndex: 2, vid: 'xifan:huabo:a:2' };
     const first = handlers['transcode-for-playback']({}, payload);
     const shared = handlers['transcode-for-playback']({}, payload);

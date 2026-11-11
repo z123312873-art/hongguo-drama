@@ -1,4 +1,4 @@
-// Run: node scripts/check-macos.cjs. No network, GUI, or user data.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -91,7 +91,7 @@ function load(platform = 'darwin') {
     const h = load();
     assert.equal(h.context.resolveFfmpeg('ffmpeg'), null);
     const ff = executable(path.join(h.root, 'Resources/bin/ffmpeg'));
-    // Windows does not implement POSIX executable bits; simulate the OS denial.
+
     h.denyExecute(ff);
     assert.equal(h.context.resolveFfmpeg('ffmpeg'), null);
   });

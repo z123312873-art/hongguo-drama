@@ -1,4 +1,4 @@
-// Isolated main/store behavior: no real media, windows, network or user files.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), vm = require('node:vm');
 const { EventEmitter } = require('node:events'), { createRequire } = require('node:module');
@@ -118,7 +118,7 @@ const checks = [
     for (const name of ['.tmp_active.mp4', 'old.mp4', '1_001.mp4']) fs.writeFileSync(path.join(dir, name), 'data');
     const nativeStat = h.run('fs.statSync');
     h.context.cacheStat = file => ({ ...nativeStat(file), size: 3 * 1024 ** 3, atimeMs: file.endsWith('old.mp4') ? 2 : 1 });
-    // Override only this VM's fs facade, never the real shared module.
+
     const realFs = h.run('fs'); const descriptor = Object.getOwnPropertyDescriptor(realFs, 'statSync');
     try {
       realFs.statSync = h.context.cacheStat;

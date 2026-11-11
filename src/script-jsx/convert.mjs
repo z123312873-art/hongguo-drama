@@ -17,7 +17,7 @@ function convertNode(node) {
   return changed ? next : node;
 }
 
-// Input values are intentionally left alone so a search box keeps the typed query.
+
 export function convertConfig(config) {
   if (!config || config['data-script'] === 'keep' || config.translate === 'no') return config;
   let next = config;

@@ -1,4 +1,4 @@
-// Run only after both final Apps have been signed, notarized and stapled.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

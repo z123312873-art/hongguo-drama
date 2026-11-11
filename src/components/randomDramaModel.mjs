@@ -7,7 +7,7 @@ const SOURCE_IDS = {
   hema: /^hema:\d{1,30}$/,
 };
 
-// IPC requests cannot be aborted in transit; cancellation stops waiting and all subsequent UI/player work.
+
 export async function waitForRequest(promise, { signal, timeoutMs = 25_000, message = '加载超时，请重试' } = {}) {
   signal?.throwIfAborted();
   let timer, abort;

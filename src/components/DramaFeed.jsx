@@ -19,7 +19,7 @@ function clockOf(timestamp) {
   return Number.isNaN(time.getTime()) ? '' : time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-// 先显示会话内上次片单，再后台更新；更新失败保留旧内容。只有“刷新片单”强制取最新。
+
 function DramaFeed({ active = true, onNavigate }) {
   const [source, setSource] = useState('hongguo');
   const { sources: mediaSources, revision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
@@ -129,7 +129,7 @@ function DramaFeed({ active = true, onNavigate }) {
     }
   }, [active, random, sourcesLoading, source, category, revision, ranking, mediaSources]);
 
-  // 来源配置被编辑后（revision 变化）旧片单不再可信，清空后按新 revision 重新取。
+
   useEffect(() => {
     if (revisionRef.current === revision) return;
     revisionRef.current = revision;

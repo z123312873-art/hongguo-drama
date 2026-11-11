@@ -1,4 +1,4 @@
-// Offline main-process boundary regression; no user data, network or real windows.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

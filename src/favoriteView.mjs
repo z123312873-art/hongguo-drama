@@ -1,5 +1,5 @@
-// The favorites page is one list: newest favorite first, narrowed by a filter. Categories come from
-// the account list or from the section the heart was clicked in; unknown stays uncategorized.
+
+
 
 export const FAVORITE_CATEGORIES = ['real', 'ai', 'comic'];
 
@@ -14,7 +14,7 @@ const FILTERS = [
 
 export const favoriteCategory = value => FAVORITE_CATEGORIES.includes(value) ? value : '';
 
-// Section of the discover page → category of a favorite clicked there.
+
 export function categoryFromBrowse(category) {
   const name = String(category || '').replace(/^hot-/, '');
   if (name === 'real-drama') return 'real';
@@ -23,7 +23,7 @@ export function categoryFromBrowse(category) {
   return '';
 }
 
-// Not online yet, or online by date but not confirmed playable.
+
 export function isWaiting(item, now, released = {}) {
   const at = Number(item?.online_time);
   return Number.isFinite(at) && at > 0 && (at > now || released[item.id] !== true);
@@ -42,7 +42,7 @@ const newestFirst = (a, b) => {
   return right - left || String(a.title).localeCompare(String(b.title), 'zh-CN') || String(a.id).localeCompare(String(b.id));
 };
 
-// Keep the same filters visible even when a category is empty or the account has not loaded yet.
+
 export function favoriteView(items, { filter = 'all', now = Date.now(), released = {}, folderIds = null } = {}) {
   const favorites = (Array.isArray(items) ? items : []).filter(item => item && item.favorite && (!Array.isArray(folderIds) || folderIds.includes(String(item.id))));
   const counts = Object.fromEntries(FILTERS.map(({ id }) => [id, favorites.filter(item => matches(item, id, now, released)).length]));

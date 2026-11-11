@@ -21,12 +21,12 @@ function uniqueCards(lists) {
   return out;
 }
 
-/**
- * Loads the comic listing in the order the page should show it:
- *   saved snapshot (instant) -> site page 1 (first paint) -> remaining site pages in order -> extra titles.
- * `onProgress` receives every state change; `isCurrent()` lets a newer request cancel this one.
- * The site's own order always comes first, extra titles are appended after it, and the total never passes COMIC_MAX.
- */
+
+
+
+
+
+
 export async function loadComicCatalog({ api, onProgress, isCurrent = () => true, forceRefresh = false } = {}) {
   const emit = (state) => { if (isCurrent()) onProgress?.(state); };
   let shown = [];
@@ -41,7 +41,7 @@ export async function loadComicCatalog({ api, onProgress, isCurrent = () => true
         snapshotShown = true;
         emit({ items, siteCount: reply.snapshot.siteCount || items.length, expectedTotal: items.length, pending: true, stale: true, notice: '' });
       }
-    } catch (_) { /* the network path below still runs */ }
+    } catch (_) {                                         }
   }
 
   const firstReply = await api.browseList({ source: 'hongguo', category: 'comic', page: 1, forceRefresh });
@@ -64,7 +64,7 @@ export async function loadComicCatalog({ api, onProgress, isCurrent = () => true
   const siteTotal = Number(firstReply.total) || firstReply.results.length * totalPages;
   const publish = (pending, extra = {}) => {
     const items = prefix();
-    // A saved snapshot stays on screen until the fresh site pages are complete, so nothing flickers.
+
     if (snapshotShown && pending) return;
     shown = items;
     emit({ items, siteCount: items.length, expectedTotal: Math.min(COMIC_MAX, Math.max(items.length, siteTotal)), pending, stale: false, notice: '', ...extra });
@@ -117,7 +117,7 @@ export async function loadComicCatalog({ api, onProgress, isCurrent = () => true
     return true;
   };
   if (!await askExtras()) return { cancelled: true };
-  // The service keeps adding titles in the background; ask again while it does, and show what arrives.
+
   for (let round = 0; refreshing && round < EXTRAS_POLL_ROUNDS; round += 1) {
     emit({ items: uniqueCards([site, extras]).slice(0, COMIC_MAX), siteCount: site.length, expectedTotal: COMIC_MAX, pending: true, stale: false,
       notice: complete ? '' : PAGES_NOTICE });

@@ -1,5 +1,5 @@
-// Adapted from dawei233/hongguo-drama, commit c884fab6c6e36ad38173e251738b9b35f958383f (GPL-3.0).
-// https://github.com/dawei233/hongguo-drama
+
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -16,7 +16,7 @@ const makeFeed = () => createOfficialFeed(SERIES, VID);
 const at = (time, text) => ({ time, text, color: '#FFFFFF', mode: 'scroll' });
 const options = (settings = DEFAULT_DANMAKU_SETTINGS, extra = {}) => ({ width: 800, height: 600, settings, reducedMotion: false, ...extra });
 
-/** 按 60fps 推进到指定时间，模拟真实播放。 */
+
 function playTo(state, list, from, to, optionsFor) {
   const step = 1 / 60;
   for (let time = from; time <= to + 1e-9; time += step) {
@@ -75,7 +75,7 @@ test('appendOfficialPage 合并、去重、按时间排序，并保留失败说�
   assert.equal(feed.loaded, true);
   assert.equal(feed.error, '');
 
-  // 分页结果二次写入不应产生重复
+
   appendOfficialPage(feed, { success: true, series_id: SERIES, episode_id: VID, items: [at(1, '前'), at(7, '新')] });
   assert.deepEqual(feed.danmaku.map(item => item.text), ['前', '后', '新']);
 
@@ -171,7 +171,7 @@ test('倒退跳转：重建后续光标并保留在屏弹幕', () => {
   const cursorBefore = state.cursor;
   assert.equal(cursorBefore, 2);
 
-  // 跳回 1.5 秒：1.5 秒之后、含 2 秒的弹幕应重新可发
+
   advanceTimedDanmaku(state, list, 1.5, 0, options());
   assert.equal(state.items.length, 2, '跳转时在屏弹幕继续自然滚动');
   assert.equal(state.cursor, 1, '光标应回到 1.5 秒对应的位置');
@@ -183,7 +183,7 @@ test('快进跳转：不把中间整段弹幕一次性倒到屏幕上', () => {
   playTo(state, list, 0, 2, options());
   const resumeAt = lowerBoundTime(list, 145);
   advanceTimedDanmaku(state, list, 150, 0.016, options());
-  // 单帧最多投放有限条，绝不能因为快进而把 1~150 秒的弹幕全倒出来。
+
   assert.ok(state.items.length <= 4, `快进后单帧投放应受限，实际 ${state.items.length}`);
   assert.ok(state.cursor >= resumeAt, '光标应落在仍算新鲜的窗口内');
   assert.ok(state.cursor <= resumeAt + 4, '光标不应越过快进位置批量消费');
@@ -206,15 +206,15 @@ test('屏蔽词命中的弹幕被跳过，且不占用通道', () => {
 
 test('同一道内允许续发：前一条走出足够距离后可以再发', () => {
   const settings = { ...DEFAULT_DANMAKU_SETTINGS, density: 'sparse' };
-  const runtime = options(settings, { height: 120 }); // 小容器只容纳一行。
+  const runtime = options(settings, { height: 120 });
   const state = makeFeed().animation;
   const list = [at(0, '第一条'), at(2, '第二条')];
   advanceTimedDanmaku(state, list, 0, 0.016, runtime);
   assert.equal(state.items.length, 1);
-  // 只推进 0.1 秒：第一条还占着道口，第二条必须等待
+
   playTo(state, list, 0, 0.1, runtime);
   assert.equal(state.items.length, 1);
-  // 推进到 3.5 秒：第二条已到点、第一条也走远，两条应同时在屏
+
   playTo(state, list, 0.1, 3.5, runtime);
   assert.equal(state.items.length, 2);
   assert.deepEqual(state.items.map(item => item.text), ['第一条', '第二条']);
@@ -223,7 +223,7 @@ test('同一道内允许续发：前一条走出足够距离后可以再发', ()
 
 test('真实密度下不丢弹幕：0.5 条/秒的 100 条应全部投放', () => {
   const state = makeFeed().animation;
-  // 时间轴 0~198 秒，每 2 秒一条，接近实测的每集弹幕密度
+
   const list = Array.from({ length: 100 }, (_, index) => at(index * 2, `弹幕${index}`));
   playTo(state, list, 0, 200, options());
   assert.equal(state.cursor, 100, '全部弹幕都应被消费');
@@ -240,7 +240,7 @@ test('突发弹幕不会互相追尾：同道内前后两条始终保持间距',
   for (let time = 0; time <= 25; time += step) {
     advanceTimedDanmaku(state, list, time, step, options(settings));
     peak = Math.max(peak, state.items.length);
-    // 同道内按 x 降序，新的那条必须整条落在旧的那条右侧留出间距之内
+
     for (const lane of new Set(state.items.map(item => item.lane))) {
       const inLane = state.items.filter(item => item.lane === lane).sort((a, b) => b.x - a.x);
       for (let i = 1; i < inLane.length; i++) {
@@ -292,7 +292,7 @@ test('暂停时不推进：位置与时间都不变', () => {
   advanceTimedDanmaku(state, list, 0, 0.016, options());
   playTo(state, list, 0, 1, options());
   const x = state.items[0].x;
-  // elapsed=0 表示这一帧媒体时间没有前进（暂停）
+
   advanceTimedDanmaku(state, list, 1, 0, options());
   assert.equal(state.items[0].x, x);
 });
@@ -314,14 +314,14 @@ test('长弹幕被截断到 80 字，并保留原文供设置变更时重新计�
 
 test('状态出口：失败绝不说成"暂无弹幕"', () => {
   const base = { source: 'official', supported: true, enabled: true, active: true, visible: true, loading: false, notice: '', loaded: true, count: 0 };
-  // 有 error 时必须原样透出
+
   assert.equal(resolveDanmakuStatus({ ...base, error: '弹幕接口不可用（HTTP 502）' }), '弹幕接口不可用（HTTP 502）');
-  // 没 error 且没有内容，才是真的没有弹幕
+
   assert.equal(resolveDanmakuStatus({ ...base, error: '' }), '本集暂无弹幕');
-  // 有内容时给出条数，并带上来源限制说明
+
   assert.match(resolveDanmakuStatus({ ...base, count: 12, notice: '上游仅返回部分结果' }), /已载入 12 条弹幕/);
   assert.match(resolveDanmakuStatus({ ...base, count: 12, notice: '上游仅返回部分结果' }), /上游仅返回部分结果/);
-  // 未启用 / 不支持 / 未播放 各有明确说法
+
   assert.match(resolveDanmakuStatus({ ...base, enabled: false }), /开启后/);
   assert.match(resolveDanmakuStatus({ ...base, supported: false }), /仅红果来源/);
   assert.match(resolveDanmakuStatus({ ...base, active: false }), /播放本集后/);

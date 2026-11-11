@@ -1,4 +1,4 @@
-// Offline behavioral checks. All files live in a disposable directory; no app data/network.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -24,7 +24,7 @@ function load(settings = {}, overrides = {}, env = process.env) {
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   require('./fixtures/trusted-ipc.cjs')(context, handlers);
   const pump = context.pumpQueue;
-  context.pumpQueue = () => {}; // Inspect queued destinations without fetching media.
+  context.pumpQueue = () => {};
   return { app, context, handlers, dir, pump, opened, proxyCalls, settings: () => stored, run: code => vm.runInContext(code, context), set(name, value) { context.fixture = value; vm.runInContext(`${name} = fixture`, context); } };
 }
 function task(id, dir, status = 'completed', filename = `${id}.mp4`, index = 1) {
@@ -681,7 +681,7 @@ async function check(name, run) { try { await run(); console.log('PASS ' + name)
   for (const key of ['ALL_PROXY', 'all_proxy']) await check(`${key} follows direct, custom and system proxy mode changes`, async () => {
     const startup = 'http://127.0.0.1:19191';
     const h = load({}, {}, { [key]: startup });
-    // Execute axios's real environment resolver against the isolated app environment.
+
     const proxyModule = { exports: {} };
     vm.runInNewContext(fs.readFileSync(req.resolve('proxy-from-env'), 'utf8'), { require: req, module: proxyModule, exports: proxyModule.exports, process: h.context.process, URL });
     const route = () => proxyModule.exports.getProxyForUrl('https://media.example.test/episode.mp4');

@@ -18,7 +18,7 @@ const PROXY_MODES = [
   { value: 'direct', label: '强制直连', desc: '忽略一切代理，直接连接' },
 ];
 
-// 常见代理软件默认端口，方便一键填入
+
 const PORT_PRESETS = [
   { label: 'Clash / Mihomo', port: 7890 },
   { label: 'V2rayN', port: 10809 },
@@ -26,7 +26,7 @@ const PORT_PRESETS = [
   { label: 'Burp / 抓包', port: 8080 },
 ];
 
-/** 已保存设置 -> 当前生效的代理描述 */
+
 function describeProxy(settings) {
   if (!settings || settings.proxy_enabled !== true) {
     return { on: false, text: '未启用（所有请求直连）' };
@@ -97,7 +97,7 @@ function SettingsPage({ active = true, preview = false }) {
     setSaved(false);
     setSaveError('');
     try {
-      // Submit only edited fields; the main process merges newer playback options.
+
       const editable = ['root', 'name_format', 'download_quality', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'app_updates_enabled'];
       const submitted = {};
       for (const key of editable) {
@@ -130,7 +130,7 @@ function SettingsPage({ active = true, preview = false }) {
     setTestResult(null);
   };
 
-  // ===== 代理弹窗 =====
+
   const openProxyModal = () => {
     testVersion.current++;
     setProxyDraft({
@@ -212,10 +212,10 @@ function SettingsPage({ active = true, preview = false }) {
           <p className="settings-hint">播放时先读取时间轴弹幕。时间轴不够 25 条时用本集评论补上；时间轴更多时不再补，并且一集最多播放 35 条。本集评论的间隔和速度会变动，同一行与时间轴对齐，避免互相盖住。下一集在当前集读完后先预载时间轴。</p>
           <button type="button" className="btn btn-outline btn-sm" onClick={async () => {
             try {
-              const result = await window.electronAPI.openExternalUrl('https://github.com/dawei233/hongguo-drama');
+              const result = await window.electronAPI.openExternalUrl('https://github.com/z123312873-art/hongguo-drama/blob/main/LICENSE');
               if (result?.success === false) throw new Error(result.error || '来源链接打开失败');
             } catch (error) { setSaveError(error.message || '来源链接打开失败'); }
-          }}>弹幕实现参考 dawei233/hongguo-drama（GPL-3.0）</button>
+          }}>檢視 GPL-3.0 授權</button>
         </div>
         <div className="settings-group">
           <label className="settings-label">下载目录</label>

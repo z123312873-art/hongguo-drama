@@ -6,7 +6,7 @@ import {
   pageCount, pageSlice, pagerNumbers, readerColumnWidth, skeletonCount,
 } from '../../comicLayout.mjs';
 
-// Window sizes the app is checked at: 1K (1920x1080), 2K (2560x1440), 4K (3840x2160) and smaller laptops.
+
 const SCREENS = [
   { name: '1K', width: 1920, height: 1080, sidebarWidth: 220 },
   { name: '2K', width: 2560, height: 1440, sidebarWidth: 220 },

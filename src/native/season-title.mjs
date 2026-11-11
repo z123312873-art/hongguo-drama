@@ -1,5 +1,5 @@
-// Renderer-only copy. The installed main process uses season-title.js because
-// app.asar cannot resolve this ESM import. Keep the two parsers aligned.
+
+
 import { canonicalTitle } from '../chineseScript.mjs';
 
 const ROMAN = {Ⅰ:1,Ⅱ:2,Ⅲ:3,Ⅳ:4,Ⅴ:5,Ⅵ:6,Ⅶ:7,Ⅷ:8,Ⅸ:9,Ⅹ:10,Ⅺ:11,Ⅻ:12,I:1,II:2,III:3,IV:4,V:5,VI:6,VII:7,VIII:8,IX:9,X:10,XI:11,XII:12};
@@ -41,26 +41,26 @@ function seasonNumber(value) {
   return Number.isSafeInteger(season) && season >= 1 ? season : 0;
 }
 
-// Sentence punctuation after a title ("…福布斯了！") is not part of the series name, and must not
-// stop "…福布斯了第二季" from being recognised as the same series.
+
+
 const TAIL = /[\s!?.,;:~·…。、！？，；：～_—-]+$/u;
 const trimTail = text => text.replace(TAIL, '');
 const PUNCTUATION = /[\s\p{P}\p{S}]+/gu;
 
 function parseSeason(title) {
   const text = trimTail(canonicalTitle(title));
-  // （第一季） keeps 第N季 inside the brackets. A bare （2024） is still not a season.
+
   const match = text.match(/^(.*?)(?:第([一二三四五六七八九十百零两兩\d]+)[季部]|[（(]\s*第([一二三四五六七八九十百零两兩\d]+)[季部]\s*[）)]|[（(]([一二三四五六七八九十百零两兩\d]+)[）)]|season(\d+))$/i);
   if (!match) return trailingInstallment(text) || { base: text, season: 1, explicit: false };
   const value = match[2] || match[3] || match[4] || match[5];
   const season = seasonNumber(value);
-  // Bare bracket numbers above 99 are years or other title metadata, not seasons.
+
   if (match[4] && season > 99) return { base: text, season: 1, explicit: false };
   if (season < 1) return { base: text, season: 1, explicit: false, invalid: true };
   return { base: match[1], season, explicit: true };
 }
 
-// `key` ignores punctuation and symbols, so "名称：副标题" and "名称，副标题" name the same series.
+
 export function seasonTitle(title) {
   const parsed = parseSeason(title);
   const base = trimTail(parsed.base);

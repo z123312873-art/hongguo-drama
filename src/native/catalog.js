@@ -8,7 +8,7 @@ const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
 const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama', 'hot-ai-drama']);
 const TIMEOUT_MS = 10000;
 const MAX_PAGE_BYTES = 8 * 1024 * 1024;
-// Same window as the discover page. A manual refresh still bypasses this.
+
 const CACHE_MS = 10 * 60 * 1000;
 const cache = new Map();
 const pending = new Map();
@@ -23,7 +23,7 @@ function ratingNumber(value) {
 const NEW_STATUS = /^新[剧劇]$/;
 const PREMIERE_STATUS = /^(?:红果首发|紅果首發)$/;
 
-// The ranking pages expose the site's own status chips (statusTags / status-tag items).
+
 function statusMatch(labels, pattern) {
   return Array.isArray(labels) && labels.some(label => typeof label === 'string' && pattern.test(label.replace(/\s+/g, '')));
 }
@@ -40,12 +40,12 @@ function publicMetadata(item) {
     : /连载|更新至\s*\d+\s*集/.test(episode_label) ? 'ongoing' : 'unknown';
   const raw = Number(item?.first_visible_time);
   const timestamp = raw < 1e12 ? raw * 1000 : raw;
-  // create_time is not an established release date, and numeric series_status has no verified mapping.
+
   const published_at = Number.isFinite(timestamp) && timestamp > 0 && timestamp <= Date.now() ? timestamp : null;
   return { episode_label, completion_status, published_at };
 }
 
-// Read only the JSON assignment; never execute scripts received from the website.
+
 function readRouterData(html) {
   const match = String(html).match(/(?:window\.)?_ROUTER_DATA\s*=\s*(\{)/);
   if (!match) throw new Error('来源页面未返回目录数据，请重试或打开来源页面');
@@ -78,7 +78,7 @@ function parseCatalog(html, category, page, sourceUrl) {
     seen.add(String(item.series_id));
     return true;
   }).map(item => {
-    // Comics are read, not played: no web episode memory, no score, and a lighter poster rendition.
+
     if (!comic) rememberWebEpisodes(item.series_id, item);
     return {
       series_id: String(item.series_id), series_title: item.series_name.trim(),
@@ -117,8 +117,8 @@ function cleanIntroduction(value) {
 function parseRanking(html, category, page, sourceUrl) {
   const text = value => decodeHtml(String(value).replace(/<[^>]*>/g, ' ')).trim();
   let data;
-  // Streaming SSR puts the public payload inside an HTML-encoded JSON argument.
-  // Parse its literals only; no remote functions or scripts are ever executed.
+
+
   for (const script of String(html).matchAll(/<script\b([^>]*)>/gi)) {
     if (!/data-fn-name=["']mergeLoaderData["']/.test(script[1])) continue;
     const encoded = script[1].match(/data-fn-args=(?:"([^"]*)"|'([^']*)')/);
@@ -128,7 +128,7 @@ function parseRanking(html, category, page, sourceUrl) {
       if (args[0] !== `rank_${category}/page` || !Array.isArray(args[1])) continue;
       const content = args[1].find(item => item.key === 'content' && item.routerDataFnName === 'p');
       if (content?.routerDataFnArgs?.[0]) data = JSON.parse(content.routerDataFnArgs[0]);
-    } catch (_) { /* Some streamed responses expose only their rendered cards. */ }
+    } catch (_) {                                                                 }
   }
   const seen = new Set();
   const normalize = item => {
@@ -151,7 +151,7 @@ function parseRanking(html, category, page, sourceUrl) {
   };
   let results = data?.isSuccess !== false && Array.isArray(data?.rankList) ? data.rankList.map(normalize).filter(Boolean) : [];
   if (!results.length) {
-    // Some pages omit the resolved loader. Semantic headings and detail links remain in SSR HTML.
+
     for (const match of String(html).matchAll(/<article\b[^>]*>([\s\S]*?)<\/article>/gi)) {
       const article = match[1];
       const heading = article.match(/<h2\b[^>]*\bid=["']rank-title-(\d+)["'][^>]*>([\s\S]*?)<\/h2>/i);
@@ -193,7 +193,7 @@ function parseRanking(html, category, page, sourceUrl) {
 }
 
 async function fetchCatalogPage(url, signal, proxyLogin) {
-  // Use the app's Chromium session, with proxy authentication but no site cookies.
+
   if (!net?.request) return (await axios.get(url, {
     ...require('./direct-connect').directAxiosOptions(),
     timeout: TIMEOUT_MS, signal, responseType: 'text', maxContentLength: MAX_PAGE_BYTES,
@@ -242,7 +242,7 @@ async function readList(options = {}, proxyLogin) {
   if (!forceRefresh && cache.get(url)?.expires > Date.now()) return cache.get(url).data;
   if (pending.has(url)) return pending.get(url);
 
-  // Each URL owns its request: a slow comic page cannot queue behind real drama (or vice versa).
+
   const task = (async () => {
     const controller = new AbortController();
     let timer;
@@ -254,10 +254,10 @@ async function readList(options = {}, proxyLogin) {
       const data = (ranking ? parseRanking : parseCatalog)(html, category, pg, url);
       cache.set(url, { expires: Date.now() + CACHE_MS, data });
       if (category === 'comic' && !genre) {
-        // The comic snapshot is an optimisation; it must never fail a catalog request.
-        try { require('./comic').service().noteSitePage({ page: data.page, totalPages: data.totalPages, items: data.results }); } catch (_) { /* ignored */ }
+
+        try { require('./comic').service().noteSitePage({ page: data.page, totalPages: data.totalPages, items: data.results }); } catch (_) {               }
       }
-      // Bound memory while retaining the latest category/filter pages.
+
       if (cache.size > 32) cache.delete(cache.keys().next().value);
       return data;
     } catch (error) {

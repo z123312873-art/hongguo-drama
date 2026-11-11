@@ -117,7 +117,7 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
   totalRef.current = total;
   const observed = typeof IntersectionObserver === 'function';
 
-  // Pages near the viewport, plus a few more after the last of them, are fetched ahead of the reader.
+
   const refreshSpan = useCallback((count) => {
     const next = preloadWindow({ near: nearPages.current, total: count });
     setSpan((value) => (value.lo === next.lo && value.hi === next.hi ? value : next));
@@ -156,8 +156,8 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
     load(readViewport());
     scroller?.scrollTo?.({ top: 0 });
     return () => { request.current += 1; clearTimeout(prefetchTimer.current); };
-    // The scroller node only changes the first time it mounts; resetting the scroll is for new episodes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+
   }, [itemId, load]);
 
   useEffect(() => () => {
@@ -166,8 +166,8 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
     warmed.current.clear();
   }, []);
 
-  // The next episode's list of pictures is asked for early. Its first pictures are fetched once the reader has
-  // reached the end of this episode's pictures, so the two never compete for the same connections.
+
+
   const nextId = nav.next?.itemId || '';
   const nextChapter = useRef({ id: '', pictures: [] });
   useEffect(() => {
@@ -178,7 +178,7 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
       try {
         const reply = await window.electronAPI?.comicChapter?.({ itemId: nextId, width: widthRef.current || 720, priority: 'prefetch' });
         if (live && reply?.success) nextChapter.current = { id: nextId, pictures: firstPictureUrls(reply) };
-      } catch (_) { /* a missed prefetch only costs the wait on the next click */ }
+      } catch (_) {                                                               }
     }, PREFETCH_DELAY_MS);
     return () => { live = false; clearTimeout(prefetchTimer.current); };
   }, [chapter, nextId]);
@@ -216,7 +216,7 @@ export default function ComicReader({ seriesTitle, episodes, itemId, onClose, on
         try {
           const reply = await window.electronAPI.comicChapter({ itemId, width: widthRef.current, priority: 'click' });
           if (ticket === request.current && reply?.success && Array.isArray(reply.pictures) && reply.pictures.length) setChapter(reply);
-        } catch (_) { /* sharper renditions are optional */ }
+        } catch (_) {                                       }
       }, RESIZE_DELAY_MS);
     };
     window.addEventListener('resize', onResize);

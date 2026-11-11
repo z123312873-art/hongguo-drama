@@ -13,7 +13,7 @@ function meetsDownloadQuality({ width, height } = {}, quality = 'auto') {
     && Math.min(...dimensions) >= Number.parseInt(quality, 10);
 }
 
-// The short side decides the tier. A 1280×720 file labeled 1080p is 720p.
+
 function measuredDownloadQuality(width, height) {
   const dimensions = [Number(width), Number(height)];
   if (!dimensions.every(value => Number.isFinite(value) && value > 0)) return 'auto';

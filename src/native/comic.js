@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Picture-comic data layer: catalog snapshot, extra titles, episode directories, chapters and fallback images.
-//
-// Nothing here is tied to a particular title. The site catalog supplies the first entries in its own order,
-// a search sweep (seeded by the site's own tags) fills the rest up to MAX_COMICS, and every network call
-// goes through one scheduler so a burst of clicks can never exceed what a single device may do.
+
+
+
+
+
+
 const fs = require('node:fs');
 const path = require('node:path');
 const realApi = require('./comic-api');
@@ -16,9 +16,9 @@ const DIRECTORY_TTL_MS = 30 * 60 * 1000;
 const CHAPTER_TTL_MS = 20 * 60 * 1000;
 const DEAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const POOL_RETRY_MS = 30 * 60 * 1000;
-// A build that added titles is continued soon; one that added nothing waits POOL_RETRY_MS.
+
 const POOL_CONTINUE_MS = 60 * 1000;
-// The first listing waits this long for a first batch of extras, then answers and lets the caller poll.
+
 const FIRST_BATCH_WAIT_MS = 8000;
 const POOL_BUILD_BUDGET_MS = 90 * 1000;
 const POOL_LIMIT = 700;
@@ -29,7 +29,7 @@ const CATEGORY_PAGES = 5;
 const MAX_CATEGORIES = 12;
 const DETAIL_SAMPLE = 20;
 const DIRECTORY_SAMPLE = 4;
-// Used only when the site catalog yields too few tags to search with.
+
 const FALLBACK_KEYWORDS = ['都市', '重生', '穿越', '古风', '玄幻', '逆袭', '恋爱', '悬疑', '系统', '总裁', '萌宝', '搞笑'];
 const ID = /^\d{6,30}$/;
 
@@ -71,7 +71,7 @@ function hashString(text) {
     return hash >>> 0;
 }
 
-// Same input, same order; a new day gives a new order. The input order never matters.
+
 function seededShuffle(items, seedText, keyOf = (item) => String(item)) {
     const list = items.slice().sort((a, b) => keyOf(a).localeCompare(keyOf(b)));
     const random = mulberry32(hashString(seedText));
@@ -82,7 +82,7 @@ function seededShuffle(items, seedText, keyOf = (item) => String(item)) {
     return list;
 }
 
-// Same idea, but a title's place depends only on the title and the seed: removing or adding others never moves it.
+
 function seededRank(items, seedText, keyOf = (item) => String(item)) {
     return items.map((item) => ({ item, key: keyOf(item), rank: hashString(`${seedText}:${keyOf(item)}`) }))
         .sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key)).map((entry) => entry.item);
@@ -107,7 +107,7 @@ function cleanTags(value) {
     return tags;
 }
 
-// "第12话 标题" -> 12; anything else keeps a short title, or its position.
+
 function episodeLabel(title, index) {
     const numbered = String(title || '').match(/^第\s*(\d{1,5})\s*[话話集章回]/);
     if (numbered) return String(Number(numbered[1]));
@@ -120,7 +120,7 @@ function bookToCard(book, api) {
     const title = typeof book?.book_name === 'string' ? book.book_name.trim() : '';
     if (!ID.test(id) || !title) return null;
     const serial = Number(book.serial_count) || 0;
-    // The listing calls name a title's tags in different fields; the first one that has any wins.
+
     const tags = [book.tags, book.pure_category_tags, book.category].map(cleanTags).find((list) => list.length) || [];
     const score = Number(book.score);
     return {
@@ -130,7 +130,7 @@ function bookToCard(book, api) {
     };
 }
 
-// Why a title cannot join the list, or '' when it can. The reasons are counted so an empty result can be explained.
+
 function rejection(card, exclude) {
     if (!card) return 'invalid';
     if (exclude.has(card.series_id)) return 'known';
@@ -153,15 +153,15 @@ function topTags(cards, count) {
 function createComicService({ api = realApi, now = Date.now, schedulerOptions = {}, imageFetcher, seed = [] } = {}) {
     let cacheFile = '';
     let persistTimer = null;
-    // `served` is the order in which extra titles were first shown. It is what keeps a list steady: a refresh adds
-    // to it, and only a title that turned out unreadable is taken out.
+
+
     const state = { site: { pages: {}, totalPages: 0, savedAt: 0 }, pool: { items: [], builtAt: 0 }, served: { day: '', ids: [] } };
-    // The shuffle day is fixed when the service first picks, so the order never turns over under a person who is browsing.
+
     let sessionDay = '';
-    // Titles whose directory came back empty are left out of the extra titles for a week, then tried again.
+
     const dead = new Set();
     const deadAt = new Map();
-    // A shipped list of titles, used only to fill what the live listings could not supply.
+
     const seedCards = (Array.isArray(seed) ? seed : []).filter((card) => validCard(card) && eligible(card, new Set()))
         .map((card) => ({ ...card, source_kind: 'seed' }));
     const directories = lru(60);
@@ -175,8 +175,8 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
     let imageActive = 0;
     const imageWaiters = [];
 
-    // The route the service accepted last is tried first. A refusal moves on to the next one, but only when a
-    // new device is being registered anyway, so a throttled device never makes the route jump around.
+
+
     const routes = Array.isArray(api.ROUTES) && api.ROUTES.length ? api.ROUTES : [undefined];
     let routeIndex = 0;
     let savedRoute = routes[0]?.id;
@@ -231,7 +231,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             if (typeof data.served?.day === 'string' && Array.isArray(data.served.ids)) {
                 state.served = { day: data.served.day, ids: data.served.ids.map(String).filter((id) => ID.test(id)).slice(0, SERVED_LIMIT) };
             }
-        } catch (_) { /* a missing or damaged cache only costs one network round trip */ }
+        } catch (_) {                                                                    }
     }
 
     function validCard(card) {
@@ -248,7 +248,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
                 const temporary = `${cacheFile}.${process.pid}.tmp`;
                 fs.writeFileSync(temporary, JSON.stringify({ version: 1, site: state.site, pool: state.pool, served: state.served, route: routes[routeIndex]?.id, dead: [...deadAt.entries()].slice(-200) }));
                 fs.renameSync(temporary, cacheFile);
-            } catch (_) { /* the cache is an optimisation only */ }
+            } catch (_) {                                         }
         }, 500);
         persistTimer.unref?.();
     }
@@ -283,10 +283,10 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return out;
     }
 
-    // Extra titles keep the order they were first shown in. A pick only adds titles after the ones already
-    // served, so a refresh, a growing pool or a second call never swaps a poster that is on screen. A title
-    // that cannot be read (parked as dead) is the one thing that leaves the list. Live titles are taken first,
-    // the shipped list tops up what is still missing.
+
+
+
+
     function selectExtras(exclude, limit, at, { record = true } = {}) {
         const want = Math.max(0, limit);
         const day = sessionDay || (sessionDay = dayKey(at));
@@ -334,7 +334,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return pool.slice(0, Math.max(0, limit));
     }
 
-    // The last complete listing, shown at once while the network refreshes it.
+
     function snapshot() {
         const pages = Object.keys(state.site.pages).length;
         if (!pages || !state.site.totalPages || pages < state.site.totalPages) return null;
@@ -343,8 +343,8 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return { items: [...site, ...extras].slice(0, MAX_COMICS), siteCount: site.length, savedAt: state.site.savedAt };
     }
 
-    // Extra titles come from two independent listings: the comic category pages (found through the categories
-    // of titles we already know) and, when those fall short, a keyword search. Either may be empty on its own.
+
+
     async function buildPool(site, blocked, needed, onFound = () => {}, { budgetMs = POOL_BUILD_BUDGET_MS, headroom = 30 } = {}) {
         const exclude = new Set([...site.map((card) => card.series_id), ...blocked]);
         const found = new Map();
@@ -363,7 +363,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             for (const book of Array.isArray(books) ? books : []) {
                 stats.seen += 1;
                 const card = bookToCard(book, api);
-                // Comic listings only hold comics; a record that names another genre is the only one turned away.
+
                 const genre = book?.genre_type === undefined || book?.genre_type === null || book?.genre_type === '' ? api.COMIC_GENRE : String(book.genre_type);
                 const reason = genre !== api.COMIC_GENRE ? 'offGenre' : rejection(card, exclude) || (found.has(card.series_id) ? 'known' : '');
                 if (reason) { rejected[reason] += 1; continue; }
@@ -372,7 +372,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
             }
             if (fresh.length) { onFound(fresh); learn(fresh); }
         };
-        // Tags of titles found along the way become further search words, so a sweep can go on past its first list.
+
         const order = [];
         const queued = new Set();
         const learn = (cards) => {
@@ -423,8 +423,8 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return { items: [...found.values()], failed: failures >= 3, error: lastError, note };
     }
 
-    // Categories of the known titles, most common first. One details call covers a spread of the site listing.
-    // When that call returns nothing usable, the directory records of a few titles give the same information.
+
+
     async function discoverCategories(site, run) {
         const known = site.map((card) => card.series_id);
         if (!known.length) return [];
@@ -446,7 +446,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return [...frequency.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, MAX_CATEGORIES).map(([id]) => id);
     }
 
-    // Extra titles never block the listing: a stale pool is served while a new one is built.
+
     async function extras({ exclude = [], limit = MAX_COMICS, waitMs = FIRST_BATCH_WAIT_MS } = {}) {
         const blocked = (Array.isArray(exclude) ? exclude : []).map(String).filter((id) => ID.test(id)).slice(0, POOL_LIMIT);
         const cap = Math.max(0, Math.min(MAX_COMICS, Number.parseInt(limit, 10) || 0));
@@ -454,13 +454,13 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         const at = now();
         const fresh = state.pool.builtAt && at - state.pool.builtAt < POOL_TTL_MS;
         const enough = selectLive(blocked, cap, at).length >= cap;
-        // A pool that stays short is not rebuilt on every call. One that is still growing is continued,
-        // and an empty one is retried sooner than a pool that simply has nothing more to give.
+
+
         const cooldown = !state.pool.items.length ? 60 * 1000 : lastBuildGain > 0 ? POOL_CONTINUE_MS : POOL_RETRY_MS;
         if ((!fresh || !enough) && !poolBuild && at - lastBuildAt > cooldown) {
             lastBuildAt = at;
             const before = state.pool.items.length;
-            // Titles join the pool as each search page arrives, so a caller that polls sees it grow.
+
             const merge = (cards) => {
                 const merged = new Map(state.pool.items.map((card) => [card.series_id, card]));
                 for (const card of cards) merged.set(card.series_id, card);
@@ -473,7 +473,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
                 lastBuildGain = state.pool.items.length - before;
             }).catch((error) => { lastPoolError = error; lastBuildGain = 0; }).finally(() => { lastBuildAt = now(); poolBuild = null; });
         }
-        // Nothing to show yet: wait a little for a first batch, then answer and let the caller ask again.
+
         if (poolBuild && selectExtras(blocked, cap, now(), { record: false }).length < cap) {
             const running = poolBuild;
             let timer;
@@ -538,7 +538,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         });
     }
 
-    // The public CDN answers 404 for some pictures. The signed copy is encrypted; decrypt it here.
+
     async function image({ itemId, index }) {
         const position = Number(index);
         if (!Number.isInteger(position) || position < 0 || position > 2000) throw Object.assign(new Error('图片序号无效'), { code: 'APP_INPUT' });
@@ -551,7 +551,7 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         };
         let data;
         try { data = await attempt(false); }
-        // A signed link expires; one fresh chapter call gets new ones.
+
         catch (error) { if (error?.status === 403 || error?.code === 'INVALID_RESPONSE') data = await attempt(true); else throw error; }
         const mime = data[0] === 0x89 ? 'image/png' : data[0] === 0x52 ? 'image/webp' : 'image/jpeg';
         return { mime, data };
@@ -561,12 +561,12 @@ function createComicService({ api = realApi, now = Date.now, schedulerOptions = 
         return { ...scheduler.snapshot(), directories: directories.size, chapters: chapters.size, pool: state.pool.items.length };
     }
 
-    // Leaving a chapter withdraws the look-ahead for it; the catalog sweep keeps running.
+
     function cancelPrefetch() {
         return scheduler.cancel((key, job) => job.priority === PRIORITY.prefetch);
     }
 
-    // A one-off sweep of the live listings with no site titles to go by; used to refresh the shipped list.
+
     function collect({ needed = MAX_COMICS, budgetMs = 5 * 60 * 1000 } = {}) {
         return buildPool([], [], needed, () => {}, { budgetMs, headroom: 0 });
     }
@@ -588,8 +588,8 @@ function service() {
     return shared;
 }
 
-// Shown after every route has been tried. A service that refuses all of them is most likely answering the
-// client's network location, which only a different exit can change.
+
+
 function withNetworkHint(error, proxyEnabled) {
     const message = String(error?.message || '');
     if (error?.code !== 'BUSINESS_REJECTED' || message.includes('代理')) return message;

@@ -1,5 +1,5 @@
-// Hongguo search: App signed search and the public JSON API run together.
-// The hidden page sniff is only a fallback when the public API shape changes.
+
+
 const { searchHongguo, HongguoSearchError } = require('./hongguo-search');
 const { searchApp } = require('./hongguo-app-search');
 const { searchNewReleasesDetailed } = require('./hongguo-app-new');
@@ -37,7 +37,7 @@ function mergeResults(primary, extra) {
       results.push(copy);
       continue;
     }
-    // A later channel may know the poster the first one lacked.
+
     if (!existing.cover && item.cover) existing.cover = item.cover;
   }
   return results;
@@ -62,7 +62,7 @@ async function lookupNewReleases(query, results, deadline, now, searchNew) {
   }
   const current = now();
   if (current < newReleaseCooldownUntil) {
-    // A skipped supplement is not a failed search. Sequel checks must not surface this cooldown.
+
     return { results, checked: false, error: '' };
   }
   if (deadline - current < 900) return { results, checked: false, error: '' };

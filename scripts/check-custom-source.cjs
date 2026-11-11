@@ -1,4 +1,4 @@
-// Offline MacCMS fixtures; no user data, credentials, DNS or media downloads.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

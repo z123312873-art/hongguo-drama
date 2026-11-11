@@ -1,5 +1,5 @@
-// In-memory Player handlers for sources the browser cannot seek (encrypted episodes streamed as fragmented MP4).
-// The real Chromium behavior is covered by check-seek-chromium.cjs.
+
+
 const assert = require('node:assert/strict');
 const { mount } = require('./check-player-resume.cjs');
 
@@ -14,7 +14,7 @@ function press(ui, key, extra = {}) {
   return down;
 }
 
-// A stream the browser cannot seek until the player swaps in the prepared complete file.
+
 function streamFixture(overrides = {}) {
   const deferred = [];
   const prepare = p => {

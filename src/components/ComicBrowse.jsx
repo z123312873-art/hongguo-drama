@@ -28,7 +28,7 @@ function readPage(reservedRows) {
   } catch (_) { return { columns: 0, pageSize: 0 }; }
 }
 
-// A group is named after the episode numbers it holds, which can skip a number the source never published.
+
 function groupName(episodes, group) {
   const first = episodes[group.start - 1]?.label;
   const last = episodes[group.end - 1]?.label;
@@ -67,7 +67,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
         forceRefresh,
         isCurrent: () => mine === ticket.current,
         onProgress: (state) => {
-          // A refresh never makes a list on screen shorter or flickers back to a first page.
+
           if (hadItems && state.pending && state.items.length < catalogRef.current.items.length) return;
           setCatalog(state);
           if (!state.pending && state.items.length) catalogMemory = { state, at: Date.now() };
@@ -108,8 +108,8 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
   const counts = useMemo(() => sourceTagCounts(catalog.items), [catalog.items]);
   useEffect(() => { setChips(previous => previous.every(label => counts.has(label)) ? previous : []); }, [counts]);
   const size = layout.pageSize || 24;
-  // The pager counts only the posters that are here, so it never shows pages that have nothing on them yet.
-  // Empty cells fill the end of the last page while more titles are on their way.
+
+
   const knownTotal = filtered.length;
   const currentPage = clampPage(page, knownTotal, size);
   const visible = filtered.slice((currentPage - 1) * size, currentPage * size);
@@ -128,8 +128,8 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Pointing at an episode asks for its list of pictures and warms its first picture, so the click that follows
-  // finds both ready. Only a few episodes are asked for, and only after the pointer rests on one.
+
+
   const hint = useCallback((itemId) => {
     clearTimeout(hoverTimer.current);
     if (asked.current.has(itemId) || asked.current.size >= HINT_LIMIT) return;
@@ -144,7 +144,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
           image.src = url;
           firstImages.current.push(image);
         }
-      } catch (_) { /* a missed hint is harmless */ }
+      } catch (_) {                                 }
     }, HOVER_PREFETCH_MS);
   }, []);
   const unhint = useCallback(() => clearTimeout(hoverTimer.current), []);
@@ -181,7 +181,7 @@ export default function ComicBrowse({ active = true, reservedRows = 0, reloadTok
       const reply = await window.electronAPI.comicEpisodes(card.series_id);
       if (mine !== detailTicket.current) return;
       if (!reply?.success) {
-        // A title the source lists without any episodes is parked by the service; take its poster off the page too.
+
         if (reply?.code === 'EMPTY_DIRECTORY') dropCard(card.series_id);
         throw new Error(reply?.error || '分集暂时没取到');
       }
