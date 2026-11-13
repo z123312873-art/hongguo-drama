@@ -17,6 +17,8 @@
 
 已發布的正式版是 **4.5**，說明留 [4.5](release-4.5.md)。這一輪是 **4.6 預發佈**，說明見 [4.6](release-4.6.md)。預發佈標籤是 `installer-4.6-traditional-pre`，更新器不會把它當成最新版。
 
+正式版 4.6.1 之後，下一輪先發 **4.6.3 預發佈**（說明見 [4.6.3](release-4.6.3.md)），標籤是 `installer-4.6.3-traditional-pre`，由 `windows/4.6.3-pre-*` 分支觸發打包。實測沒問題後再發 4.7 正式版。
+
 | 平台 | 构建入口 | 发布门槛 |
 |---|---|---|
 | macOS arm64 | npm run build:mac | 对应 arm64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证 |
