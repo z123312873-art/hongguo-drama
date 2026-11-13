@@ -6,6 +6,12 @@
 .history-filter button { padding: 8px 12px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .history-filter button:hover { background: var(--bg-hover); }
 .history-filter button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-border); }
+.history-filter .history-select-toggle { margin-left: auto; border-color: var(--border); }
+.history-filter .history-select-toggle.is-active { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-border); }
+.history-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-inset); }
+.history-batch-count { margin-right: auto; padding: 0 4px; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.history-check { flex: none; width: 18px; height: 18px; margin: 0 4px 0 8px; accent-color: var(--accent); cursor: pointer; }
+.history-row.is-selected .history-resume { background: var(--accent-soft); }
 .history-list { list-style: none; padding: 0; margin: 0; }
 .history-row { border-bottom: 1px solid var(--border); padding: 16px 0; }
 .history-main { display: flex; align-items: center; gap: 8px; }

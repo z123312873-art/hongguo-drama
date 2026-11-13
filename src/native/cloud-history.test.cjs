@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cloudRow, fetchHistory, uploadEntry, deleteEntry, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH } = require('./cloud-history');
+const { cloudRow, fetchHistory, uploadEntry, deleteEntry, deleteEntries, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH } = require('./cloud-history');
 
 const raw = (id, extra = {}) => ({
   book_id_str: id, book_name: `剧${id}`, thumb_url: 'https://p3-sign.fqnovelpic.com/novel-pic/x~tplv-a.heic?x-signature=1',
@@ -118,6 +118,48 @@ test('delete is confirmed by reading the list again', async () => {
 
 const U = '1234567890123456', OTHER = '6543210987654321';
 const local = (extra = {}) => ({ watched: true, vid_index: 2, currentTime: 5, updatedAt: 1000, ...extra });
+test('batch delete: one confirmation read for all, per-drama outcomes, stops when told, nothing sent for bad ids', async () => {
+  const A = '7300000000000000001', B = '7300000000000000002', C = '7300000000000000003';
+  const entry = id => ({ series_id: id, vid_index: 3 });
+  const s = server([page([raw(B)])]);
+  let summary;
+  const done = await deleteEntries(s.request, [entry(A), entry(B), entry(A), entry('hema:1')], { onSummary: value => { summary = value; } });
+  assert.deepEqual(done.removed, [A]);
+  assert.deepEqual(done.failed.map(item => [item.id, item.code]), [['hema:1', 'CLOUD_DELETE_INVALID'], [B, 'CLOUD_DELETE_UNCONFIRMED']]);
+  assert.equal(done.rows.length, 1);
+  assert.equal(summary.returnedCount, 1);
+  assert.equal(s.calls.filter(call => call.method === 'POST').length, 2, 'duplicates and invalid ids are not sent');
+  assert.equal(s.calls.filter(call => call.method === 'GET').length, 1, 'one read confirms the whole batch');
+
+  let sent = 0;
+  const flaky = async (method, path, query, body) => {
+    if (method === 'GET') return page([]);
+    sent += 1;
+    if (body.includes(`"book_id":${B},`)) throw new Error('HTTP 502');
+    return { code: 0, data: {} };
+  };
+  const partial = await deleteEntries(flaky, [entry(A), entry(B), entry(C)]);
+  assert.deepEqual(partial.removed, [A, C]);
+  assert.deepEqual(partial.failed, [{ id: B, code: 'CLOUD_DELETE_FAILED', message: 'HTTP 502' }]);
+  assert.equal(sent, 3);
+
+  const unread = await deleteEntries(async method => { if (method === 'GET') throw new Error('timeout'); return { code: 0, data: {} }; }, [entry(A), entry(B)]);
+  assert.deepEqual(unread.removed, [], 'without a confirmation read nothing counts as removed');
+  assert.deepEqual(unread.failed.map(item => item.code), ['CLOUD_DELETE_FAILED', 'CLOUD_DELETE_FAILED']);
+  assert.equal(unread.rows, null);
+
+  let allowed = 1; const posted = [];
+  const stopped = await deleteEntries(async (method, path, query, body) => { if (method === 'GET') throw new Error('must not read'); posted.push(body); allowed -= 1; return { code: 0, data: {} }; },
+    [entry(A), entry(B)], { keepGoing: () => allowed > 0 });
+  assert.equal(posted.length, 1);
+  assert.deepEqual(stopped.removed, []);
+  assert.deepEqual(stopped.failed.map(item => [item.id, item.code]), [[B, 'CLOUD_DELETE_STOPPED'], [A, 'CLOUD_DELETE_STOPPED']]);
+
+  const none = await deleteEntries(async () => { throw new Error('must not be called'); }, []);
+  assert.deepEqual(none, { rows: null, removed: [], failed: [] });
+  assert.deepEqual(await deleteEntries(async () => { throw new Error('must not be called'); }, null), { rows: null, removed: [], failed: [] });
+});
+
 const row = (id, extra = {}) => cloudRow(raw(id, { read_timestamp_ms: 5000, ...extra }));
 
 test('local only: never-synced records are sent up and kept', () => {

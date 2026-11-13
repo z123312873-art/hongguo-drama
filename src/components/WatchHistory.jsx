@@ -3,6 +3,10 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Play, RefreshCw, Clock, Trash2, Check, Shield } from './icons';
 import './WatchHistory.css';
 
+const HISTORY_SYNC_MS = 60 * 1000;
+const HISTORY_FOCUS_MS = 30 * 1000;
+const REMOVE_CHUNK = 25;
+
 export default function WatchHistory({ active = true, onNavigate }) {
   const { notice: playbackNotice, showNotice: showPlaybackNotice } = usePlaybackNotice();
   const [rows, setRows] = useState([]);
@@ -15,25 +19,49 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const [pendingRemove, setPendingRemove] = useState('');
   const [filter, setFilter] = useState('all');
   const [sync, setSync] = useState({ mode: 'local' });
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState([]);
+  const [pendingBatch, setPendingBatch] = useState(false);
+  const [batch, setBatch] = useState(null);
+  const batchStop = useRef(false);
+  const busy = useRef(false);
   const request = useRef(0);
   const openingRef = useRef(false);
   const openingRequest = useRef(0);
   const completedCount = rows.filter(row => row.completed === true).length;
   const visibleRows = rows.filter(row => filter === 'all' || (row.completed === true) === (filter === 'completed'));
 
-  const load = async () => {
+  const selectedIds = selected.filter(id => rows.some(row => row.series_id === id));
+  busy.current = checking || !!removing || !!batch || !!opening;
+
+  const applyRows = (next) => {
+    setRows(next);
+    setPendingRemove(current => next.some(item => item.series_id === current) ? current : '');
+    setSelected(current => {
+      const kept = current.filter(id => next.some(item => item.series_id === id));
+      return kept.length === current.length ? current : kept;
+    });
+  };
+
+  const load = async ({ background = false } = {}) => {
     const version = ++request.current;
     try {
-      const result = await window.electronAPI.getWatchHistory();
+      const result = await window.electronAPI.getWatchHistory(background ? { fresh: true } : undefined);
       if (version !== request.current) return;
       if (!result?.success) throw new Error(result?.error || '观看记录加载失败');
       const next = result.results || [];
-      setRows(next);
-      setSync(result.sync?.mode === 'cloud' ? result.sync : { mode: 'local', error: result.sync?.error || '' });
-      setPendingRemove(current => next.some(item => item.series_id === current) ? current : '');
+      const nextSync = result.sync?.mode === 'cloud' ? result.sync : { mode: 'local', error: result.sync?.error || '' };
+      if (background && nextSync.error && nextSync.mode === 'cloud') {
+        const { error: _quiet, ...rest } = nextSync;
+        applyRows(next);
+        setSync(current => current.error ? { ...rest, error: current.error } : rest);
+        return;
+      }
+      applyRows(next);
+      setSync(nextSync);
       setError('');
     } catch (failure) {
-      if (version === request.current) setError(failure.message || '观看记录加载失败，请重试');
+      if (version === request.current && !background) setError(failure.message || '观看记录加载失败，请重试');
     } finally { if (version === request.current) setLoading(false); }
   };
 
@@ -45,7 +73,28 @@ export default function WatchHistory({ active = true, onNavigate }) {
     if (active) load();
     return () => { request.current++; };
   }, [active]);
-  useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(() => { if (active) load(); }), [active]);
+  useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(() => { if (active && !batch) load(); }), [active, !!batch]);
+
+  useEffect(() => {
+    if (!active || sync.mode !== 'cloud') return undefined;
+    let last = Date.now();
+    const refresh = () => {
+      if (busy.current || (typeof document !== 'undefined' && document.hidden)) return;
+      last = Date.now();
+      load({ background: true });
+    };
+    const interval = setInterval(refresh, HISTORY_SYNC_MS);
+    const onFocus = () => { if (Date.now() - last >= HISTORY_FOCUS_MS) refresh(); };
+    window.addEventListener?.('focus', onFocus);
+    return () => { clearInterval(interval); window.removeEventListener?.('focus', onFocus); };
+  }, [active, sync.mode]);
+
+  useEffect(() => {
+    if (active) return undefined;
+    batchStop.current = true;
+    setSelecting(false); setSelected([]); setPendingBatch(false);
+    return undefined;
+  }, [active]);
 
   useEffect(() => {
     if (!active) { setStatus(''); return undefined; }
@@ -66,8 +115,64 @@ export default function WatchHistory({ active = true, onNavigate }) {
     finally { setChecking(false); }
   };
 
+  const leaveSelecting = () => { setSelecting(false); setSelected([]); setPendingBatch(false); };
+  const toggleSelected = (id) => {
+    if (batch) return;
+    setPendingBatch(false);
+    setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  };
+  const visibleIds = visibleRows.map(row => row.series_id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+  const toggleAllVisible = () => {
+    if (batch) return;
+    setPendingBatch(false);
+    setSelected(current => allVisibleSelected ? current.filter(id => !visibleIds.includes(id)) : [...new Set([...current, ...visibleIds])]);
+  };
+
+  const removeSelected = async () => {
+    if (openingRef.current || checking || removing || batch || !selectedIds.length) return;
+    if (!pendingBatch) { setPendingBatch(true); return; }
+    const ids = [...selectedIds];
+    const userId = sync.mode === 'cloud' ? sync.userId : undefined;
+    setPendingBatch(false); setPendingRemove(''); setError(''); setStatus('');
+    batchStop.current = false;
+    setBatch({ done: 0, total: ids.length });
+    const removed = [], failed = [];
+    let stopped = '', cloud = false;
+    try {
+      for (let start = 0; start < ids.length; start += REMOVE_CHUNK) {
+        if (batchStop.current) { stopped = '已停止，其余记录没有移除。'; break; }
+        const chunk = ids.slice(start, start + REMOVE_CHUNK);
+        let result;
+        try { result = await window.electronAPI.removeWatchHistoryBatch(chunk, userId); }
+        catch (failure) { result = { success: false, error: failure.message }; }
+        request.current++;
+        if (!result?.success) { stopped = result?.error || '移除失败，请重试'; break; }
+        cloud = cloud || result.cloud === true;
+        removed.push(...(result.removed || []));
+        failed.push(...(result.failed || []));
+        if (result.history?.success && Array.isArray(result.history.results)) {
+          applyRows(result.history.results);
+          setSync(result.history.sync || { mode: 'local' });
+        } else {
+          const gone = new Set(result.removed || []);
+          setRows(current => current.filter(item => !gone.has(item.series_id)));
+        }
+        setBatch({ done: Math.min(ids.length, start + chunk.length), total: ids.length });
+      }
+    } finally {
+      setBatch(null);
+      const gone = new Set(removed);
+      setSelected(current => current.filter(id => !gone.has(id)));
+      if (removed.length) setStatus(`${cloud ? '已从帐号历史移除' : '已移除'} ${removed.length} 部观看记录，影片档案保留。`);
+      const problems = [failed.length ? `有 ${failed.length} 部没有移除，仍保持选取（${failed[0].error}）` : '', stopped].filter(Boolean);
+      if (problems.length) setError(problems.join('；'));
+      else if (removed.length === ids.length) leaveSelecting();
+    }
+  };
+
   const removeRow = async (row) => {
-    if (openingRef.current || checking || removing) return;
+    if (openingRef.current || checking || removing || batch || selecting) return;
     if (pendingRemove !== row.series_id) { setPendingRemove(row.series_id); return; }
     setPendingRemove('');
     setRemoving(row.series_id);
@@ -78,7 +183,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       if (!result?.success) throw new Error(result?.error || '移除失败，请重试');
       request.current++;
       if (result.history?.success && Array.isArray(result.history.results)) {
-        setRows(result.history.results);
+        applyRows(result.history.results);
         setSync(result.history.sync || { mode: 'local' });
       } else setRows(current => current.filter(item => item.series_id !== row.series_id));
       setStatus(result.cloud ? `已從帳號歷史移除《${row.series_title}》，影片檔案保留。` : `已移除《${row.series_title}》的觀看紀錄，影片檔案保留。`);
@@ -87,7 +192,8 @@ export default function WatchHistory({ active = true, onNavigate }) {
   };
 
   const resume = async (row, sequel = null) => {
-    if (!active || openingRef.current) return;
+    if (!active || openingRef.current || batch) return;
+    if (selecting) { toggleSelected(row.series_id); return; }
     const version = ++openingRequest.current;
     openingRef.current = true;
     setOpening(row.series_id); setError('');
@@ -127,7 +233,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
     {playbackNotice && <div key={playbackNotice.id} className="record-toast playback-toast" role="status" aria-live="polite"><span>{playbackNotice.text}</span></div>}
     <div className="history-header">
       <div><h1 id="history-title">观看记录</h1><p>继续上次的故事。{sync.mode === 'cloud' ? '已登录：与手机「历史」双向同步。' : '未同步：记录仅保存在这台电脑。'}</p></div>
-      <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || loading || !!removing || !rows.length}>
+      <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || loading || !!removing || !!batch || !rows.length}>
         <RefreshCw size={15} className={checking ? 'spin' : ''} />{checking ? '正在检查更新…' : '检查更新'}
       </button>
     </div>
@@ -143,8 +249,19 @@ export default function WatchHistory({ active = true, onNavigate }) {
         ['all', '全部', rows.length],
         ['completed', '已看完', completedCount],
         ['unfinished', '未看完', rows.length - completedCount],
-      ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={filter === value} disabled={loading} onClick={() => { setFilter(value); setPendingRemove(''); }}>{label} {count}</button>)}
+      ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={filter === value} disabled={loading || !!batch} onClick={() => { setFilter(value); setPendingRemove(''); setPendingBatch(false); setSelected([]); }}>{label} {count}</button>)}
+      {rows.length > 0 && <button type="button" className={`history-select-toggle${selecting ? ' is-active' : ''}`} aria-expanded={selecting} disabled={loading || checking || !!removing || !!batch || !!opening} onClick={() => { if (selecting) leaveSelecting(); else { setPendingRemove(''); setSelecting(true); } }}>{selecting ? '完成' : '批次移除'}</button>}
     </div>
+    {selecting && <div className="history-batch" role="group" aria-label="批次移除观看记录">
+      <button type="button" className="btn btn-outline btn-sm" disabled={!!batch || !visibleIds.length} onClick={toggleAllVisible}>{allVisibleSelected ? '取消全选' : `全选目前筛选（${visibleIds.length}）`}</button>
+      <span className="history-batch-count" role="status">{batch ? `移除中 ${batch.done} / ${batch.total}…` : `已选 ${selectedIds.length} 部`}</span>
+      {batch ? <button type="button" className="btn btn-outline btn-sm" onClick={() => { batchStop.current = true; }}>停止</button> : <>
+        <button type="button" className="btn btn-outline btn-sm history-remove" disabled={!selectedIds.length || checking || !!removing || !!opening}
+          title={sync.mode === 'cloud' ? '手机历史也会移除；不删除已下载视频' : '不删除已下载视频'}
+          onClick={removeSelected}><Trash2 size={14} />{pendingBatch ? `确认移除 ${selectedIds.length} 部${sync.mode === 'cloud' ? '（含手机）' : ''}` : `移除所选（${selectedIds.length}）`}</button>
+        {pendingBatch && <button type="button" className="btn btn-outline btn-sm" onClick={() => setPendingBatch(false)}>取消</button>}
+      </>}
+    </div>}
     <p className="history-hint">依帳號的完播狀態與最新觀看進度分類；新增集數後可能回到「未看完」。</p>
     {error && <div className="history-error" role="alert"><span>{error}</span><button className="btn btn-outline btn-sm" onClick={load}>重新加载</button></div>}
     {status && <div key={status} className="record-toast" role="status" aria-live="polite"><Check size={18} /><span>{status}</span></div>}
@@ -154,9 +271,10 @@ export default function WatchHistory({ active = true, onNavigate }) {
     </div> : !visibleRows.length ? <div className="history-empty" role="status">
       <Clock size={30} /><h2>{filter === 'completed' ? '还没有已看完的短剧' : '没有未看完的短剧'}</h2>
       <button type="button" className="btn btn-outline" onClick={() => setFilter('all')}>查看全部</button>
-    </div> : <ul className="history-list">{visibleRows.map(row => <li className="history-row" key={row.series_id}>
+    </div> : <ul className="history-list">{visibleRows.map(row => <li className={`history-row${selecting && selectedIds.includes(row.series_id) ? ' is-selected' : ''}`} key={row.series_id}>
       <div className="history-main">
-      <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing} aria-label={`继续观看 ${row.series_title} 第${row.vid_index}集${row.hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`}>
+      {selecting && <input type="checkbox" className="history-check" checked={selectedIds.includes(row.series_id)} disabled={!!batch} aria-label={`选取 ${row.series_title}`} onChange={() => toggleSelected(row.series_id)} />}
+      <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing || !!batch} aria-pressed={selecting ? selectedIds.includes(row.series_id) : undefined} aria-label={`继续观看 ${row.series_title} 第${row.vid_index}集${row.hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`}>
         {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
         <span className="history-copy">
           <span className="history-name">{row.hasUpdates && <span className="history-dot" role="img" aria-label="有更新" />}{row.series_title}</span>
@@ -167,11 +285,11 @@ export default function WatchHistory({ active = true, onNavigate }) {
         </span>
         <span className="history-action"><Play size={15} />{opening === row.series_id ? '打开中…' : '继续观看'}</span>
       </button>
-      <button type="button" className="btn btn-outline btn-sm history-remove" disabled={!!opening || checking || !!removing}
+      {!selecting && <button type="button" className="btn btn-outline btn-sm history-remove" disabled={!!opening || checking || !!removing}
         aria-label={pendingRemove === row.series_id ? `确认从观看记录移除 ${row.series_title}` : `从观看记录移除 ${row.series_title}`}
         title={pendingRemove === row.series_id ? (sync.mode === 'cloud' ? '手机历史也会移除；不删除已下载视频' : '不删除已下载视频') : '从观看记录移除，不再检查这部剧'}
-        onClick={() => removeRow(row)}><Trash2 size={14} />{removing === row.series_id ? '移除中…' : pendingRemove === row.series_id ? (sync.mode === 'cloud' ? '确认移除（含手机）' : '确认移除') : '移除'}</button>
-      {pendingRemove === row.series_id && <button type="button" className="btn btn-outline btn-sm" onClick={() => setPendingRemove('')}>取消</button>}
+        onClick={() => removeRow(row)}><Trash2 size={14} />{removing === row.series_id ? '移除中…' : pendingRemove === row.series_id ? (sync.mode === 'cloud' ? '确认移除（含手机）' : '确认移除') : '移除'}</button>}
+      {!selecting && pendingRemove === row.series_id && <button type="button" className="btn btn-outline btn-sm" onClick={() => setPendingRemove('')}>取消</button>}
       </div>
       {!!row.sequels?.length && <div className="history-sequels"><span>疑似续作</span>{row.sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(row, sequel)}>{sequel.series_title}</button>)}</div>}
       {row.lastCheckError && <p className="history-check-error">更新检查未完成：{row.lastCheckError}</p>}

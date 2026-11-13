@@ -125,12 +125,47 @@ async function deleteEntry(request, entry, now = Date.now(), options = {}) {
   await request('POST', UPDATE_PATH, {}, updateBody(entry, now, true));
   const after = await fetchHistory(request, options);
   if (after.some(row => row.series_id === entry.series_id)) {
-    const error = new Error('手机历史没有确认移除，请稍后再试');
+    const error = new Error(DELETE_UNCONFIRMED);
     error.code = 'CLOUD_DELETE_UNCONFIRMED';
     error.rows = after;
     throw error;
   }
   return after;
+}
+
+const DELETE_UNCONFIRMED = '手机历史没有确认移除，请稍后再试';
+
+async function deleteEntries(request, entries, { now = Date.now, keepGoing = () => true, ...options } = {}) {
+  const posted = [];
+  const failed = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const id = readId(entry?.series_id);
+    if (!id) { failed.push({ id: String(entry?.series_id ?? ''), code: 'CLOUD_DELETE_INVALID', message: '这部剧无法从手机历史移除' }); continue; }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (!keepGoing()) { failed.push({ id, code: 'CLOUD_DELETE_STOPPED', message: '' }); continue; }
+    try {
+      await request('POST', UPDATE_PATH, {}, updateBody(entry, now(), true));
+      posted.push(id);
+    } catch (error) {
+      failed.push({ id, code: 'CLOUD_DELETE_FAILED', message: String(error?.message || '请稍后重试') });
+    }
+  }
+  if (!posted.length) return { rows: null, removed: [], failed };
+  if (!keepGoing()) return { rows: null, removed: [], failed: [...failed, ...posted.map(id => ({ id, code: 'CLOUD_DELETE_STOPPED', message: '' }))] };
+  let rows;
+  try { rows = await fetchHistory(request, options); }
+  catch (error) {
+    const message = String(error?.message || '请稍后重试');
+    return { rows: null, removed: [], failed: [...failed, ...posted.map(id => ({ id, code: 'CLOUD_DELETE_FAILED', message }))] };
+  }
+  const listed = new Set(rows.map(row => row.series_id));
+  return {
+    rows,
+    removed: posted.filter(id => !listed.has(id)),
+    failed: [...failed, ...posted.filter(id => listed.has(id)).map(id => ({ id, code: 'CLOUD_DELETE_UNCONFIRMED', message: DELETE_UNCONFIRMED }))],
+  };
 }
 
 const HONGGUO_ID = /^\d{6,30}$/;
@@ -187,4 +222,4 @@ function reconcileHistory({ playback, cloudRows, userId }) {
   };
 }
 
-module.exports = { cloudRow, parsePage, fetchHistory, uploadEntry, deleteEntry, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH };
+module.exports = { cloudRow, parsePage, fetchHistory, uploadEntry, deleteEntry, deleteEntries, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH };

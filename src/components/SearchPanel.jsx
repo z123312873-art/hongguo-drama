@@ -28,8 +28,23 @@ export function rankSearchResults(results, keyword) {
 
 
 
+const DEFAULT_SOURCE = 'hongguo';
+const ALL_SOURCES = 'all';
+const AUTO_PAGES = 4;
+const MANUAL_PAGES = 5;
+const LAST_PAGE = 50;
+const RESULT_LIMIT = 1000;
+const EAGER_COVERS = 24;
+const IDLE_PAGER = { next: [], loading: false, error: '' };
+
+function followingPage(response, source, page) {
+  if (response?.hasMore !== true || page >= LAST_PAGE) return null;
+  const next = Number(response.nextPage);
+  return { source, page: Number.isInteger(next) && next > page ? Math.min(next, LAST_PAGE) : page + 1 };
+}
+
 function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = true }) {
-  const [source, setSource] = useState('all');
+  const [source, setSource] = useState(DEFAULT_SOURCE);
   const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const requestVersion = useRef(0);
   const pendingSearch = useRef(null);
@@ -47,9 +62,11 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
   const [searchWarning, setSearchWarning] = useState('');
   const [pageTitle, setPageTitle] = useState('');
   const [pickingId, setPickingId] = useState('');
+  const [pager, setPager] = useState(IDLE_PAGER);
 
   useEffect(() => {
     if (!active) {
+      setPager(current => current.loading ? { ...current, loading: false } : current);
       requestVersion.current++;
       pendingSearch.current = null;
       setPickingId('');
@@ -76,8 +93,8 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
 
   useEffect(() => {
     requestVersion.current++; pendingSearch.current = null;
-    setLoading(false); setPickingId(''); setResults(null); setError(''); setSearchWarning(''); setPageTitle('');
-    if (source !== 'all' && !mediaSources.some(item => item.id === source)) setSource('all');
+    setLoading(false); setPickingId(''); setResults(null); setError(''); setSearchWarning(''); setPageTitle(''); setPager(IDLE_PAGER);
+    if (source !== ALL_SOURCES && !mediaSources.some(item => item.id === source)) setSource(ALL_SOURCES);
   }, [sourceRevision, mediaSources]);
 
   const switchSource = (next) => {
@@ -91,6 +108,7 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
     setError('');
     setSearchWarning('');
     setPageTitle('');
+    setPager(IDLE_PAGER);
   };
 
   const changeKeyword = (value) => {
@@ -102,6 +120,7 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
     setResults(null);
     setError('');
     setSearchWarning('');
+    setPager(IDLE_PAGER);
   };
 
   const clearHistory = () => {
@@ -123,6 +142,36 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
     }
   };
 
+  const loadPages = async (request, kw, queue, budget, shown) => {
+    let merged = shown, next = queue, failure = '';
+    setPager({ next, loading: true, error: '' });
+    while (next.length && budget > 0 && merged.length < RESULT_LIMIT) {
+      const [{ source: pageSource, page }, ...rest] = next;
+      let response;
+      try { response = await window.electronAPI.searchSeries(kw, { source: pageSource, page }); }
+      catch (failed) { response = { success: false, error: failed?.message }; }
+      if (request !== requestVersion.current) return;
+      if (!response?.success) { failure = `${mediaSourceLabel(pageSource, mediaSources)}：${response?.error || '载入失败，请重试'}`; break; }
+      const rows = (response.results || []).map(item => ({ ...item, source: pageSource }));
+      const ranked = rankSearchResults([...merged, ...rows], kw);
+      const following = ranked.length > merged.length ? followingPage(response, pageSource, page) : null;
+      next = following ? [...rest, following] : rest;
+      budget -= 1;
+      if (ranked.length > merged.length) {
+        merged = ranked;
+        rememberCatalogTitles(rows);
+        setResults(merged);
+      }
+      setPager({ next, loading: true, error: '' });
+    }
+    setPager({ next: merged.length < RESULT_LIMIT ? next : [], loading: false, error: failure });
+  };
+
+  const loadMore = () => {
+    if (pager.loading || loading || !pager.next.length || !results) return;
+    loadPages(requestVersion.current, keyword.trim(), pager.next, MANUAL_PAGES, results);
+  };
+
   const doSearch = async () => {
     if (sourcesLoading) return;
     const kw = keyword.trim();
@@ -141,21 +190,24 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
     setSearchWarning('');
     setResults(null);
     setPageTitle('');
+    setPager(IDLE_PAGER);
     try {
-      const sources = source === 'all' ? mediaSources.map(item => item.id) : [source];
+      const sources = source === ALL_SOURCES ? mediaSources.map(item => item.id) : [source];
       const responses = await Promise.allSettled(sources.map(async (searchSource) => {
         const res = await window.electronAPI.searchSeries(kw, { source: searchSource });
         if (!res?.success) throw new Error(res?.error || '搜索失败，请重试');
         return res;
       }));
       if (request !== requestVersion.current) return;
-      const merged = [], failures = [], warnings = [];
+      const merged = [], failures = [], warnings = [], queue = [];
       responses.forEach((response, index) => {
         const searchSource = sources[index];
         if (response.status === 'fulfilled') {
           merged.push(...(response.value.results || []).map(item => ({ ...item, source: searchSource })));
           if (response.value.partial) warnings.push(`${mediaSourceLabel(searchSource, mediaSources)}：${response.value.error || '补充搜索未完成，可稍后重试。'}`);
           if (sources.length === 1) setPageTitle(response.value.pageTitle || '');
+          const following = followingPage(response.value, searchSource, 1);
+          if (following) queue.push(following);
         } else {
           failures.push(`${mediaSourceLabel(searchSource, mediaSources)}：${response.reason?.message || '搜索失败'}`);
         }
@@ -169,9 +221,11 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
           setHistoryError('搜索结果已显示，但本机搜索历史保存失败。');
         }
       }
-      setResults(rankSearchResults(merged, kw));
+      const ranked = rankSearchResults(merged, kw);
+      setResults(ranked);
       setSearchWarning(warnings.join('；'));
       if (failures.length) setError(`${failures.join('；')}。${merged.length ? '已显示其他来源的结果。' : ''}请重试或切换来源。`);
+      if (queue.length && ranked.length) loadPages(request, kw, queue, AUTO_PAGES, ranked);
     } catch (e) {
       if (request !== requestVersion.current) return;
       setError('搜索异常: ' + e.message);
@@ -185,6 +239,7 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
 
   const pick = async (item) => {
     const request = ++requestVersion.current;
+    setPager(current => current.loading ? { ...current, loading: false } : current);
     setPickingId(item.series_id);
     setError('');
     onSelectStart?.(item);
@@ -210,6 +265,35 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
     } catch (e) { setError(e.message || '来源页面打开失败，请重试'); }
   };
 
+  const matched = (results || []).filter(item => item.relevance < 2);
+  const others = (results || []).filter(item => item.relevance === 2);
+  const card = (item, index) => (
+    <button
+      type="button"
+      disabled={pickingId !== ''}
+      key={`${item.source}:${item.series_id}`}
+      className={`search-card ${pickingId === item.series_id ? 'picking' : ''}`}
+      onClick={() => pickingId === '' && pick(item)}
+      title={`点击查看并下载：${item.series_title}`}
+    >
+      <div className="search-cover">
+        <CoverImage src={item.cover} alt={item.series_title} eager={index < EAGER_COVERS} />
+      </div>
+      <div className="search-card-body">
+        <div className="search-card-title">{item.series_title}</div>
+        <div className="search-card-sub">
+          {pickingId === item.series_id ? (
+            <>
+              <RefreshCw size={13} className="spin" /> 正在拉取分集…
+            </>
+          ) : (
+            <><span className="badge">{mediaSourceLabel(item.source, mediaSources)}</span>查看剧集</>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+
   return (
     <div className="hongguo-card">
       <div className="card-header-title">
@@ -225,7 +309,6 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
           type="text"
           className="input-field"
           aria-label="搜索短剧名称"
-          aria-describedby="search-suggestions-hint"
           aria-autocomplete="list"
           aria-expanded={suggestOpen && suggestions.length > 0}
           aria-controls="local-search-suggestions"
@@ -267,15 +350,11 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
           )}
         </button>
       </div>
-      <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">本机联想：匹配搜索历史和本次浏览过的真实剧名。显示随界面繁简变化，搜索仍使用原来的剧名。离开输入框、开始搜索或按 Esc 会收起。</p>
       {history.length > 0 && <div className="search-history">
         <div className="search-history-heading"><span>本机搜索历史</span><button type="button" className="btn-chip" onClick={clearHistory}>清除历史</button></div>
         <div className="search-history-terms">{history.map((term) => <span className="search-history-term" key={term}><button type="button" className="btn-chip" title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button><button type="button" className="search-history-remove" aria-label={`删除搜索历史：${term}`} title="删除这条搜索历史" onClick={() => removeHistory(term)}>×</button></span>)}</div>
       </div>}
       {historyError && <p className="search-history-error" role="alert">{historyError}</p>}
-      <p className="settings-hint" style={{ marginTop: 8 }}>
-        {source === 'all' ? '同时搜索所有已启用来源，结果标明来源；选择一部即可查看全部剧集。' : '按剧名查找，选择一部即可查看全部剧集。'}
-      </p>
 
       {results === null && !loading && !error && (
         <div className="search-welcome"><Search size={36} /><h3>好故事，从一个名字开始</h3><p>输入完整剧名或关键词，发现你想看的短剧。</p></div>
@@ -309,35 +388,22 @@ function SearchPanel({ onSelectSeries, onSelectStart, onSwitchToInput, active = 
 
       {results && results.length > 0 && (
         <>
-          <div className="search-count">找到 {results.filter(item => item.relevance < 2).length} 部标题匹配短剧{results.some(item => item.relevance === 2) ? `，另有 ${results.filter(item => item.relevance === 2).length} 部来源返回的其他结果（排在后面）` : ''}</div>
-          <div className="search-grid">
-            {results.map((item) => (
-              <button
-                type="button"
-                disabled={pickingId !== ''}
-                key={`${item.source}:${item.series_id}`}
-                className={`search-card ${pickingId === item.series_id ? 'picking' : ''}`}
-                onClick={() => pickingId === '' && pick(item)}
-                title={`点击查看并下载：${item.series_title}`}
-              >
-                <div className="search-cover">
-                  <CoverImage src={item.cover} alt={item.series_title} />
-                </div>
-                <div className="search-card-body">
-                  <div className="search-card-title">{item.series_title}</div>
-                  <div className="search-card-sub">
-                    {pickingId === item.series_id ? (
-                      <>
-                        <RefreshCw size={13} className="spin" /> 正在拉取分集…
-                      </>
-                    ) : (
-                      <><span className="badge">{mediaSourceLabel(item.source, mediaSources)}</span>{item.relevance === 2 ? '其他结果 · 查看剧集' : '查看剧集'}</>
-                    )}
-                  </div>
-                </div>
-              </button>
-            ))}
+          <div className="search-summary">
+            <strong>找到 {results.length} 部</strong>
+            <span className="search-summary-chip">标题匹配 {matched.length}</span>
+            {others.length > 0 && <span className="search-summary-chip is-muted">其他相关 {others.length}</span>}
+            <span className="search-summary-state" role="status">
+              {pager.loading ? <><RefreshCw size={13} className="spin" /> 正在载入更多结果…</>
+                : pager.error ? `更多结果没有载入完成：${pager.error}`
+                  : pager.next.length ? '还有更多结果' : '已显示全部结果'}
+            </span>
+            {!pager.loading && pager.next.length > 0 && <button type="button" className="btn btn-outline btn-sm" disabled={pickingId !== ''} onClick={loadMore}>{pager.error ? '重试载入' : '载入更多'}</button>}
           </div>
+          {matched.length > 0 && <div className="search-grid">{matched.map((item, index) => card(item, index))}</div>}
+          {others.length > 0 && <>
+            <h3 className="search-group-title">其他相关结果</h3>
+            <div className="search-grid">{others.map((item, index) => card(item, matched.length + index))}</div>
+          </>}
         </>
       )}
     </div>
