@@ -8,12 +8,16 @@ import { developmentCjs } from './scripts/vite-dev-cjs.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const scriptJsx = path.resolve(root, 'src/script-jsx');
 
+// Vite hands importers over with forward slashes even on Windows, so compare
+// on a normalized path instead of the platform separator.
+export const isScriptJsxFile = file => /[/\\]script-jsx[/\\]/.test(String(file || ''));
+
 function traditionalJsx() {
   return {
     name: 'traditional-jsx',
     enforce: 'pre',
     resolveId(source, importer) {
-      if (!importer || importer.includes(`${path.sep}script-jsx${path.sep}`)) return null;
+      if (!importer || isScriptJsxFile(importer)) return null;
       if (source === 'react/jsx-runtime') return path.join(scriptJsx, 'jsx-runtime.js');
       if (source === 'react/jsx-dev-runtime') return path.join(scriptJsx, 'jsx-dev-runtime.js');
       return null;
