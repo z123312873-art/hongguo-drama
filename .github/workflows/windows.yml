@@ -84,7 +84,7 @@ jobs:
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
       - name: Verify portable, fresh NSIS install, reinstall and real 1.80 upgrade
         env:
-          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.6-release-') || startsWith(github.ref, 'refs/heads/windows/4.6-pre-') || startsWith(github.ref, 'refs/heads/windows/4.5-release-') || startsWith(github.ref, 'refs/heads/windows/4.5-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
+          HONGGUO_SKIP_PLAYBACK: ${{ (startsWith(github.ref, 'refs/heads/windows/4.6-release-') || startsWith(github.ref, 'refs/heads/windows/4.6-pre-') || startsWith(github.ref, 'refs/heads/windows/4.6.3-pre-') || startsWith(github.ref, 'refs/heads/windows/4.5-release-') || startsWith(github.ref, 'refs/heads/windows/4.5-pre-') || startsWith(github.ref, 'refs/heads/windows/4.3-release-') || startsWith(github.ref, 'refs/heads/windows/4.1-release-')) && 'true' || inputs.skip_playback || 'false' }}
         shell: pwsh
         run: |
           if ($env:HONGGUO_SKIP_PLAYBACK -eq 'true') {
@@ -540,3 +540,75 @@ jobs:
             fi
           done
           gh release view "$tag" --json isPrerelease,isDraft,assets --jq '{isPrerelease,isDraft,assets:[.assets[].name]}'
+  publish-release-4-6-3-pre:
+    needs: windows
+    if: startsWith(github.ref, 'refs/heads/windows/4.6.3-pre-')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release candidate
+        id: candidate
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Retry the release candidate download once
+        if: steps.candidate.outcome == 'failure'
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-release-candidate
+          path: release
+      - name: Publish the 4.6.3 pre-release without replacing the 4.6 formal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=installer-4.6.3-traditional-pre
+          setup="release/hongguo-downloader-4.6.3-win-x64-setup.exe"
+          blockmap="$setup.blockmap"
+          latest="release/latest.yml"
+          portable="release/hongguo-downloader-4.6.3-win-x64.zip"
+          for file in "$setup" "$blockmap" "$latest" "$portable"; do test -f "$file"; done
+          grep -Fq "hongguo-downloader-4.6.3-win-x64-setup.exe" "$latest"
+          grep -Eq '^version: 4\.6\.3$' "$latest"
+          setup_sha=$(sha256sum "$setup" | cut -d' ' -f1)
+          setup_size=$(stat -c %s "$setup")
+          portable_sha=$(sha256sum "$portable" | cut -d' ' -f1)
+          notes=$(cat <<EOF
+          摘要：
+          - 觀看紀錄與手機同步更快：定時自動更新
+          - 觀看紀錄新增批次移除，可全選目前篩選的結果
+          - 搜尋頁預設來源改為紅果，一次顯示全部搜尋結果
+          - 搜尋結果分成「標題匹配」與「其他相關」，海報載入更快
+          - 精簡搜尋頁提示文字，修正來源選單文字偏下
+
+          4.6.3 預發佈，未簽章。4.6 仍是正式版。下載與安裝都要自己確認。
+
+          檔名：hongguo-downloader-4.6.3-win-x64-setup.exe
+          SHA256：$setup_sha
+          大小：$setup_size
+          便攜 ZIP：hongguo-downloader-4.6.3-win-x64.zip
+          便攜 ZIP SHA256：$portable_sha
+          對應提交：$GITHUB_SHA
+          EOF
+          )
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            gh release edit "$tag" --prerelease=true --latest=false --title "4.6.3 預發佈" --notes "$notes"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false --title "4.6.3 預發佈" --notes "$notes"
+          fi
+          gh release upload "$tag" "$setup" "$blockmap" "$latest" "$portable" --clobber
+          keep=$(printf '%s\n' "$(basename "$setup")" "$(basename "$blockmap")" "latest.yml" "$(basename "$portable")")
+          gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r name; do
+            if ! printf '%s\n' "$keep" | grep -Fxq -- "$name"; then
+              gh release delete-asset "$tag" "$name" --yes
+            fi
+          done
+          test "$(gh release view "$tag" --json isPrerelease,isDraft --jq '(.isPrerelease == true) and (.isDraft == false)')" = "true"
+          test "$(gh release view --json tagName --jq .tagName)" != "$tag"
+          test "$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
+          gh release list --limit 20
