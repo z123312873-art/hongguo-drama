@@ -53,10 +53,11 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
         if (!cloud.favIgnore) cloud.favorites = change.video_shelf_operate_type === 0 ? [...new Set([...cloud.favorites, change.book_id])] : cloud.favorites.filter(id => id !== change.book_id);
         return { code: 0, data: {} };
       }
-      if (method === 'GET') return { code: 0, data: { data_list: cloud.rows, has_more: false, total: cloud.reportedTotal } };
+      if (method === 'GET') { if (cloud.hold) await cloud.hold; return { code: 0, data: { data_list: cloud.rows, has_more: false, total: cloud.reportedTotal } }; }
+      if (cloud.postFail?.(body)) throw new Error('HTTP 502');
       const update = JSON.parse(body.replace(/:(\d{16,})/g, ':"$1"')).update_datas[0];
       const id = String(update.book_id);
-      cloud.rows = cloud.rows.filter(item => item.book_id_str !== id || (update.is_delete && cloud.ignoreDelete) || (!update.is_delete && cloud.dropUploads));
+      cloud.rows = cloud.rows.filter(item => item.book_id_str !== id || (update.is_delete && (cloud.ignoreDelete || cloud.keepIds?.includes(id))) || (!update.is_delete && cloud.dropUploads));
       if (!update.is_delete && !cloud.dropUploads) cloud.rows.unshift(row(id, { vid_index: update.vid_index, current_play_position: update.current_play_position, read_timestamp_ms: update.read_timestamp_ms }));
       return { code: 0, data: {} };
     },
@@ -67,8 +68,8 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
   const overrides = { electron, './src/store': store, './src/native/account-code': { createCodeClient: () => fakeClient },
     './src/native/hongguo': { fetchEpisodeList: async id => { (cloud.catalogReads ||= []).push(id); if (cloud.availability === 'error') throw new Error('HTTP 500'); return cloud.availability === 'offline' ? { episodes: [] } : structuredClone(cloud.catalog || freshSeries.find(item => item.series_id === id) || freshSeries[0]); } }, './src/native/xifan': offline, './src/native/hema': offline };
   overrides['./src/native/hongguo'].fetchSeriesMetadata = async id => ({ ...await overrides['./src/native/hongguo'].fetchEpisodeList(id), series_id: id });
-  const context = vm.createContext({ Date: clock === null ? Date : class extends Date { static now() { return clock; } }, require: name => overrides[name] || req(name), __dirname: path.dirname(source), process, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController,
-    setTimeout: (fn, ms) => { timers.push(fn); return timers.length; }, clearTimeout() {} });
+  const context = vm.createContext({ Date: clock === null ? Date : class extends Date { static now() { return typeof clock === 'function' ? clock() : clock; } }, require: name => overrides[name] || req(name), __dirname: path.dirname(source), process, console: { log() {}, warn() {}, error() {} }, Buffer, URL, Response, Request, Headers, AbortController,
+    setTimeout: (fn, ms) => { timers.push(Object.assign(fn, { ms })); return timers.length; }, clearTimeout: id => { if (timers[id - 1]) timers[id - 1].cleared = true; } });
   vm.runInContext(fs.readFileSync(source, 'utf8'), context, { filename: source });
   require('./fixtures/trusted-ipc.cjs')(context, handlers);
   vm.runInContext('mainWindow.webContents.send = (channel, payload) => sentLog.push([channel, payload])', Object.assign(context, { sentLog: sent }));
@@ -76,7 +77,7 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
   context.runSearchSniff = offline.search;
   vm.runInContext('seriesRegistry = fixture', context);
   const call = (name, ...args) => handlers[name]({}, ...args);
-  return { call, cloud, sent, timers, registry: () => vm.runInContext('seriesRegistry', context), playback: () => playback, blob: () => blob, record: () => record, restored: () => restored, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return { call, cloud, sent, timers, app, registry: () => vm.runInContext('seriesRegistry', context), playback: () => playback, blob: () => blob, record: () => record, restored: () => restored, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
 const ids = result => result.results.map(item => item.series_id);
@@ -447,5 +448,181 @@ test('missing metadata during an outage leaves every cloud favorite listed witho
     assert.equal(result.rows.length, 2);
     assert.equal(h.cloud.favorites.length, 2);
     assert.equal(h.cloud.requests.filter(request => request.apiPath === req('./src/native/cloud-favorites').UPDATE_PATH).length, 0);
+  } finally { h.cleanup(); }
+});
+
+const plain = value => JSON.parse(JSON.stringify(value));
+const posts = h => h.cloud.requests.filter(r => r.method === 'POST');
+const reads = h => h.cloud.requests.filter(r => r.method === 'GET' && r.apiPath.includes('read_history')).length;
+
+test('continuous playback cannot starve the upload: one timer per drama, sent early, then at most once per interval', async () => {
+  let now = Date.now() + 1000;
+  const h = load({ clock: () => now });
+  try {
+    await h.call('get-watch-history');
+    const before = h.timers.length, sentBefore = posts(h).length;
+    await h.call('save-playback-position', THREE, 2, 5, {});
+    assert.equal(h.timers.length, before + 1);
+    assert.ok(h.timers.at(-1).ms <= 2000, 'the first save of a drama goes up within a couple of seconds');
+    for (const seconds of [10, 15, 20]) { now += 5000; await h.call('save-playback-position', THREE, 2, seconds, {}); }
+    assert.equal(h.timers.length, before + 1, 'later saves reuse the pending timer instead of pushing it back');
+    assert.ok(!h.timers.at(-1).cleared, 'the pending upload is never cancelled by another save');
+    await h.timers.at(-1)();
+    assert.equal(posts(h).length, sentBefore + 1);
+    assert.match(posts(h).at(-1).body, /"current_play_position":20000/, 'the newest position is what goes up');
+    now += 5000;
+    await h.call('save-playback-position', THREE, 2, 25, {});
+    assert.equal(h.timers.length, before + 2);
+    assert.ok(h.timers.at(-1).ms >= 14000 && h.timers.at(-1).ms <= 20000, 'the next upload waits out the interval');
+    await h.call('save-playback-position', ONE, 8, 3, {});
+    assert.ok(h.timers.at(-1).ms <= 2000, 'another drama has its own schedule');
+  } finally { h.cleanup(); }
+});
+
+test('a save that lands while an upload is in flight is sent afterwards, not lost', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    await h.call('save-playback-position', THREE, 2, 5, {});
+    const running = h.timers.at(-1)();
+    await h.call('save-playback-position', THREE, 3, 1, {});
+    const count = h.timers.length;
+    await running;
+    assert.equal(h.timers.length, count + 1, 'a follow-up upload is scheduled');
+    await h.timers.at(-1)();
+    assert.match(posts(h).at(-1).body, /"vid_index":3/);
+  } finally { h.cleanup(); }
+});
+
+test('quitting sends pending progress first and does nothing when there is none', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    let prevented = 0;
+    h.app.quit = () => {};
+    h.app.emit('before-quit', { preventDefault() { prevented++; } });
+    assert.equal(prevented, 0, 'nothing pending: quit is not held back');
+    await h.call('save-playback-position', THREE, 2, 9, {});
+    const before = posts(h).length;
+    h.app.emit('before-quit', { preventDefault() { prevented++; } });
+    assert.equal(prevented, 1);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(posts(h).length, before + 1, 'the pending upload went out immediately');
+  } finally { h.cleanup(); }
+});
+
+test('a background refresh re-reads the account only after a short gap', async () => {
+  let now = Date.now() + 1000;
+  const h = load({ clock: () => now });
+  try {
+    await h.call('get-watch-history');
+    const first = reads(h);
+    await h.call('get-watch-history', { fresh: true });
+    assert.equal(reads(h), first, 'asked again right away: reuses the last read');
+    now += 16_000;
+    h.cloud.rows = h.cloud.rows.filter(item => item.book_id_str !== TWO);
+    const result = await h.call('get-watch-history', { fresh: true });
+    assert.ok(reads(h) > first);
+    assert.ok(!ids(result).includes(TWO), 'a drama removed on the phone disappears here');
+    h.cloud.rows.unshift(row('7300000000000000004', { read_timestamp_ms: 9000 }));
+    now += 16_000;
+    assert.ok(ids(await h.call('get-watch-history', { fresh: true })).includes('7300000000000000004'), 'a drama watched on the phone appears here');
+    now += 16_000;
+    h.cloud.fail = 'HTTP 500';
+    const failed = await h.call('get-watch-history', { fresh: true });
+    assert.equal(failed.sync.mode, 'cloud');
+    assert.deepEqual(plain(ids(failed)).sort(), plain(ids(result)).concat('7300000000000000004').sort(), 'a failed refresh changes nothing');
+  } finally { h.cleanup(); }
+});
+
+test('batch removal: one read, one confirmation, per-drama outcomes, nothing unconfirmed is dropped', async () => {
+  const h = load({ server: { keepIds: [TWO] } });
+  try {
+    await h.call('get-watch-history');
+    const before = reads(h), postsBefore = posts(h).length;
+    const result = await h.call('remove-watch-history-batch', [ONE, TWO, THREE, ONE, '7300000000000000077']);
+    assert.equal(result.success, true);
+    assert.deepEqual(plain(result.removed).sort(), [ONE, THREE]);
+    assert.deepEqual(plain(result.failed).map(item => item.series_id).sort(), [TWO, '7300000000000000077'].sort());
+    assert.match(result.failed.find(item => item.series_id === TWO).error, /没有确认移除/);
+    assert.match(result.failed.find(item => item.series_id === '7300000000000000077').error, /不在观看记录/);
+    assert.equal(reads(h) - before, 2, 'the account list is read once before and once after, not per drama');
+    assert.equal(posts(h).length - postsBefore, 3, 'one delete per listed drama, duplicates collapsed');
+    assert.equal(h.playback()[ONE], undefined);
+    assert.equal(h.playback()[THREE], undefined);
+    assert.ok(h.playback()[TWO], 'the unconfirmed drama stays here');
+    assert.deepEqual(plain(ids(result.history)), [TWO]);
+    assert.deepEqual(plain(h.sent.at(-1)), ['watch-history-updated', { removedSeriesIds: plain(result.removed) }]);
+  } finally { h.cleanup(); }
+});
+
+test('batch removal: a failed delete request only affects that drama; input and account are validated', async () => {
+  const h = load({ server: { postFail: body => body.includes(`"book_id":${ONE},`) && body.includes('"is_delete":true') } });
+  try {
+    await h.call('get-watch-history');
+    for (const bad of [[], 'x', [1], [''], Array.from({ length: 101 }, (_, i) => `73000000000000001${String(i).padStart(2, '0')}`)]) {
+      assert.equal((await h.call('remove-watch-history-batch', bad)).success, false);
+    }
+    assert.equal((await h.call('remove-watch-history-batch', [ONE], 'other')).success, false);
+    const result = await h.call('remove-watch-history-batch', [ONE, THREE], '1000000000000001');
+    assert.deepEqual(plain(result.removed), [THREE]);
+    assert.match(result.failed[0].error, /HTTP 502/);
+    assert.ok(h.playback()[ONE]);
+    assert.deepEqual(plain(h.sent.at(-1)), ['watch-history-updated', { removedSeriesId: THREE }]);
+  } finally { h.cleanup(); }
+});
+
+test('batch removal: account unreadable removes nothing; signed out removes on this computer only', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    h.cloud.fail = 'HTTP 500';
+    const refused = await h.call('remove-watch-history-batch', [ONE, THREE]);
+    assert.deepEqual(plain(refused.removed), []);
+    assert.equal(refused.failed.length, 2);
+    assert.ok(h.playback()[ONE] && h.playback()[THREE]);
+  } finally { h.cleanup(); }
+  const local = load({ account: false });
+  try {
+    const result = await local.call('remove-watch-history-batch', [ONE, THREE]);
+    assert.deepEqual(plain(result.removed), [ONE, THREE]);
+    assert.equal(result.cloud, false);
+    assert.equal(local.cloud.requests.length, 0);
+    assert.deepEqual(local.playback(), {});
+  } finally { local.cleanup(); }
+});
+
+test('a refresh that started before a removal cannot bring the removed drama back', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    let open;
+    h.cloud.hold = new Promise(resolve => { open = resolve; });
+    const refresh = h.call('refresh-watch-history');
+    const removal = h.call('remove-watch-history', TWO);
+    await new Promise(resolve => setImmediate(resolve));
+    h.cloud.hold = null; open();
+    const [, done] = await Promise.all([refresh, removal]);
+    assert.equal(done.success, true);
+    assert.equal(h.playback()[TWO], undefined);
+    assert.ok(!ids(await h.call('get-watch-history')).includes(TWO));
+  } finally { h.cleanup(); }
+});
+
+test('removing a drama cancels its pending upload; a failed removal keeps the upload', async () => {
+  const h = load({ server: { ignoreDelete: true } });
+  try {
+    await h.call('get-watch-history');
+    await h.call('save-playback-position', ONE, 8, 3, {});
+    const pending = h.timers.at(-1);
+    assert.equal((await h.call('remove-watch-history', ONE)).success, false);
+    assert.ok(pending.cleared, 'held while the removal runs');
+    assert.ok(!h.timers.at(-1).cleared && h.timers.at(-1) !== pending, 'rescheduled because the drama is still here');
+    h.cloud.ignoreDelete = false;
+    const live = h.timers.at(-1), before = posts(h).length;
+    assert.equal((await h.call('remove-watch-history', ONE)).success, true);
+    assert.ok(live.cleared);
+    await live();
+    assert.equal(posts(h).length, before + 1, 'only the delete went out; the cancelled upload sends nothing');
   } finally { h.cleanup(); }
 });

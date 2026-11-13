@@ -366,6 +366,123 @@ test('history returns fresh counts immediately, orders completed first, and fade
   ui.unmount(); assert.equal(timers.size, 0);
 });
 
+test('history batch removal: select, confirm, remove in one call, keep failures selected and report both outcomes', async () => {
+  const h = fixture({ setInterval: () => 1, clearInterval() {} });
+  let rows = [{ series_id: 'a', series_title: '甲', completed: true }, { series_id: 'b', series_title: '乙', completed: false }, { series_id: 'c', series_title: '丙', completed: false }];
+  const snapshot = () => ({ success: true, results: rows, sync: { mode: 'cloud', userId: '123456' } });
+  const calls = []; let single = 0;
+  h.window.electronAPI = {
+    getWatchHistory: async () => snapshot(),
+    removeWatchHistory: async () => { single++; return { success: true }; },
+    removeWatchHistoryBatch: async (ids, userId) => {
+      calls.push([ids, userId]);
+      rows = rows.filter(row => row.series_id === 'c');
+      return { success: true, cloud: true, removed: ids.filter(id => id !== 'c'), failed: ids.includes('c') ? [{ series_id: 'c', error: '手机历史没有确认移除，请稍后再试' }] : [], history: snapshot() };
+    },
+  };
+  const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
+  const button = label => ui.find(n => n.type === 'button' && n.children.join('').includes(label));
+  const text = () => ui.nodes().flatMap(n => n.children || []).filter(x => typeof x === 'string').join('|');
+  assert.ok(!ui.find(n => n.type === 'input'), 'no checkboxes until batch mode is on');
+  button('批次移除').props.onClick(); ui.render();
+  assert.equal(ui.nodes().filter(n => n.type === 'input' && n.props.type === 'checkbox').length, 3);
+  assert.ok(!ui.find(n => n.props['aria-label'] === '从观看记录移除 甲'), 'single remove buttons are hidden while selecting');
+  assert.equal(button('移除所选').props.disabled, true, 'nothing selected: cannot remove');
+  ui.find(n => n.props['aria-label'] === '继续观看 甲 第undefined集').props.onClick(); ui.render();
+  assert.ok(text().includes('已选 1 部'), 'clicking a row selects it instead of playing');
+  button('全选目前筛选').props.onClick(); ui.render();
+  assert.ok(text().includes('已选 3 部'));
+  button('移除所选').props.onClick(); ui.render();
+  assert.equal(calls.length, 0, 'first click only asks for confirmation');
+  const confirm = button('确认移除 3 部');
+  assert.ok(confirm.children.join('').includes('（含手机）'));
+  await confirm.props.onClick(); await ui.flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [[['a', 'b', 'c'], '123456']]);
+  assert.equal(single, 0);
+  assert.ok(text().includes('已从帐号历史移除'));
+  assert.match(text(), /有 1 部没有移除/);
+  assert.match(text(), /没有确认移除/);
+  assert.ok(text().includes('已选 1 部'), 'the drama that failed stays selected');
+  assert.equal(ui.nodes().filter(n => n.type === 'input' && n.props.checked === true).length, 1);
+  button('完成').props.onClick(); ui.render();
+  assert.ok(!ui.find(n => n.type === 'input'));
+  assert.ok(ui.find(n => n.props['aria-label'] === '从观看记录移除 丙'));
+  ui.unmount();
+});
+
+test('history batch removal: large selections go in chunks, can be stopped between chunks, and a refused call stops', async () => {
+  const h = fixture({ setInterval: () => 1, clearInterval() {} });
+  let rows = Array.from({ length: 60 }, (_, i) => ({ series_id: `s${i}`, series_title: `剧${i}`, completed: false }));
+  const snapshot = () => ({ success: true, results: rows, sync: { mode: 'local' } });
+  const calls = []; let refuse = false, gate = null, release;
+  h.window.electronAPI = {
+    getWatchHistory: async () => snapshot(),
+    removeWatchHistoryBatch: async (ids, userId) => {
+      calls.push(ids.length); assert.equal(userId, undefined);
+      if (refuse) return { success: false, error: '帳號已切換，請重新整理。' };
+      rows = rows.filter(row => !ids.includes(row.series_id));
+      if (calls.length === 2) { gate = new Promise(resolve => { release = resolve; }); await gate; }
+      return { success: true, cloud: false, removed: ids, failed: [], history: snapshot() };
+    },
+  };
+  const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
+  const button = label => ui.find(n => n.type === 'button' && n.children.join('').includes(label));
+  const text = () => ui.nodes().flatMap(n => n.children || []).filter(x => typeof x === 'string').join('|');
+  button('批次移除').props.onClick(); ui.render();
+  button('全选目前筛选').props.onClick(); ui.render();
+  button('移除所选').props.onClick(); ui.render();
+  assert.ok(!button('确认移除 60 部').children.join('').includes('含手机'), 'signed out: this computer only');
+  const running = button('确认移除 60 部').props.onClick(); await ui.flush();
+  assert.match(text(), /移除中 25 \/ 60/);
+  assert.equal(button('检查更新').props.disabled, true, 'other actions wait while a batch runs');
+  button('停止').props.onClick(); release();
+  await running; await ui.flush();
+  assert.deepEqual(calls, [25, 25], 'stopped before the third chunk');
+  assert.match(text(), /已停止/);
+  assert.ok(text().includes('已移除 50 部'));
+  assert.ok(text().includes('已选 10 部'));
+  refuse = true;
+  button('移除所选').props.onClick(); ui.render();
+  await button('确认移除 10 部').props.onClick(); await ui.flush();
+  assert.match(text(), /帳號已切換/);
+  assert.equal(rows.length, 10);
+  ui.unmount();
+});
+
+test('history refreshes from the account on a timer and on focus, quietly, and only while signed in and idle', async () => {
+  const intervals = []; const cleared = [];
+  const h = fixture({ setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; }, clearInterval: id => cleared.push(id) });
+  let rows = [{ series_id: 'a', series_title: '甲', completed: false }, { series_id: 'b', series_title: '乙', completed: false }];
+  let mode = 'cloud', failing = false; const asked = [];
+  h.window.electronAPI = { getWatchHistory: async options => {
+    asked.push(options);
+    return { success: true, results: rows, sync: mode === 'cloud' ? { mode: 'cloud', userId: '123456', ...(failing ? { error: '刚才没有更新成功' } : {}) } : { mode: 'local' } };
+  } };
+  const ui = h.mount('components/WatchHistory.jsx'); await ui.flush();
+  const text = () => ui.nodes().flatMap(n => n.children || []).filter(x => typeof x === 'string').join('|');
+  const sync = intervals.find(item => item.ms === 60000);
+  assert.ok(sync, 'a one-minute refresh runs while the signed-in page is open');
+  const before = asked.length;
+  rows = rows.slice(1);
+  sync.fn(); await ui.flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(asked.slice(before))), [{ fresh: true }]);
+  assert.ok(!text().includes('甲'), 'a drama removed on the phone leaves the list without any click');
+  failing = true;
+  sync.fn(); await ui.flush();
+  assert.ok(!text().includes('刚才没有更新成功'), 'a failed background refresh is not shown');
+  h.window.dispatchEvent(new Event('focus')); await ui.flush();
+  assert.equal(asked.length, before + 2, 'focus right after a refresh does not ask again');
+  ui.find(n => n.type === 'button' && n.children.join('').includes('批次移除')).props.onClick(); ui.render();
+  ui.unmount();
+  assert.ok(cleared.length > 0, 'the timer is cleared with the page');
+
+  const local = fixture({ setInterval: (fn, ms) => { intervals.push({ fn, ms, local: true }); return 1; }, clearInterval() {} });
+  local.window.electronAPI = { getWatchHistory: async () => ({ success: true, results: [], sync: { mode: 'local' } }) };
+  const signedOut = local.mount('components/WatchHistory.jsx'); await signedOut.flush();
+  assert.ok(!intervals.some(item => item.local && item.ms === 60000), 'signed out: no account refresh');
+  signedOut.unmount();
+});
+
 test('favorites show mobile folders, filter by membership, swap comic before AI, hide raw codes and update counts on removal', async () => {
   const h = fixture(), library = h.load('localLibrary.js');
   library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, category: 'comic', cloud_user: '123456' });

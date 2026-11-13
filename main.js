@@ -1457,17 +1457,32 @@ function catalogQuery(keyword) {
   return simplified || typed;
 }
 
+const SEARCH_LAST_PAGE = 50;
+function searchPageOf(value) {
+  return Number.isInteger(value) && value >= 1 && value <= SEARCH_LAST_PAGE ? value : 1;
+}
+
 async function searchAtSource(keyword, options = {}) {
-  if (String(options?.source).startsWith('custom:')) return require('./src/native/custom-source').searchSeries(keyword, options);
-  if (options?.source === 'hema') return require('./src/native/hema').search(catalogQuery(keyword));
-  if (options?.source === 'xifan') return require('./src/native/xifan').search(catalogQuery(keyword));
+  const page = searchPageOf(options?.page);
+  if (String(options?.source).startsWith('custom:')) return require('./src/native/custom-source').searchSeries(keyword, { ...options, page });
+  if (options?.source === 'hema') return require('./src/native/hema').search(catalogQuery(keyword), page);
+  if (options?.source === 'xifan') return require('./src/native/xifan').search(catalogQuery(keyword), page);
   if (options?.source && options.source !== 'hongguo') throw new Error('不支持的搜索来源');
-  return runSearchSniff(keyword);
+  if (page === 1) return runSearchSniff(keyword);
+  const found = await require('./src/native/hongguo-search').searchHongguo(catalogQuery(keyword), { page, timeout: 8000 });
+  return { success: true, results: found.results || [], page, total: found.total || 0, totalPages: found.totalPages || 0, hasMore: found.hasMore === true, keyword: found.keyword || '', channel: 'web' };
 }
 
 ipcMain.handle('search-series', async (event, keyword, options = {}) => {
   try {
-    return await seriesSearch.searchSeries(keyword, kw => searchAtSource(kw, options));
+    const page = searchPageOf(options?.page);
+    if (page > 1) {
+      const kw = String(keyword || '').trim();
+      if (!kw || kw.length > 200) return { success: false, results: [], error: '请输入 1 至 200 字的搜索词' };
+      const more = await searchAtSource(kw, { source: options?.source, page });
+      return more?.success ? more : { success: false, results: [], error: more?.error || '搜索暂不可用' };
+    }
+    return await seriesSearch.searchSeries(keyword, kw => searchAtSource(kw, { ...options, page: 1 }));
   } catch (error) {
     console.error('[Search] 失败:', error.message);
     return { success: false, error: error.message };
@@ -3562,6 +3577,11 @@ function historyRows() {
 
 const cloudHistoryApi = require('./src/native/cloud-history');
 const CLOUD_HISTORY_TTL = 60 * 1000;
+const CLOUD_HISTORY_FRESH_MS = 15 * 1000;
+const CLOUD_UPLOAD_DELAY_MS = 1500;
+const CLOUD_UPLOAD_INTERVAL_MS = 20 * 1000;
+const CLOUD_UPLOAD_QUIT_MS = 3000;
+const HISTORY_REMOVE_LIMIT = 100;
 let cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
 const cloudUploads = new Map();
 
@@ -3606,7 +3626,9 @@ function uploadEntryFor(sid, record, userId) {
 
 
 let historySync = null;
+let historyRemoval = null;
 async function syncCloudHistory(force = false) {
+  while (historyRemoval) await historyRemoval;
   if (historySync) return historySync;
   historySync = (async () => {
     const state = await loadCloudHistory(force);
@@ -3666,52 +3688,152 @@ function scheduleCloudUpload(seriesId) {
   if (!userId) return;
   const sid = String(seriesId);
   if (watchHistory.sourceOf(sid) !== 'hongguo') return;
-  clearTimeout(cloudUploads.get(sid));
-  cloudUploads.set(sid, setTimeout(async () => {
-    cloudUploads.delete(sid);
-    if (syncedAccountId() !== userId) return;
+  let slot = cloudUploads.get(sid);
+  if (!slot || slot.userId !== userId) {
+    if (slot) clearTimeout(slot.timer);
+    slot = { userId, timer: null, running: null, dirty: false, sentAt: 0 };
+    cloudUploads.set(sid, slot);
+  }
+  if (slot.running) { slot.dirty = true; return; }
+  if (slot.timer !== null) return;
+  const wait = Math.max(CLOUD_UPLOAD_DELAY_MS, slot.sentAt + CLOUD_UPLOAD_INTERVAL_MS - Date.now());
+  slot.timer = setTimeout(() => runCloudUpload(sid, slot), wait);
+}
+
+function runCloudUpload(sid, slot) {
+  if (cloudUploads.get(sid) !== slot) return Promise.resolve();
+  if (slot.running) return slot.running;
+  clearTimeout(slot.timer);
+  slot.timer = null;
+  slot.dirty = false;
+  slot.running = (async () => {
+    if (syncedAccountId() !== slot.userId) return;
     const record = store.getPlayback()[sid];
     if (!record) return;
     try {
-      await cloudHistoryApi.uploadEntry(cloudRequest(), uploadEntryFor(sid, record, userId));
-      if (cloudHistory.userId === userId) cloudHistory.fetchedAt = 0;
+      await cloudHistoryApi.uploadEntry(cloudRequest(), uploadEntryFor(sid, record, slot.userId));
+      if (cloudHistory.userId === slot.userId) cloudHistory.fetchedAt = 0;
       sendToRenderer('watch-history-updated', {});
     } catch (error) {
       console.warn('[History] 手机历史同步失败:', error.message);
     }
-  }, 5000));
+  })().finally(() => {
+    slot.running = null;
+    slot.sentAt = Date.now();
+    if (cloudUploads.get(sid) !== slot || !slot.dirty) return;
+    slot.dirty = false;
+    scheduleCloudUpload(sid);
+  });
+  return slot.running;
 }
 
-
-
-async function removeWatchHistoryEverywhere(seriesId, { missingOk = false } = {}) {
-  const sid = String(seriesId);
-  const userId = watchHistory.sourceOf(sid) === 'hongguo' ? syncedAccountId() : '';
-  const map = store.getPlayback();
-  if (userId) {
-    const state = await loadCloudHistory(true);
-    if (syncedAccountId() !== userId || state?.userId !== userId) return { success: false, error: '帳號已切換，請重新操作。' };
-    if (!state?.rows || state.error) return { success: false, error: `手机历史暂时读不到，没有移除（${state?.error || '请稍后重试'}）` };
-    const row = state.rows.find(item => item.series_id === sid);
-    if (row) {
-      try {
-        let summary;
-        const after = await cloudHistoryApi.deleteEntry(cloudRequest(), row, Date.now(), { onSummary: value => { summary = value; } });
-        if (cloudHistory === state) Object.assign(state, { rows: after, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), mergedAt: 0, error: '' });
-      } catch (error) {
-        if (error.rows && cloudHistory === state) Object.assign(state, { rows: error.rows, fetchedAt: Date.now() });
-        return { success: false, error: error.code === 'CLOUD_DELETE_UNCONFIRMED' ? error.message : `从手机历史移除失败：${error.message || '请稍后重试'}` };
-      }
-    } else if (!map[sid]) return { success: false, error: '这部剧不在观看记录中' };
-  }
-  if (userId && syncedAccountId() !== userId) return { success: false, error: '帳號已切換，請重新操作。' };
-  clearTimeout(cloudUploads.get(sid));
+function cancelCloudUpload(sid) {
+  const slot = cloudUploads.get(sid);
+  if (!slot) return null;
+  clearTimeout(slot.timer);
   cloudUploads.delete(sid);
-  const latest = store.getPlayback();
-  if (watchHistory.forgetPlayback(latest, sid)) store.savePlayback(latest);
-  else if (!userId && !missingOk) return { success: false, error: '这部剧不在观看记录中' };
-  sendToRenderer('watch-history-updated', { removedSeriesId: sid });
-  return { success: true, cloud: !!userId, history: await watchHistoryView(false) };
+  return slot.running;
+}
+
+function clearCloudUploads() {
+  for (const slot of cloudUploads.values()) clearTimeout(slot.timer);
+  cloudUploads.clear();
+}
+
+function flushCloudUploads(limitMs = CLOUD_UPLOAD_QUIT_MS) {
+  const jobs = [];
+  for (const [sid, slot] of cloudUploads) {
+    if (slot.running) {
+      jobs.push(slot.dirty ? slot.running.then(() => {
+        const next = cloudUploads.get(sid);
+        return next && next.timer !== null ? runCloudUpload(sid, next) : undefined;
+      }) : slot.running);
+    } else if (slot.timer !== null) jobs.push(runCloudUpload(sid, slot));
+  }
+  if (!jobs.length) return null;
+  let timer;
+  return Promise.race([
+    Promise.allSettled(jobs),
+    new Promise(resolve => { timer = setTimeout(resolve, limitMs); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+const HISTORY_ACCOUNT_SWITCHED = '帳號已切換，請重新操作。';
+const HISTORY_NOT_LISTED = '这部剧不在观看记录中';
+
+function historyRemovalError(item) {
+  if (item.code === 'CLOUD_DELETE_STOPPED') return HISTORY_ACCOUNT_SWITCHED;
+  if (item.code === 'CLOUD_DELETE_UNCONFIRMED') return item.message;
+  return `从手机历史移除失败：${item.message || '请稍后重试'}`;
+}
+
+async function removeHistoryEntries(seriesIds, { missingOk = false } = {}) {
+  const ids = [...new Set((Array.isArray(seriesIds) ? seriesIds : [seriesIds]).map(String))];
+  while (historyRemoval) await historyRemoval;
+  let release;
+  historyRemoval = new Promise(resolve => { release = resolve; });
+  try {
+    if (historySync) await historySync.catch(() => {});
+    const userId = syncedAccountId();
+    const removed = [], failed = [];
+    const fail = (id, error) => failed.push({ series_id: id, error });
+    const cloudIds = userId ? ids.filter(id => watchHistory.sourceOf(id) === 'hongguo') : [];
+    const cloudSet = new Set(cloudIds);
+    const confirmed = new Set(ids.filter(id => !cloudSet.has(id)));
+    const held = cloudIds.filter(id => cloudUploads.has(id));
+    if (cloudIds.length) {
+      await Promise.allSettled(cloudIds.map(id => cancelCloudUpload(id)).filter(Boolean));
+      const state = await loadCloudHistory(true);
+      if (syncedAccountId() !== userId || state?.userId !== userId) cloudIds.forEach(id => fail(id, HISTORY_ACCOUNT_SWITCHED));
+      else if (!state?.rows || state.error) cloudIds.forEach(id => fail(id, `手机历史暂时读不到，没有移除（${state?.error || '请稍后重试'}）`));
+      else {
+        const map = store.getPlayback();
+        const listed = new Map(state.rows.map(row => [row.series_id, row]));
+        const targets = [];
+        for (const id of cloudIds) {
+          if (listed.has(id)) targets.push(listed.get(id));
+          else if (map[id]) confirmed.add(id);
+          else fail(id, HISTORY_NOT_LISTED);
+        }
+        if (targets.length) {
+          let summary;
+          const outcome = await cloudHistoryApi.deleteEntries(cloudRequest(), targets, {
+            keepGoing: () => syncedAccountId() === userId, onSummary: value => { summary = value; },
+          });
+          if (outcome.rows && cloudHistory === state) {
+            Object.assign(state, { rows: outcome.rows, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), mergedAt: 0, error: '' });
+          }
+          for (const id of outcome.removed) confirmed.add(id);
+          for (const item of outcome.failed) fail(item.id, historyRemovalError(item));
+        }
+        if (syncedAccountId() !== userId) {
+          for (const id of cloudIds) if (confirmed.delete(id)) fail(id, HISTORY_ACCOUNT_SWITCHED);
+        }
+      }
+    }
+    const latest = store.getPlayback();
+    let changed = false;
+    for (const id of ids) {
+      if (!confirmed.has(id)) continue;
+      cancelCloudUpload(id);
+      if (watchHistory.forgetPlayback(latest, id)) { changed = true; removed.push(id); }
+      else if (cloudSet.has(id) || missingOk) removed.push(id);
+      else fail(id, HISTORY_NOT_LISTED);
+    }
+    if (changed) store.savePlayback(latest);
+    for (const id of held) if (!removed.includes(id) && latest[id]) scheduleCloudUpload(id);
+    if (removed.length) sendToRenderer('watch-history-updated', removed.length === 1 ? { removedSeriesId: removed[0] } : { removedSeriesIds: removed });
+    return { removed, failed, cloud: cloudIds.length > 0 };
+  } finally {
+    historyRemoval = null;
+    release();
+  }
+}
+
+async function removeWatchHistoryEverywhere(seriesId, options = {}) {
+  const outcome = await removeHistoryEntries([String(seriesId)], options);
+  if (outcome.failed.length) return { success: false, error: outcome.failed[0].error };
+  return { success: true, cloud: outcome.cloud, history: await watchHistoryView(false) };
 }
 
 async function refreshWatchHistory(force = false) {
@@ -3930,8 +4052,19 @@ ipcMain.handle('remove-watch-history', async (_event, seriesId, expectedUserId) 
   catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
 });
 
-ipcMain.handle('get-watch-history', async () => {
-  try { return await watchHistoryView(false); }
+ipcMain.handle('remove-watch-history-batch', async (_event, seriesIds, expectedUserId) => {
+  if (expectedUserId !== undefined && String(expectedUserId) !== syncedAccountId()) return { success: false, error: '帳號已切換，請重新整理。' };
+  if (!Array.isArray(seriesIds) || !seriesIds.length || seriesIds.length > HISTORY_REMOVE_LIMIT
+    || !seriesIds.every(id => typeof id === 'string' && id && id.length <= 200)) return { success: false, error: '請重新選擇要移除的觀看紀錄。' };
+  try {
+    const outcome = await removeHistoryEntries(seriesIds, { missingOk: true });
+    return { success: true, removed: outcome.removed, failed: outcome.failed, cloud: outcome.cloud, history: await watchHistoryView(false) };
+  } catch (error) { return { success: false, error: error.message || '移除失败，请重试' }; }
+});
+
+ipcMain.handle('get-watch-history', async (_event, options) => {
+  const fresh = options?.fresh === true && !!syncedAccountId() && Date.now() - (cloudHistory.fetchedAt || 0) >= CLOUD_HISTORY_FRESH_MS;
+  try { return await watchHistoryView(fresh); }
   catch (error) { return { success: true, results: historyRows(), sync: { mode: 'local', error: error.message } }; }
 });
 ipcMain.handle('refresh-watch-history', async () => {
@@ -4006,6 +4139,7 @@ function forgetAccountSession() {
   accountCodeClient?.reset();
   try { store.saveLoginSession(''); } catch {                                                  }
   cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
+  clearCloudUploads();
 }
 
 function accountCode() {
@@ -4986,6 +5120,8 @@ app.on('before-quit', event => {
   const pending = [...jobs.map(job => job.promise), ...mergeRuns.values(), ...downloadRuns.values()];
   if (compatClearing) pending.push(compatClearing);
   if (mergeTempCleanup) pending.push(mergeTempCleanup);
+  const uploads = flushCloudUploads();
+  if (uploads) pending.push(uploads);
   const downloading = downloadRuns.size || downloadQueue.length || sourceRetryTimers.size;
   if (!pending.length && !downloading) { quitReady = true; return; }
   event.preventDefault();

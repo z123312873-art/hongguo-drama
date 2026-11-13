@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
   forgetSeries: (seriesId) => ipcRenderer.invoke('forget-series', seriesId),
   removeWatchHistory: (seriesId, userId) => ipcRenderer.invoke('remove-watch-history', seriesId, userId),
+  removeWatchHistoryBatch: (seriesIds, userId) => ipcRenderer.invoke('remove-watch-history-batch', seriesIds, userId),
   cleanupWatchedEpisode: (seriesId, vidIndex) => ipcRenderer.invoke('cleanup-watched-episode', seriesId, vidIndex),
   removeSeries: (seriesId) => ipcRenderer.invoke('remove-series', seriesId),
   purgeEmptySeries: () => ipcRenderer.invoke('purge-empty-series'),
@@ -120,7 +121,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlaybackPosition: (seriesId) => ipcRenderer.invoke('get-playback-position', seriesId),
 
 
-  getWatchHistory: () => ipcRenderer.invoke('get-watch-history'),
+  getWatchHistory: (options) => ipcRenderer.invoke('get-watch-history', options?.fresh === true ? { fresh: true } : undefined),
   deleteWatchHistory: (seriesId) => ipcRenderer.invoke('delete-watch-history', seriesId),
   refreshWatchHistory: () => ipcRenderer.invoke('refresh-watch-history'),
   acknowledgeWatchUpdates: (seriesId, snapshot) => ipcRenderer.invoke('acknowledge-watch-updates', seriesId, snapshot),

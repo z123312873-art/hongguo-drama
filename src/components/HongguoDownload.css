@@ -42,7 +42,12 @@
 .episode-num { font-weight: 600; font-size: 12px; }
 .episode-title { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .search-loading { display: flex; gap: 10px; align-items: center; padding: 36px 0; color: var(--text-secondary); }
-.search-count { margin: 26px 0 14px; font-size: 12px; color: var(--text-secondary); }
+.search-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 22px 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-inset); font-size: calc(12px * var(--font-scale, 1)); color: var(--text-secondary); }
+.search-summary strong { color: var(--text-primary); font-size: calc(14px * var(--font-scale, 1)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.search-summary-chip { padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.search-summary-chip.is-muted { background: var(--bg-hover); color: var(--text-secondary); }
+.search-summary-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; overflow-wrap: anywhere; }
+.search-group-title { margin: 22px 0 12px; font-size: calc(13px * var(--font-scale, 1)); font-weight: 600; color: var(--text-secondary); }
 .search-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ui-scale, 1)), 1fr)); gap: 12px; }
 .search-card { display: flex; text-align: left; align-items: center; gap: 14px; padding: 12px; border: 0; border-radius: 10px; background: var(--bg-canvas); }
 .search-card:hover { background: var(--bg-inset); }
@@ -55,10 +60,9 @@
 .search-empty { padding: 55px 20px; text-align: center; color: var(--text-secondary); }
 
 .hongguo-container .source-control { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; font-weight: 400; white-space: nowrap; }
-.hongguo-container .source-control select { width: auto; min-width: 112px; }
+.hongguo-container .source-control select { width: auto; min-width: 112px; height: 35px; padding-block: 0; line-height: 35px; text-align: center; text-align-last: center; }
 .episode-card:disabled { cursor: not-allowed; background: var(--bg-inset); color: var(--text-secondary); }
 
-.search-suggestions-hint { margin-top: 8px; }
 .search-history { margin-top: 16px; }
 .search-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; }
 .search-history-heading .btn-chip { background: transparent; }

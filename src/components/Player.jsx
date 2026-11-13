@@ -172,7 +172,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(payload => {
     const media = loadedMediaRef.current;
 
-    if (media && String(media.seriesId) === payload?.removedSeriesId) media.played = false;
+    if (!media) return;
+    const sid = String(media.seriesId);
+    if (sid === payload?.removedSeriesId || (Array.isArray(payload?.removedSeriesIds) && payload.removedSeriesIds.includes(sid))) media.played = false;
   }), []);
 
   const currentPosition = useCallback(() => {
