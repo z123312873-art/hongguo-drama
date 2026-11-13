@@ -2,10 +2,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..');
-const load = () => import(path.join(__dirname, 'vite-dev-cjs.mjs'));
+const load = () => import(pathToFileURL(path.join(__dirname, 'vite-dev-cjs.mjs')).href);
 
 const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
   const full = path.join(dir, entry.name);
@@ -65,7 +66,7 @@ test('every CommonJS module the renderer reaches converts to ESM with the same e
     }
     for (const file of modules) {
       const expected = require(file);
-      const actual = await import(path.join(dir, path.basename(file, '.js') + '.mjs'));
+      const actual = await import(pathToFileURL(path.join(dir, path.basename(file, '.js') + '.mjs')).href);
       const exported = Object.keys(actual).filter(key => key !== 'default').sort();
       assert.deepEqual(exported, Object.keys(expected).sort(), `${path.basename(file)} exposes every name as a named export`);
       assert.deepEqual(Object.keys(actual.default).sort(), Object.keys(expected).sort(), `${path.basename(file)} default export is the whole module`);
