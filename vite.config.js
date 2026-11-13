@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { developmentCjs } from './scripts/vite-dev-cjs.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const scriptJsx = path.resolve(root, 'src/script-jsx');
@@ -21,7 +22,7 @@ function traditionalJsx() {
 }
 
 export default defineConfig({
-  plugins: [traditionalJsx(), react(), {
+  plugins: [traditionalJsx(), developmentCjs(), react(), {
     name: 'development-csp',
     apply: 'serve',
 
