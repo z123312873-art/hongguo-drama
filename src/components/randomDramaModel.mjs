@@ -1,9 +1,8 @@
 import { BUILTIN_MEDIA_SOURCES, CUSTOM_SOURCE_ID, normalizeMediaSources } from './mediaSourcesModel.mjs';
 
-export const RANDOM_SOURCES = [['all', '全部来源'], ['hongguo', '红果'], ['xifan', '西饭'], ['hema', '河马']];
+export const RANDOM_SOURCES = [['all', '全部来源'], ['hongguo', '红果'], ['hema', '河马']];
 const SOURCE_IDS = {
   hongguo: /^\d{6,30}$/,
-  xifan: /^xifan:[a-zA-Z0-9_-]{1,200}:[a-zA-Z0-9_-]{1,200}$/,
   hema: /^hema:\d{1,30}$/,
 };
 

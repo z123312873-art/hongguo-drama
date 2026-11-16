@@ -582,7 +582,7 @@ async function resolveSeriesId(shareUrl) {
 async function fetchEpisodeList(seriesId) {
   if (String(seriesId).startsWith('custom:')) return require('./custom-source').fetchEpisodeList(seriesId);
   if (String(seriesId).startsWith('hema:')) return require('./hema').fetchEpisodeList(seriesId);
-  if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisodeList(seriesId);
+  if (String(seriesId).startsWith('xifan:')) throw Object.assign(new Error('西饭来源已移除，请改用红果或河马'), { code: 'SOURCE_REMOVED' });
   return cachedRequest(`episodes:${seriesId}`, 60000, () => fetchEpisodeListFresh(seriesId));
 }
 
@@ -721,7 +721,7 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
     const quality = normalizeDownloadQuality(options.quality);
     if (String(vid).startsWith('custom:') || String(sid).startsWith('custom:')) return require('./custom-source').fetchPlayUrlSingle(vid, sid, options);
     if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
-    if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
+    if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return { url: null, spadeA: null, codec: null, source: 'xifan', error: '西饭来源已移除，请改用红果或河马' };
     const skipWeb = (failedWebMedia.get(String(vid)) || 0) > Date.now();
     const allowLowerQuality = options.allowLowerQuality === true && quality !== 'auto';
     const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}${skipWeb ? ':fallback' : ''}${allowLowerQuality ? ':lower-quality' : ''}`;

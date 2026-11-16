@@ -7,6 +7,7 @@
 
 const crypto = require('node:crypto');
 const playerSigning = require('./player-signing');
+const playerV5 = require('./player-v5');
 const { takePlaybackDevice, armPlaybackPool } = require('./playback-device');
 const sm3 = require('./sm3');
 const { normalizeDownloadQuality, meetsDownloadQuality, measuredDownloadQuality } = require('./download-quality');
@@ -21,6 +22,7 @@ const VIDEO_PATH = '/novel/player/multi_video_model/v1/';
 const VIDEO_HOSTS = Object.freeze(['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-hl.fqnovel.com']);
 const videoApi = (host, apiPath = VIDEO_PATH) => `https://${host || VIDEO_HOSTS[0]}${apiPath}`;
 let preferredHost = 0;
+let preferredV5Host = 0;
 const VIDEO_UA = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const DEVICE = {
     ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
@@ -547,6 +549,52 @@ async function fetchAppPlayUrl(vid, options = {}) {
     };
     let identity = null, registrationReason = '';
     try { identity = await takePlaybackDevice(requestJson); } catch (failure) { identity = null; registrationReason = failure?.reason || ''; }
+    const readPlayerV5 = async (device, host) => {
+        const signed = playerV5.signedPlayerRequest(vid, device, host);
+        const json = await requestJson(signed.url, {
+            method: 'POST', headers: signed.headers, data: signed.body,
+            decompress: true,
+        }, deadline, signal);
+        if (Number(json?.code ?? json?.Code ?? 0) !== 0) {
+            throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
+        }
+        const modeled = playerV5.modelFromResponse(json, vid);
+        if (!modeled) throw Object.assign(new Error('App 接口未返回所选分集，已停止取址'), { code: 'MISSING_MODEL' });
+        return modeled;
+    };
+    const tryPlayerV5 = async device => {
+        const hosts = playerV5.PLAYER_HOSTS;
+        let lastError = null;
+        for (let step = 0; step < hosts.length; step++) {
+            const index = (preferredV5Host + step) % hosts.length;
+            let model;
+            try { model = await readPlayerV5(device, hosts[index]); }
+            catch (error) {
+                lastError = error;
+                if (signal.aborted || Date.now() >= deadline || ['ETIMEDOUT', 'ECONNABORTED', 'ERR_TLS_CERT', 'DEVICE_REGISTRATION_FAILED'].includes(error?.code)) break;
+                continue;
+            }
+            preferredV5Host = index;
+            return { result: await variantsFrom(model) };
+        }
+        return { error: lastError };
+    };
+    if (identity && playerV5.PLAYER_HOSTS.length) {
+        let attempt;
+        try { attempt = await tryPlayerV5(identity); }
+        catch (error) {
+            if (error?.code !== 'NO_COMPATIBLE_CODEC') throw error;
+            let fresh = null;
+            try { fresh = await takePlaybackDevice(requestJson, { again: true }); } catch (failure) { registrationReason = failure?.reason || registrationReason; }
+            if (!fresh || (fresh.device_id === identity.device_id && fresh.iid === identity.iid)) throw error;
+            preferredV5Host = (preferredV5Host + 1) % playerV5.PLAYER_HOSTS.length;
+            const second = await tryPlayerV5(fresh);
+            if (second.result) return second.result;
+            throw error;
+        }
+        if (attempt.result) return attempt.result;
+        if (attempt.error?.code === 'ERR_TLS_CERT') throw attempt.error;
+    }
     const catalogModel = await readVideoTab(vid, deadline, signal, identity);
     if (catalogModel) return await variantsFrom(catalogModel);
     const firstHost = preferredHost;
@@ -554,9 +602,6 @@ async function fetchAppPlayUrl(vid, options = {}) {
     try {
         result = await variantsFrom(await readModel(identity, VIDEO_HOSTS[firstHost]));
     } catch (error) {
-
-
-
         const retryable = error?.code === 'EMPTY_RESPONSE' || error?.code === 'NO_COMPATIBLE_CODEC';
         if (!retryable) throw error;
         let fresh = null;
@@ -603,4 +648,4 @@ async function fetchAppSeriesMetadata(seriesId) {
     }
     throw lastError;
 }
-module.exports = { fetchAppSeriesMetadata, fetchAppPlayUrl, warmPlayback, setBytevc2Ready, NEWER_CODEC_UNREADY, VIDEO_HOSTS, METADATA_HOSTS, signedSearchRequest, signedMetadataRequest, requestMetadata, parseSearchInteger, requestJson };
+module.exports = { fetchAppSeriesMetadata, fetchAppPlayUrl, warmPlayback, setBytevc2Ready, NEWER_CODEC_UNREADY, VIDEO_HOSTS, METADATA_HOSTS, signedSearchRequest, signedMetadataRequest, requestMetadata, parseSearchInteger, requestJson, playerV5 };

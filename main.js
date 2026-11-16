@@ -1271,7 +1271,7 @@ async function invalidateCustomSource(id) {
 }
 ipcMain.handle('get-custom-sources', async () => ({success:true,sources:getCurrentSettings().custom_sources || []}));
 ipcMain.handle('get-media-sources', async () => ({success:true,sources:[
-  {id:'hongguo',label:'红果'},{id:'xifan',label:'西饭'},{id:'hema',label:'河马'},
+  {id:'hongguo',label:'红果'},{id:'hema',label:'河马'},
   ...(getCurrentSettings().custom_sources || []).filter(source => source.enabled).map(source => ({id:`custom:${source.id}`,label:source.name,custom:true})),
 ]}));
 ipcMain.handle('save-custom-source', async (_event,draft) => {
@@ -1302,13 +1302,17 @@ ipcMain.handle('test-custom-source', async (_event,draft) => {
 
 ipcMain.handle('browse-list', async (_event, options) => {
   const source = String(options?.source || '');
+  if (source === 'xifan') return { success: false, error: '西饭来源已移除，请改用红果或河马' };
+  const covers = source === 'hema' ? require('./src/native/cover-preconnect') : null;
+  covers?.warm?.();
   const listed = await require(source.startsWith('custom:') ? './src/native/custom-source' : source === 'hema' ? './src/native/hema'
-    : source === 'xifan' ? './src/native/xifan' : './src/native/catalog').browseList(options, (authInfo, callback) => {
+    : './src/native/catalog').browseList(options, (authInfo, callback) => {
       if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
       else callback();
     });
 
-  if (source.startsWith('custom:') || source === 'hema' || source === 'xifan' || !listed?.success || !Array.isArray(listed.results)) return listed;
+  if (listed?.success) covers?.remember?.(listed);
+  if (source.startsWith('custom:') || source === 'hema' || !listed?.success || !Array.isArray(listed.results)) return listed;
   try {
     const releases = require('./src/native/hongguo-app-new');
     if (typeof releases.premiereIds !== 'function' || typeof releases.warmNewReleases !== 'function') return listed;
@@ -1465,8 +1469,14 @@ function searchPageOf(value) {
 async function searchAtSource(keyword, options = {}) {
   const page = searchPageOf(options?.page);
   if (String(options?.source).startsWith('custom:')) return require('./src/native/custom-source').searchSeries(keyword, { ...options, page });
-  if (options?.source === 'hema') return require('./src/native/hema').search(catalogQuery(keyword), page);
-  if (options?.source === 'xifan') return require('./src/native/xifan').search(catalogQuery(keyword), page);
+  if (options?.source === 'hema') {
+    const covers = require('./src/native/cover-preconnect');
+    covers.warm();
+    const found = await require('./src/native/hema').search(catalogQuery(keyword), page);
+    if (found?.success) covers.remember(found);
+    return found;
+  }
+  if (options?.source === 'xifan') return { success: false, error: '西饭来源已移除，请改用红果或河马' };
   if (options?.source && options.source !== 'hongguo') throw new Error('不支持的搜索来源');
   if (page === 1) return runSearchSniff(keyword);
   const found = await require('./src/native/hongguo-search').searchHongguo(catalogQuery(keyword), { page, timeout: 8000 });
@@ -3843,6 +3853,7 @@ async function refreshWatchHistory(force = false) {
     const now = Date.now();
 
     const due = historyRows().filter(item => seriesRegistry.some(entry => String(entry.series_id) === String(item.series_id)))
+      .filter(item => !String(item.series_id).startsWith('xifan:'))
       .filter(item => force || now - item.lastCheckedAt >= HISTORY_CHECK_INTERVAL)
       .sort((a, b) => a.lastCheckedAt - b.lastCheckedAt);
     const batch = due.slice(0, 20);

@@ -16,6 +16,7 @@ import { joinPages, loadPage } from '../catalogPages.mjs';
 import { DEFAULT_BROWSE_CATEGORIES } from '../browseCategories.mjs';
 import { HERO_RESERVED_ROWS, heroLineup, readDiscoverShelf, writeDiscoverShelf } from '../discoverHero.mjs';
 import DiscoverHero from './DiscoverHero';
+import CoverImage from './CoverImage';
 import ComicBrowse from './ComicBrowse';
 import { categoryFromBrowse } from '../favoriteView.mjs';
 
@@ -29,6 +30,7 @@ const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
 
 
 const EAGER_POSTERS = 12;
+const HEMA_COVER_HEDGE_MS = 4000;
 const LIST_TIMEOUT_MS = 30_000;
 
 function snapshotKey(source, category, genre, page) {
@@ -832,7 +834,6 @@ function Browse({ onNavigate, active = true }) {
 
       {sourcesError && <p className="browse-source-note" role="status">来源列表更新失败，暂用上次列表。可在设置重新保存来源后重试。</p>}
       {source.startsWith('custom:') && <p className="browse-source-note">来自 {mediaSourceLabel(source, mediaSources)} 的接口目录，按来源顺序显示，不代表热播榜。</p>}
-      {source === 'xifan' && <p className="browse-source-note">当前提供题材分类，西饭热播榜暂未接入。</p>}
 
       {comicView && !upcoming && <ComicBrowse active={active} reservedRows={reserveRows} reloadToken={comicReload} />}
 
@@ -853,7 +854,7 @@ function Browse({ onNavigate, active = true }) {
             className={`genre-chip ${genre === '' ? 'active' : ''}`}
             onClick={() => switchGenre('')}
           >
-            {source === 'xifan' ? '默认分类' : '全部'}
+            全部
           </button>
           {meta.genres.map((g) => (
             <button
@@ -913,7 +914,9 @@ function Browse({ onNavigate, active = true }) {
                     {item.is_premiere === true ? <span className="browse-new-badge">红果首发</span> : item.is_new === true && <span className="browse-new-badge">新剧</span>}
                     {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
                   </div>}
-                  {item.cover ? (
+                  {source === 'hema' ? (
+                    <CoverImage src={item.cover} alt={item.series_title} eager={position < EAGER_POSTERS} hedgeMs={HEMA_COVER_HEDGE_MS} />
+                  ) : item.cover ? (
                     <img src={item.cover} alt={item.series_title} loading={position < EAGER_POSTERS ? 'eager' : 'lazy'} decoding="async" fetchpriority={position < EAGER_POSTERS ? 'high' : 'auto'} />
                   ) : (
                     <div className="cover-placeholder"><Film size={22} /></div>

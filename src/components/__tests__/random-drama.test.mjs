@@ -9,14 +9,13 @@ test('pool keeps available sources, validates IDs and deduplicates', async () =>
   const requests = [];
   const result = await model.loadRandomPool(async options => {
     requests.push(options);
-    if (options.source === 'xifan') throw new Error('offline');
-    return { success: true, results: options.source === 'hongguo'
-      ? [drama('123456'), drama('123456'), drama('hema:1'), drama('bad'), drama('654321', ' ')]
-      : [drama('hema:1'), drama('hema:2')] };
+    if (options.source === 'hema') throw new Error('offline');
+    return { success: true, results: [drama('123456'), drama('123456'), drama('hema:1'), drama('bad'), drama('654321', ' '), drama('xifan:a:b')] };
   });
-  assert.deepEqual(result.items.map(item => item.series_id), ['123456', 'hema:1', 'hema:2']);
-  assert.deepEqual(result.unavailable, ['xifan']);
-  assert.equal(requests.length, 3);
+  assert.deepEqual(result.items.map(item => item.series_id), ['123456']);
+  assert.deepEqual(result.unavailable, ['hema']);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(request => request.source !== 'xifan'), 'the retired source is never asked');
   assert.ok(requests.every(request => request.page === 1 && request.category === 'real-drama'));
 });
 
@@ -25,10 +24,12 @@ test('single-source pool never requests other sources and reports empty director
   const result = await model.loadRandomPool(async request => {
     requests.push(request.source);
     return { success: true, results: [] };
-  }, { source: 'xifan' });
-  assert.deepEqual(requests, ['xifan']);
+  }, { source: 'hema' });
+  assert.deepEqual(requests, ['hema']);
   assert.deepEqual(result.items, []);
-  assert.deepEqual(result.unavailable, ['xifan']);
+  assert.deepEqual(result.unavailable, ['hema']);
+  await assert.rejects(model.loadRandomPool(async () => ({ success: true, results: [] }), { source: 'xifan' }), /有效来源/);
+  assert.equal(model.RANDOM_SOURCES.some(([id]) => id === 'xifan'), false);
 });
 
 test('draw excludes the previous ID and the same title across sources', () => {
@@ -44,7 +45,7 @@ test('slow source times out without discarding a working source', async () => {
     ? Promise.resolve({ success: true, results: [drama('123456')] })
     : new Promise(() => {}), { timeoutMs: 10 });
   assert.equal(result.items.length, 1);
-  assert.deepEqual(result.unavailable, ['xifan', 'hema']);
+  assert.deepEqual(result.unavailable, ['hema']);
 });
 
 test('cancelling a pending pool rejects promptly', async () => {

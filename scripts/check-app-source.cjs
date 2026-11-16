@@ -12,6 +12,8 @@ const vectors = [
   ['x'.repeat(10000), '335de0cbf893f7af9a3e548067c72f47630b9fa9293d93959c79c2085fab7e5e'],
 ];
 const keyHex = '0123456789abcdef0123456789abcdef';
+const realPlayer = require(path.join(nativeDir, 'player-v5'));
+const legacyOnlyPlayer = { ...realPlayer, PLAYER_HOSTS: [] };
 function encodedKey() {
   const plain = Buffer.from(`0${keyHex}`);
   const raw = Buffer.alloc(34);
@@ -64,6 +66,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
       if (name === './codec-rank') return require(path.join(nativeDir, 'codec-rank'));
       if (name === './playback-policy') return require(path.join(nativeDir, 'playback-policy'));
       if (name === './cert-hint') return require(path.join(nativeDir, 'cert-hint'));
+      if (name === './player-v5') return legacyOnlyPlayer;
       if (name === 'node:crypto') return { ...crypto, createHash(name, ...args) {
         assert.notEqual(name.toLowerCase(), 'sm3', 'must not depend on OpenSSL SM3');
         return crypto.createHash(name, ...args);
@@ -74,7 +77,7 @@ function fixture({ wrongVid = false, fallback = 'https://vod.snssdk.com/info', m
   vm.runInNewContext(fs.readFileSync(path.join(nativeDir, 'app-source.js'), 'utf8'), context);
   return { fetch: context.module.exports.fetchAppPlayUrl, calls, signedDeviceIds };
 }
-function loadApp(axios, { videoTab = false } = {}) {
+function loadApp(axios, { videoTab = false, player = legacyOnlyPlayer } = {}) {
   const context = { Buffer, URL, AbortSignal, module: { exports: {} },
     require: name => {
       if (name === 'axios') return config => !videoTab && String(config.url).includes('/reading/bookapi/video_tab/')
@@ -87,6 +90,7 @@ function loadApp(axios, { videoTab = false } = {}) {
       if (name === './codec-rank') return require(path.join(nativeDir, 'codec-rank'));
       if (name === './playback-policy') return require(path.join(nativeDir, 'playback-policy'));
       if (name === './cert-hint') return require(path.join(nativeDir, 'cert-hint'));
+      if (name === './player-v5') return player;
       if (name === 'node:crypto') return crypto;
       throw new Error(`Unexpected dependency: ${name}`);
     },
@@ -574,6 +578,123 @@ const checks = [
       device.resetPlaybackDevice();
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
     }
+  }],
+  ['the newer player route answers first for registered lookups and the older route stays as a fallback', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    const zlib = require('node:zlib');
+    device.resetPlaybackDevice();
+    const hosts = realPlayer.PLAYER_HOSTS;
+    const v5Model = (name, codec = 'hvc1') => ({ code: 0, data: { '1004': { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: mediaUrl(name), codec_type: codec, vwidth: 1080, vheight: 1920 },
+    ] }) } } } });
+    const legacyModel = name => ({ code: 0, data: { video_model_data: { '11': { video_model: JSON.stringify({ video_list: [
+      { main_url: mediaUrl(name), codec_type: 'h264', vwidth: 720, vheight: 1280 },
+    ] }) } } } });
+    const run = (answer) => {
+      const calls = [];
+      let registered = 0;
+      const app = loadApp(async config => {
+        calls.push(config);
+        if (String(config.url).includes('device_register')) {
+          registered += 1;
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: String(7000000000000000 + registered), install_id_str: String(8000000000000000 + registered), code: 0 }) };
+        }
+        const url = new URL(config.url);
+        if (url.pathname === realPlayer.PLAYER_PATH) {
+          assert.equal(config.method, 'POST');
+          assert.equal(config.headers['Content-Encoding'], 'gzip');
+          for (const name of ['x-medusa', 'x-helios', 'x-khronos', 'x-ss-stub']) assert.ok(config.headers[name], name);
+          for (const name of ['Cookie', 'X-Tt-Token', 'x-argus', 'x-ladon', 'x-gorgon']) assert.equal(config.headers[name], undefined, name);
+          const body = JSON.parse(zlib.gunzipSync(config.data).toString());
+          assert.deepEqual(body.mixed_video_id_map, { '1004': ['11'] });
+          assert.equal(String(Number(url.searchParams.get('_rticket'))).length, 13);
+          assert.equal(config.headers['x-khronos'], String(Math.floor(Number(url.searchParams.get('_rticket')) / 1000) ));
+          return answer('v5', url.hostname);
+        }
+        return answer(url.pathname.includes('video_tab') ? 'tab' : 'legacy', url.hostname);
+      }, { videoTab: true, player: realPlayer });
+      const v5Hosts = () => calls.filter(call => new URL(call.url).pathname === realPlayer.PLAYER_PATH).map(call => new URL(call.url).hostname);
+      const legacy = () => calls.filter(call => !String(call.url).includes('device_register') && new URL(call.url).pathname !== realPlayer.PLAYER_PATH).length;
+      return { app, v5Hosts, legacy, registered: () => registered };
+    };
+    const reply = data => ({ status: 200, headers: {}, data: typeof data === 'string' ? data : JSON.stringify(data) });
+    try {
+      const direct = run(kind => kind === 'v5' ? reply(v5Model('v5')) : reply(legacyModel('old')));
+      const first = await direct.app.fetchAppPlayUrl('11');
+      assert.equal(first.url, mediaUrl('v5'));
+      assert.equal(first.codec, 'hevc');
+      assert.equal(direct.legacy(), 0, 'a working newer route never touches the older route');
+      assert.deepEqual(direct.v5Hosts(), [hosts[0]]);
+
+      device.resetPlaybackDevice();
+      const moved = run((kind, host) => kind === 'v5' ? (host === hosts[0] ? reply('') : reply(v5Model('second'))) : reply(legacyModel('old')));
+      assert.equal((await moved.app.fetchAppPlayUrl('11')).url, mediaUrl('second'));
+      assert.equal((await moved.app.fetchAppPlayUrl('11')).url, mediaUrl('second'));
+      assert.deepEqual(moved.v5Hosts(), [hosts[0], hosts[1], hosts[1]], 'the host that answered is asked first next time');
+
+      device.resetPlaybackDevice();
+      const fallback = run(kind => kind === 'v5' ? reply('') : reply(legacyModel('old')));
+      const old = await fallback.app.fetchAppPlayUrl('11');
+      assert.equal(old.url, mediaUrl('old'));
+      assert.equal(new Set(fallback.v5Hosts()).size, hosts.length, 'every newer host is tried once before the older route');
+      assert.equal(fallback.v5Hosts().length, hosts.length);
+      assert.ok(fallback.legacy() >= 1);
+
+      device.resetPlaybackDevice();
+      const missing = run(kind => kind === 'v5' ? reply({ code: 0, data: { '1004': { '12': {} } } }) : reply(legacyModel('old')));
+      assert.equal((await missing.app.fetchAppPlayUrl('11')).url, mediaUrl('old'), 'a wrong episode is never played');
+
+      device.resetPlaybackDevice();
+      const newer = run(kind => kind === 'v5' ? reply(v5Model('vvc', 'bytevc2')) : reply(legacyModel('old')));
+      await assert.rejects(newer.app.fetchAppPlayUrl('11'), error => error.code === 'NO_COMPATIBLE_CODEC');
+      assert.equal(newer.registered(), 2, 'one fresh device, then stop');
+      assert.equal(newer.v5Hosts().length, 2);
+      assert.equal(newer.legacy(), 0);
+
+      device.resetPlaybackDevice();
+      const ready = run(kind => kind === 'v5' ? reply(v5Model('vvc', 'bytevc2')) : reply(legacyModel('old')));
+      ready.app.setBytevc2Ready(true);
+      const transcoded = await ready.app.fetchAppPlayUrl('11');
+      ready.app.setBytevc2Ready(false);
+      assert.equal(transcoded.transcode, 'bytevc2');
+      assert.equal(ready.registered(), 1);
+
+      device.resetPlaybackDevice();
+      let unregistered = 0;
+      const anonymous = loadApp(async config => {
+        if (String(config.url).includes('device_register')) return reply({ code: 1 });
+        if (new URL(config.url).pathname === realPlayer.PLAYER_PATH) unregistered += 1;
+        return reply(legacyModel('old'));
+      }, { videoTab: true, player: realPlayer });
+      await anonymous.fetchAppPlayUrl('11').catch(() => null);
+      assert.equal(unregistered, 0, 'without a registered device the newer route is not asked');
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
+  ['newer player signing matches its reference vectors and request shape', async () => {
+    const f13 = require(path.join(nativeDir, 'fixtures/signing-v5-f13.json'));
+    for (const vector of f13) {
+      const digest = realPlayer.hashF13(Buffer.from(vector.query, 'hex'), Buffer.from(vector.body, 'hex'), vector.ts).toString('hex');
+      assert.ok(digest.startsWith(vector.digest), `f13 ${vector.ts}`);
+    }
+    const carrier = require(path.join(nativeDir, 'fixtures/signing-v5-carrier.json'));
+    for (const vector of carrier) {
+      const out = new realPlayer.AesV5(Buffer.from(vector.key, 'hex'), vector.ts).encrypt(Buffer.from(vector.source, 'hex'), Buffer.from(vector.iv, 'hex'));
+      assert.equal(out.toString('hex'), vector.encrypted, `carrier ${vector.ts}`);
+    }
+    const identity = { device_id: '4474387174276572', iid: '4474387173477868', cdid: '11111111-2222-3333-4444-555555555555' };
+    const signed = realPlayer.signedPlayerRequest('7600000000000000001', identity, realPlayer.PLAYER_HOSTS[1], { now: 1800000000123 });
+    const url = new URL(signed.url);
+    assert.equal(url.hostname, realPlayer.PLAYER_HOSTS[1]);
+    assert.equal(realPlayer.branchOf(url.search.slice(1), signed.body, signed.khronos), 0);
+    assert.equal(signed.headers['x-ss-stub'], crypto.createHash('md5').update(signed.body).digest('hex').toUpperCase());
+    assert.throws(() => realPlayer.signedPlayerRequest('../1', identity));
+    assert.throws(() => realPlayer.signedPlayerRequest('11', { device_id: '0', iid: '0', cdid: 'x' }), error => error.code === 'DEVICE_REGISTRATION_FAILED');
+    assert.equal(realPlayer.modelFromResponse({ data: { '1004': { '11': { video_model: '{}' } } } }, '11').data['11'].video_model, '{}');
+    assert.equal(realPlayer.modelFromResponse({ data: { '1004': { '12': { video_model: '{}' } } } }, '11'), null);
+    assert.equal(realPlayer.modelFromResponse({ data: null }, '11'), null);
   }],
   ['invalid input and invalid key rejected', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'app-source.js')), 'app source missing');

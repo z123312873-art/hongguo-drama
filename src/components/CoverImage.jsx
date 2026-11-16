@@ -4,7 +4,7 @@ import { coverCandidates } from '../coverFallback.mjs';
 
 export const COVER_HEDGE_MS = 600;
 
-export default function CoverImage({ src, alt = '', size = 22, eager = false }) {
+export default function CoverImage({ src, alt = '', size = 22, eager = false, hedgeMs = COVER_HEDGE_MS }) {
   const candidates = coverCandidates(src);
   const key = candidates.join('|');
   const [attempt, setAttempt] = useState(0);
@@ -19,7 +19,7 @@ export default function CoverImage({ src, alt = '', size = 22, eager = false }) 
       probe = new Image();
       probe.onload = () => setAttempt(value => (candidates[value] === current ? value + 1 : value));
       probe.src = next;
-    }, COVER_HEDGE_MS);
+    }, hedgeMs);
     return () => { clearTimeout(timer); if (probe) probe.onload = null; };
   }, [key, attempt, shown]);
   if (!current) return <div className="cover-placeholder"><Film size={size} /></div>;
