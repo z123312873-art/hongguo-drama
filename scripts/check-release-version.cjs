@@ -184,7 +184,7 @@ const pre465Body = pre465Heredoc[1].split('\n').map(line => line.replace(/^ {10}
 assert.deepEqual(releaseSummary(pre465Body).items, pre465Doc, 'The 4.6.5 pre-release must publish the documented summary');
 assert.deepEqual(pre465Doc, [
   '修復紅果短劇無法播放，恢復線上取址',
-  '河馬短劇移除分集鎖定，可播集直接看、畫質最高 720P',
+  '修復河馬短劇有集無鎖卻不能播，播放器可切換解析度，畫質最高 720P',
   '移除西飯來源，只保留紅果與河馬',
   '河馬海報載入更快，首屏更快出現',
   '河馬題材標籤整理成複合分類，篩選更清爽',
