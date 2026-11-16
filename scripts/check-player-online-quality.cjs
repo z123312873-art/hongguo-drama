@@ -74,6 +74,15 @@ if (process.argv[2] !== 'main') {
     const third=mount({local:true,storage,seriesId:'xifan:A'}); await third.flush();
     assert(select(third).props.disabled); assert.equal(select(third).props.value,'auto');
     assert.equal(third.find(n=>n.type==='video').props.src,'file:///mock-1.mp4'); third.unmount();
+    const hema=mount({local:true,storage,seriesId:'hema:A'}); await hema.flush();
+    const hemaSelect=select(hema);
+    const optionValues=(node,acc=[])=>{ if(!node) return acc; if(Array.isArray(node)) { node.forEach(n=>optionValues(n,acc)); return acc; } if(node.type==='option') acc.push(node.props.value); optionValues(node.children,acc); return acc; };
+    assert.equal(hemaSelect.props.disabled, false);
+    assert.equal(hemaSelect.props.value,'auto');
+    assert.deepEqual(optionValues(hemaSelect), ['auto','720p']);
+    hemaSelect.props.onChange({target:{value:'720p'}}); await hema.flush();
+    assert.equal(hema.prepares.at(-1).quality,'720p');
+    hema.unmount();
   });
 } else {
   const prefix=fs.readFileSync(path.join(__dirname,'check-download-quality-integration.cjs'),'utf8').split('const checks = [')[0];
@@ -100,6 +109,8 @@ if (process.argv[2] !== 'main') {
       assert.deepEqual(Array.from(h.calls,c=>c[2].quality),['auto','720p','1080p']); assert.equal(h.run('onlineCache.size'),3);
       assert.equal((await h.handlers['prepare-online-play']({}, {vid:'11',quality:'bogus'})).success,false);
       assert.equal((await h.handlers['prepare-online-play']({}, {vid:'xifan:11',quality:'1080p'})).success,false);
+      assert.equal((await h.handlers['prepare-online-play']({}, {vid:'hema:11',quality:'1080p'})).success,false);
+      assert.match((await h.handlers['prepare-online-play']({}, {vid:'hema:11',quality:'1080p'})).error, /720P|720p/);
       h.context.clearOnlineCache();
     });
     await check('explicit-quality complete cache survives upstream failure during download fallback',async()=>{

@@ -34,24 +34,113 @@ function httpsUrl(value) {
     return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
   } catch (_) { return ''; }
 }
-function pickPlayUrl(obj, depth = 0) {
-  if (!obj || depth > 8) return '';
-  if (typeof obj === 'string') return httpsUrl(obj);
-  if (Array.isArray(obj)) {
-    for (const item of obj) { const found = pickPlayUrl(item, depth + 1); if (found) return found; }
-    return '';
-  }
-  if (typeof obj === 'object') {
-    for (const key of ['mp4Url', 'mp4720pUrl', 'm3u8720pUrl', 'm3u8', 'playUrl', 'videoUrl', 'downLoadUrl']) {
-      const found = httpsUrl(obj[key]);
-      if (found) return found;
-    }
-    for (const value of Object.values(obj)) {
-      const found = pickPlayUrl(value, depth + 1);
+const PLAY_KEYS = ['mp4Url', 'mp4720pUrl', 'm3u8720pUrl', 'mp4SwitchUrl', 'mp4720pSwitchUrl', 'm3u8', 'playUrl', 'videoUrl', 'downLoadUrl'];
+const IMAGE_EXT = /\.(?:jpe?g|png|gif|webp|bmp|svg|ico|avif)$/i;
+const VIDEO_EXT = /\.(?:mp4|m4v|m3u8|mov|ts|m4s)$/i;
+
+function pathName(url) {
+  try { return new URL(url).pathname; } catch (_) { return ''; }
+}
+
+function mediaUrl(value, fromPlayKey = false) {
+  const url = httpsUrl(value);
+  if (!url || IMAGE_EXT.test(pathName(url))) return '';
+  if (fromPlayKey || VIDEO_EXT.test(pathName(url))) return url;
+  return '';
+}
+
+function firstMedia(value, fromPlayKey = false) {
+  if (typeof value === 'string') return mediaUrl(value, fromPlayKey);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstMedia(item, fromPlayKey);
       if (found) return found;
     }
   }
   return '';
+}
+
+function pickByKeys(obj, depth = 0) {
+  if (!obj || depth > 8) return '';
+  if (Array.isArray(obj)) {
+    for (const item of obj) { const found = pickByKeys(item, depth + 1); if (found) return found; }
+    return '';
+  }
+  if (typeof obj !== 'object') return '';
+  for (const key of PLAY_KEYS) {
+    const found = firstMedia(obj[key], true);
+    if (found) return found;
+  }
+  for (const value of Object.values(obj)) {
+    const found = pickByKeys(value, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+function pickByExt(obj, depth = 0) {
+  if (!obj || depth > 8) return '';
+  if (typeof obj === 'string') return mediaUrl(obj, false);
+  if (Array.isArray(obj)) {
+    for (const item of obj) { const found = pickByExt(item, depth + 1); if (found) return found; }
+    return '';
+  }
+  if (typeof obj !== 'object') return '';
+  for (const value of Object.values(obj)) {
+    const found = pickByExt(value, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+function pickPlayUrl(obj) {
+  return pickByKeys(obj) || pickByExt(obj);
+}
+
+function pickRate(obj, depth = 0) {
+  if (!obj || depth > 8) return '';
+  if (Array.isArray(obj)) {
+    for (const item of obj) { const found = pickRate(item, depth + 1); if (found) return found; }
+    return '';
+  }
+  if (typeof obj !== 'object') return '';
+  const rate = String(obj.mp4UrlRate || '').toUpperCase();
+  if (/^(540|720|1080)P$/.test(rate)) return rate;
+  for (const value of Object.values(obj)) {
+    const found = pickRate(value, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+function pickQualities(obj, depth = 0, acc = []) {
+  if (!obj || depth > 8) return acc;
+  if (Array.isArray(obj)) {
+    for (const item of obj) pickQualities(item, depth + 1, acc);
+    return acc;
+  }
+  if (typeof obj !== 'object') return acc;
+  if (Array.isArray(obj.resolutionRates)) {
+    for (const item of obj.resolutionRates) {
+      const rate = String(item?.rate || '').toUpperCase();
+      if (!/^(540|720)P$/.test(rate)) continue;
+      if (item.needVip === 1 || item.needVip === '1') continue;
+      if (!acc.includes(rate)) acc.push(rate);
+    }
+  }
+  for (const value of Object.values(obj)) pickQualities(value, depth + 1, acc);
+  return acc;
+}
+
+function requestedRate(quality) {
+  const value = String(quality || 'auto').toLowerCase();
+  if (value === '540p' || value === '540') return '540P';
+  return '720P';
+}
+
+function publicQuality(rate) {
+  const match = String(rate || '').toUpperCase().match(/^(540|720)P$/);
+  return match ? `${match[1]}p` : '720p';
 }
 
 function freshSessionSeed() {
@@ -97,7 +186,7 @@ async function portalCall(action, body, sess, options = {}) {
     response = await axios.post(`${HOST}${PORTAL}${action}`, bodyWire, {
       ...require('./direct-connect').directAxiosOptions(),
       headers, timeout, maxRedirects: 0, maxContentLength: 4 * 1024 * 1024,
-      responseType: 'text', transformResponse: [(data) => data], validateStatus: () => true,
+      responseType: 'text', transformRequest: [(data) => data], transformResponse: [(data) => data], validateStatus: () => true,
       signal: options.signal,
     });
   } catch (error) {
@@ -171,11 +260,12 @@ async function fetchDetail(bookId, chapterId, options = {}) {
 }
 
 async function fetchPlay(bookId, chapterId, options = {}) {
+  const rate = requestedRate(options.quality);
   const body = {
     bookId: String(bookId), chapterIds: [String(chapterId)], unClockType: 'load',
     chapterId: String(chapterId),
     tierPlaySource: { firstTierPlaySource: null, secondTierPlaySource: null, thirdTierPlaySource: null },
-    resolutionRate: MAX_RATE, preview: 1, playPercentage: 0, continuousAd: 0, commentType: 2,
+    resolutionRate: rate, preview: 1, playPercentage: 0, continuousAd: 0, commentType: 2,
   };
   const res = await call('1139', body, options);
   if (!res.data || typeof res.data !== 'object') throw new Error('河马未提供有效 HTTPS 播放地址');
@@ -183,7 +273,9 @@ async function fetchPlay(bookId, chapterId, options = {}) {
   if (!url) {
     return { url: null, locked: true, error: '本集暂时无法取得播放地址，请稍后重试或改看其他集' };
   }
-  return { url, locked: false, rate: MAX_RATE };
+  const delivered = pickRate(res.data);
+  const capped = delivered === '1080P' ? MAX_RATE : (delivered || rate);
+  return { url, locked: false, rate: capped, quality: publicQuality(capped), qualities: pickQualities(res.data) };
 }
 
-module.exports = { ensureSession, resetSession, fetchDetail, fetchPlay, pickPlayUrl, MAX_RATE, httpsUrl };
+module.exports = { ensureSession, resetSession, fetchDetail, fetchPlay, pickPlayUrl, requestedRate, publicQuality, MAX_RATE, httpsUrl };
