@@ -3592,9 +3592,24 @@ const CLOUD_HISTORY_FRESH_MS = 15 * 1000;
 const CLOUD_UPLOAD_DELAY_MS = 1500;
 const CLOUD_UPLOAD_INTERVAL_MS = 20 * 1000;
 const CLOUD_UPLOAD_QUIT_MS = 3000;
+const CLOUD_CONFIRM_RETRY_MS = [2000, 5000];
+const CLOUD_UPLOAD_RETRIES = 3;
 const HISTORY_REMOVE_LIMIT = 100;
 let cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: null };
 const cloudUploads = new Map();
+const cloudConfirmed = new Map();
+const CLOUD_CONFIRMED_KEEP_MS = 10 * 60 * 1000;
+
+function withConfirmedRows(rows, userId, startedAt) {
+  const now = Date.now();
+  const listed = new Set(rows.map(row => row.series_id));
+  const extra = [];
+  for (const [sid, item] of cloudConfirmed) {
+    if (now - item.at > CLOUD_CONFIRMED_KEEP_MS) { cloudConfirmed.delete(sid); continue; }
+    if (item.userId === userId && item.at >= startedAt && !listed.has(sid)) extra.push(item.row);
+  }
+  return extra.length ? [...extra, ...rows] : rows;
+}
 
 function cloudRequest() {
   const code = accountCode();
@@ -3609,8 +3624,10 @@ async function loadCloudHistory(force = false) {
   if (cloudHistory.pending) return cloudHistory.pending;
   const state = cloudHistory;
   let summary;
-  state.pending = cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }).then(rows => {
+  const startedAt = Date.now();
+  state.pending = cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }).then(fetched => {
     if (cloudHistory !== state) return cloudHistory;
+    const rows = withConfirmedRows(fetched, userId, startedAt);
     Object.assign(state, { rows, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), error: '' });
     persistAccountSession();
     return state;
@@ -3650,7 +3667,9 @@ async function syncCloudHistory(force = false) {
     store.savePlayback(plan.playback);
     const sent = [];
     const failures = [];
-    for (const sid of plan.toUpload.slice(0, 30)) {
+    const playbackNow = store.getPlayback();
+    const queue = [...new Set(plan.toUpload)].sort((a, b) => (Number(playbackNow[b]?.updatedAt) || 0) - (Number(playbackNow[a]?.updatedAt) || 0));
+    for (const sid of queue.slice(0, 30)) {
       if (syncedAccountId() !== userId) return state;
       const record = store.getPlayback()[sid];
       if (!record) continue;
@@ -3660,7 +3679,8 @@ async function syncCloudHistory(force = false) {
     if (sent.length) {
       try {
         let summary;
-        const rows = await cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } });
+        const startedAt = Date.now();
+        const rows = withConfirmedRows(await cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }), userId, startedAt);
         state.reportedTotal = summary?.reportedTotal ?? null;
         if (cloudHistory === state) Object.assign(state, { rows, fetchedAt: Date.now() });
         const listed = new Set(rows.map(row => row.series_id));
@@ -3701,8 +3721,8 @@ function scheduleCloudUpload(seriesId) {
   if (watchHistory.sourceOf(sid) !== 'hongguo') return;
   let slot = cloudUploads.get(sid);
   if (!slot || slot.userId !== userId) {
-    if (slot) clearTimeout(slot.timer);
-    slot = { userId, timer: null, running: null, dirty: false, sentAt: 0 };
+    if (slot) { clearTimeout(slot.timer); clearTimeout(slot.confirmTimer); }
+    slot = { userId, timer: null, running: null, dirty: false, sentAt: 0, retries: 0, confirmTimer: null };
     cloudUploads.set(sid, slot);
   }
   if (slot.running) { slot.dirty = true; return; }
@@ -3723,9 +3743,14 @@ function runCloudUpload(sid, slot) {
     if (!record) return;
     try {
       await cloudHistoryApi.uploadEntry(cloudRequest(), uploadEntryFor(sid, record, slot.userId));
-      if (cloudHistory.userId === slot.userId) cloudHistory.fetchedAt = 0;
+      slot.retries = 0;
+      const confirmed = record.cloudSynced !== slot.userId && await confirmCloudUpload(sid, slot.userId);
+      if (!confirmed && cloudHistory.userId === slot.userId) cloudHistory.fetchedAt = 0;
+      if (!confirmed && record.cloudSynced !== slot.userId) scheduleCloudConfirm(sid, slot, 0);
       sendToRenderer('watch-history-updated', {});
     } catch (error) {
+      slot.retries = (slot.retries || 0) + 1;
+      if (slot.retries <= CLOUD_UPLOAD_RETRIES) slot.dirty = true;
       console.warn('[History] 手机历史同步失败:', error.message);
     }
   })().finally(() => {
@@ -3738,17 +3763,55 @@ function runCloudUpload(sid, slot) {
   return slot.running;
 }
 
+async function confirmCloudUpload(sid, userId) {
+  try {
+    const found = await cloudHistoryApi.findRows(cloudRequest(), [sid]);
+    const row = found.get(sid);
+    if (!row || syncedAccountId() !== userId) return false;
+    const map = store.getPlayback();
+    if (!map[sid]) return false;
+    cloudConfirmed.set(sid, { userId, row, at: Date.now() });
+    if (map[sid].cloudSynced !== userId) {
+      map[sid] = { ...map[sid], cloudSynced: userId };
+      store.savePlayback(map);
+    }
+    if (cloudHistory.userId === userId && Array.isArray(cloudHistory.rows)) {
+      cloudHistory.rows = [row, ...cloudHistory.rows.filter(item => item.series_id !== sid)];
+    }
+    return true;
+  } catch (error) {
+    console.warn('[History] 手机历史确认失败:', error.message);
+    return false;
+  }
+}
+
+function scheduleCloudConfirm(sid, slot, attempt) {
+  const wait = CLOUD_CONFIRM_RETRY_MS[attempt];
+  if (wait === undefined || cloudUploads.get(sid) !== slot) return;
+  clearTimeout(slot.confirmTimer);
+  slot.confirmTimer = setTimeout(async () => {
+    slot.confirmTimer = null;
+    if (cloudUploads.get(sid) !== slot || syncedAccountId() !== slot.userId) return;
+    if (store.getPlayback()[sid]?.cloudSynced === slot.userId) return;
+    if (await confirmCloudUpload(sid, slot.userId)) sendToRenderer('watch-history-updated', {});
+    else scheduleCloudConfirm(sid, slot, attempt + 1);
+  }, wait);
+}
+
 function cancelCloudUpload(sid) {
+  cloudConfirmed.delete(sid);
   const slot = cloudUploads.get(sid);
   if (!slot) return null;
   clearTimeout(slot.timer);
+  clearTimeout(slot.confirmTimer);
   cloudUploads.delete(sid);
   return slot.running;
 }
 
 function clearCloudUploads() {
-  for (const slot of cloudUploads.values()) clearTimeout(slot.timer);
+  for (const slot of cloudUploads.values()) { clearTimeout(slot.timer); clearTimeout(slot.confirmTimer); }
   cloudUploads.clear();
+  cloudConfirmed.clear();
 }
 
 function flushCloudUploads(limitMs = CLOUD_UPLOAD_QUIT_MS) {

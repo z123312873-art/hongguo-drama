@@ -10,6 +10,7 @@ import { useDanmakuWarmup } from './danmakuWarmup.mjs';
 
 import { SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, readShortcuts, shortcutKey, subscribeShortcuts } from '../shortcuts';
 import CommunityPanel from './CommunityPanel';
+import CoverImage from './CoverImage';
 import SequelFinder from './SequelFinder';
 import * as nextSeason from '../native/next-season.mjs';
 import VideoEnhancement, { useVideoEnhancement } from './VideoEnhancement';
@@ -1624,7 +1625,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
                     }}
                   >
                     <div className="series-row-cover">
-                      {s.cover ? <img src={s.cover} alt="" loading="lazy" /> : <Film size={14} />}
+                      {s.cover ? <CoverImage src={s.cover} size={14} eager={isActive} /> : <Film size={14} />}
                     </div>
                     <div className="series-row-body">
                       <div className="series-row-title">{s.series_title}</div>

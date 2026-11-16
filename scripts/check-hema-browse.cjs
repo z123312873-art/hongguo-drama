@@ -82,15 +82,22 @@ async function check() {
   const browse = fs.readFileSync(path.join(root, 'src/components/Browse.jsx'), 'utf8');
   assert.match(browse, /mediaSources\.map\(\(\{ id, label \}\) => <option key=\{id\} value=\{id\}>\{label\}<\/option>\)/);
   assert.match(fs.readFileSync(path.join(root, 'src/components/mediaSourcesModel.mjs'), 'utf8'), /id: 'hema', label: '河马短剧'/);
-  assert.match(browse, /source !== 'hongguo' && !totalPages && \(page > 1 \|\| meta.hasMore\)/);
+  assert.match(browse, /const MATCHED_PAGE_SOURCES = new Set\(\['hema'\]\);/, '河马每页张数与红果一致');
+  assert.match(browse, /source !== 'hongguo' && !matchedSource && !totalPages && \(page > 1 \|\| meta.hasMore\)/, '河马改用页码列，只剩自订来源用上一页／下一页');
   assert.equal(/西饭热播榜暂未接入/.test(browse), false);
   assert.equal(/id: 'xifan'/.test(fs.readFileSync(path.join(root, 'src/components/mediaSourcesModel.mjs'), 'utf8')), false);
   const paging = browse.slice(browse.indexOf('  const gotoPage ='), browse.indexOf('  const openSeries ='));
   for (const source of ['hema']) {
     let selectedPage = 1;
-    vm.runInNewContext(paging + '\ngotoPage(2);', { source, category: '', genre: '', page: 1, meta: {hasMore:true,totalPages:0},
+    const run = (target, openPagerTotal) => vm.runInNewContext(paging + `\ngotoPage(${target});`, { source, category: '', genre: '', page: 1, meta: {hasMore:true,totalPages:0},
+      MATCHED_PAGE_SOURCES: new Set(['hema']), openPagerTotal,
       invalidateList() {}, setPage(value) { selectedPage = value; }, showSnapshot() {}, document: {querySelector:()=>null} });
+    run(2, 5);
     assert.equal(selectedPage, 2, source + ' 下一页必须改变当前页码');
+    run(5, 5);
+    assert.equal(selectedPage, 5, source + ' 可直接跳到页码列上的页');
+    run(9, 5);
+    assert.equal(selectedPage, 5, source + ' 不跳过页码列已知的范围');
   }
 
   const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');

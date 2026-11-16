@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import './HongguoDownload.css';
 import { Film, Download, CheckSquare, Square, RefreshCw, Folder, Link2, Search, Play } from './icons';
 import SearchPanel from './SearchPanel';
+import CoverImage from './CoverImage';
 import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
@@ -341,7 +342,7 @@ function HongguoDownload({ onNavigate, active = true }) {
           <div className="series-header">
             <div className="series-info">
               {seriesData.cover ? (
-                <img src={seriesData.cover} alt={seriesData.series_title} className="series-cover" />
+                <CoverImage src={seriesData.cover} alt={seriesData.series_title} className="series-cover" size={28} eager />
               ) : (
                 <div className="series-cover-placeholder">
                   <Film size={28} />

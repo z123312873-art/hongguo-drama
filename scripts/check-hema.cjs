@@ -70,6 +70,8 @@ async function check() {
   assert.equal(hema.optimizeCover(search.results[0].cover), search.results[0].cover);
   assert.equal(hema.optimizeCover("https://seoali.zqkanshu.com/a.jpg?t=9&imageView2/0/w/200/h/267"), "https://seoali.zqkanshu.com/a.jpg?t=9&x-oss-process=image/resize,w_320/quality,q_80");
   assert.equal(hema.optimizeCover("https://cdn.example/a.jpg"), "https://cdn.example/a.jpg");
+  assert.equal(hema.optimizeCover("https://kyyresali.kkyd.cn/cppartner/1/41000497974.jpg?t=1794578310201&imageView2/0/w/200/h/267"), "https://kyyresali.kkyd.cn/cppartner/1/41000497974.jpg?t=1794578310201&x-oss-process=image/resize,w_320/quality,q_80", '详情与续播用的海报同样取缩图');
+  assert.equal(hema.optimizeCover("https://kkyd.cn.example/a.jpg"), "https://kkyd.cn.example/a.jpg");
   assert.equal(hema.optimizeCover("http://seoali.zqkanshu.com/a.jpg"), "");
   assert.equal(search.hasMore, true);
   assert.equal(search.nextPage, 3);

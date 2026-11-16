@@ -78,3 +78,23 @@ export function sourcePageWindow(uiPage, span, totalSourcePages) {
   const count = Math.max(0, Math.min(width, total - start + 1));
   return { start, count, uiPages: Math.max(1, Math.ceil(total / width)) };
 }
+
+export const MATCHED_PAGE_LIMIT = SOURCE_PAGE_SIZE * MAX_SOURCE_PAGES;
+
+export function matchedPageSize(slots) {
+  const size = alignedPageSize(slots);
+  return size > 0 ? Math.min(size, MATCHED_PAGE_LIMIT) : 0;
+}
+
+export function itemPageWindow(uiPage, pageSize, perPage, totalSourcePages) {
+  const size = Math.floor(Number(pageSize));
+  const per = Math.floor(Number(perPage));
+  const total = Math.floor(Number(totalSourcePages));
+  if (!(size > 0) || !(per > 0) || !(total > 0)) return null;
+  const uiPages = Math.max(1, Math.ceil((total * per) / size));
+  const page = Math.min(Math.max(1, Math.floor(Number(uiPage)) || 1), uiPages);
+  const first = (page - 1) * size;
+  const start = Math.floor(first / per) + 1;
+  const end = Math.min(total, Math.ceil((first + size) / per));
+  return { page, start, count: Math.max(1, end - start + 1), skip: first - (start - 1) * per, take: size, uiPages };
+}

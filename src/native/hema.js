@@ -4,7 +4,7 @@ const hemaApp = require('./hema-app');
 
 const ORIGIN = 'https://www.kuaikaw.cn';
 const ID = /^\d{1,30}$/;
-const OSS_COVER_HOST = /(^|\.)(zqkanshu\.com|aliyuncs\.com)$/i;
+const OSS_COVER_HOST = /(^|\.)(zqkanshu\.com|aliyuncs\.com|kkyd\.cn)$/i;
 const COVER_PROCESS = 'image/resize,w_320/quality,q_80';
 const LOCKED_HINT = '本集为河马付费章节，免费试看集以外需在河马官方 App 内解锁后才能播放';
 let genreCache;

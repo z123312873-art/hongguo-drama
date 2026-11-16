@@ -4,7 +4,7 @@ import { coverCandidates } from '../coverFallback.mjs';
 
 export const COVER_HEDGE_MS = 600;
 
-export default function CoverImage({ src, alt = '', size = 22, eager = false, hedgeMs = COVER_HEDGE_MS }) {
+export default function CoverImage({ src, alt = '', size = 22, eager = false, hedgeMs = COVER_HEDGE_MS, className = '' }) {
   const candidates = coverCandidates(src);
   const key = candidates.join('|');
   const [attempt, setAttempt] = useState(0);
@@ -22,7 +22,7 @@ export default function CoverImage({ src, alt = '', size = 22, eager = false, he
     }, hedgeMs);
     return () => { clearTimeout(timer); if (probe) probe.onload = null; };
   }, [key, attempt, shown]);
-  if (!current) return <div className="cover-placeholder"><Film size={size} /></div>;
-  return <img key={current} src={current} alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" {...(eager ? { fetchpriority: 'high' } : {})}
+  if (!current) return <div className={className ? `cover-placeholder ${className}` : 'cover-placeholder'}><Film size={size} /></div>;
+  return <img key={current} src={current} alt={alt} {...(className ? { className } : {})} loading={eager ? 'eager' : 'lazy'} decoding="async" {...(eager ? { fetchpriority: 'high' } : {})}
     onLoad={() => setShown(current)} onError={() => setAttempt(value => (candidates[value] === current ? value + 1 : value))} />;
 }

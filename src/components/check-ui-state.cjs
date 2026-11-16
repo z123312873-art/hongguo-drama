@@ -785,25 +785,43 @@ async function mount(file, api, props = {}) {
     assert.ok(ui.text().includes('来源不可用')); assert.ok(ui.text().includes('已加载片单')); ui.unmount();
   });
 
-  await test('hema browse source switch rejects late lists and opens the current source URL', async () => {
+  await test('hema browse source switch rejects late lists, fills a page like 红果 and pages by number', async () => {
     const old = deferred(), opened = [], pages = []; let calls = 0;
-    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: p => p.source === 'hema' ? (pages.push(p.page), Promise.resolve({ success: true, results: [{ series_id: 'hema:9', series_title: '河马片单' }], genres: [{ slug: '68', label: '都市' }], total: 0, totalPages: 0, hasMore: p.page === 1 })) : ++calls === 1 ? Promise.resolve({ success: true, results: [{ series_id: 'H', series_title: '红果片单' }], sourceUrl: 'https://www.hongguoduanju.com/category/real-drama' }) : old.promise, searchWindowShow: async (...args) => opened.push(args) });
+    const hemaPage = p => p <= 6 ? Array.from({ length: 10 }, (_, i) => ({ series_id: `hema:${p}0${i}`, series_title: `河马片单${(p - 1) * 10 + i + 1}号` })) : [];
+    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: p => p.source === 'hema' ? (pages.push(p.page), Promise.resolve({ success: true, results: hemaPage(p.page), genres: [{ slug: '68', label: '都市' }], total: 0, totalPages: 0, hasMore: p.page < 6 })) : ++calls === 1 ? Promise.resolve({ success: true, results: [{ series_id: 'H', series_title: '红果片单' }], sourceUrl: 'https://www.hongguoduanju.com/category/real-drama' }) : old.promise, searchWindowShow: async (...args) => opened.push(args) });
     await ui.flush();
     assert.equal(ui.button('打开来源页面'), undefined, 'the discover page no longer opens the source site');
     ui.button('刷新片单').props.onClick(); ui.render();
     const source = ui.find(n => n.props['aria-label'] === '短剧来源'); assert.ok(source, 'source selector missing');
     source.props.onChange({ target: { value: 'hema' } }); await ui.flush();
     old.resolve({ success: true, results: [{ series_id: 'late', series_title: '旧红果片单' }] }); await ui.flush();
-    assert.ok(ui.text().includes('河马片单')); assert.ok(!ui.text().includes('旧红果片单'));
+    const cards = () => ui.nodes().filter(n => n.props.className === 'browse-card');
+    const pager = label => ui.find(n => n.type === 'button' && String(n.props.className || '').startsWith('pager-item') && (n.children.join('') === label || n.props['aria-label'] === label));
+    assert.ok(ui.text().includes('河马片单1号')); assert.ok(!ui.text().includes('旧红果片单'));
+    assert.equal(cards().length, 24, 'a 河马 page holds as many posters as a 红果 page');
     assert.equal(ui.button('打开来源页面'), undefined); assert.ok(ui.button('都市'));
-    ui.button('下一页').props.onClick(); await ui.flush(); assert.equal(pages.at(-1), 2); assert.equal(ui.button('下一页').props.disabled, true); assert.ok(ui.text().includes('第 2 页'));
-    ui.button('上一页').props.onClick(); await ui.flush(); assert.ok(ui.text().includes('第 1 页')); ui.unmount();
+    assert.ok(pager('2') && pager('5'), 'numbered pages like 红果 instead of one step at a time');
+    assert.equal(ui.find(n => n.type === 'span' && n.children.join('').startsWith('第 ') && n.children.join('').endsWith(' 页')), undefined, 'the one-step pager is gone');
+    ui.advanceTimers(500); await ui.flush();
+    assert.ok(pages.includes(4) && pages.includes(5), 'the next page is fetched ahead while the first is on screen');
+    const asked = pages.length;
+    pager('下一页').props.onClick(); ui.render();
+    assert.equal(cards().length, 24, 'the prepared page appears at once, without a blank wall');
+    await ui.flush();
+    assert.equal(pages.length, asked, 'a prepared page is not fetched twice');
+    assert.ok(ui.text().includes('河马片单25号') && !ui.text().includes('河马片单24号'), 'page two continues exactly where page one stopped');
+    assert.equal(cards().length, 24);
+    pager('3').props.onClick(); await ui.flush();
+    assert.equal(cards().length, 12, 'the last page keeps the remaining posters');
+    assert.equal(pager('下一页').props.disabled, true, 'no page after the last one');
+    pager('1').props.onClick(); await ui.flush();
+    assert.ok(ui.text().includes('河马片单1号')); assert.equal(cards().length, 24); ui.unmount();
   });
   await test('all-source search merges both sources and resolves the original source ID', async () => {
     const first = deferred(), second = deferred(), calls = [], resolved = [], picked = [];
     const ui = await mount('SearchPanel', { searchSeries: (kw, options) => { calls.push([kw, options.source]); return options.source === 'hongguo' ? first.promise : options.source === 'hema' ? second.promise : Promise.resolve({ success: true, results: [] }); }, searchResolve: async id => { resolved.push(id); return ok(detail(id)); } }, { onSelectSeries: d => picked.push(d) });
     assert.equal(ui.find(n => n.props['aria-label'] === '短剧来源').props.value, 'hongguo', 'the source defaults to 红果');
-    assert.ok(ui.find(n => n.type === 'option' && n.props.value === 'all'));
+    assert.ok(ui.find(n => n.type === 'option' && n.props.value === 'all' && n.children.join('') === '全部'), 'the first choice reads 全部 so the menu has no extra padding');
     ui.find(n => n.props['aria-label'] === '短剧来源').props.onChange({ target: { value: 'all' } }); ui.render();
     assert.equal(ui.find(n => n.props['aria-label'] === '短剧来源').props.value, 'all');
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '同名剧' } }); ui.render(); ui.button('搜索').props.onClick();

@@ -113,4 +113,18 @@ ui.setProps({ src: 'https://img.example/next.jpg', alt: 'swap' });
 run();
 assert.equal(probes.length, 0, 'changing the poster cancels the pending alternative for the old one');
 
+ui = mountCover({ src: 'https://img.example/styled.jpg', alt: 'x', className: 'series-cover' });
+assert.equal(ui.current().props.className, 'series-cover', 'a caller class sizes the poster');
+ui.current().props.onError(); ui.render();
+assert.equal(ui.current().props.className, 'cover-placeholder series-cover', 'the placeholder keeps the same size, never a broken image');
+ui = mountCover({ src: 'https://img.example/plain.jpg', alt: 'x' });
+assert.equal(ui.current().props.className, undefined, 'no class unless asked');
+
+const sources = ['src/components/HongguoDownload.jsx', 'src/components/Player.jsx', 'src/components/WatchHistory.jsx', 'src/components/Browse.jsx'].map(file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
+assert.match(sources[0], /<CoverImage src=\{seriesData\.cover\}/, 'the search detail poster recovers from a failed host');
+assert.match(sources[1], /<CoverImage src=\{s\.cover\}/, 'the player library poster recovers from a failed host');
+assert.match(sources[2], /<CoverImage className="history-cover" src=\{row\.cover\}/, 'history posters recover from a failed host');
+assert.match(sources[3], /<CoverImage src=\{detail\.cover\} className="browse-drawer-cover"/, 'the discover detail poster recovers from a failed host');
+for (const text of sources) assert.doesNotMatch(text, /<img src=\{(seriesData|s|detail)\.cover\}/);
+
 console.log('PASS cover image: source first, plain rendition retry, placeholder, reset on new poster, unusable values');

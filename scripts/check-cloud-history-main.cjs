@@ -53,6 +53,7 @@ function load({ account = true, saved = '1000000000000001', encryption = true, s
         if (!cloud.favIgnore) cloud.favorites = change.video_shelf_operate_type === 0 ? [...new Set([...cloud.favorites, change.book_id])] : cloud.favorites.filter(id => id !== change.book_id);
         return { code: 0, data: {} };
       }
+      if (method === 'GET' && cloud.staleOnce) { const wait = cloud.staleOnce, listed = [...cloud.rows]; cloud.staleOnce = null; await wait; return { code: 0, data: { data_list: listed, has_more: false } }; }
       if (method === 'GET') { if (cloud.hold) await cloud.hold; return { code: 0, data: { data_list: cloud.rows, has_more: false, total: cloud.reportedTotal } }; }
       if (cloud.postFail?.(body)) throw new Error('HTTP 502');
       const update = JSON.parse(body.replace(/:(\d{16,})/g, ':"$1"')).update_datas[0];
@@ -624,5 +625,120 @@ test('removing a drama cancels its pending upload; a failed removal keeps the up
     assert.ok(live.cleared);
     await live();
     assert.equal(posts(h).length, before + 1, 'only the delete went out; the cancelled upload sends nothing');
+  } finally { h.cleanup(); }
+});
+
+const FOUR = '7300000000000000004';
+const addSeries = (h, id) => h.registry().push({ series_id: id, series_title: `新剧${id.slice(-1)}`, total: 10, episodes: Array.from({ length: 10 }, (_, i) => ({ vid_index: i + 1, vid: `75${i}` })) });
+
+test('a newly watched drama is shown as on the phone right after its upload is listed, without waiting for the next full sync', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    addSeries(h, FOUR);
+    await h.call('save-playback-position', FOUR, 1, 12, {});
+    const before = reads(h), sentBefore = h.sent.length;
+    await h.timers.at(-1)();
+    assert.equal(h.playback()[FOUR].cloudSynced, '1000000000000001', 'marked only because the account now lists it');
+    assert.equal(reads(h), before + 1, 'one short look at the newest history page');
+    assert.ok(h.sent.slice(sentBefore).some(([channel]) => channel === 'watch-history-updated'));
+    const view = await h.call('get-watch-history');
+    assert.equal(view.results.find(item => item.series_id === FOUR).synced, true);
+    assert.equal(reads(h), before + 1, 'the history page answers from the confirmed copy instead of reading everything again');
+    assert.ok(ids(view).includes(FOUR) && ids(view).includes(ONE) && ids(view).includes(THREE), 'nothing else dropped out');
+  } finally { h.cleanup(); }
+});
+
+test('a full read that started before the upload is confirmed cannot drop the newly watched drama', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    addSeries(h, FOUR);
+    let open;
+    h.cloud.staleOnce = new Promise(resolve => { open = resolve; });
+    const refresh = h.call('refresh-watch-history');
+    await new Promise(resolve => setImmediate(resolve));
+    await h.call('save-playback-position', FOUR, 1, 12, {});
+    await h.timers.at(-1)();
+    assert.equal(h.playback()[FOUR].cloudSynced, '1000000000000001');
+    open();
+    await refresh;
+    assert.ok(h.playback()[FOUR], 'kept after the older read finished');
+    const view = await h.call('get-watch-history');
+    assert.equal(view.results.find(item => item.series_id === FOUR)?.synced, true);
+    h.cloud.rows = h.cloud.rows.filter(item => item.book_id_str !== FOUR);
+    await h.call('refresh-watch-history');
+    assert.equal(h.playback()[FOUR], undefined, 'a later read without it still follows a deletion on the phone');
+  } finally { h.cleanup(); }
+});
+
+test('an upload the account lists a little later is confirmed by a short follow-up, and never treated as deleted', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    addSeries(h, FOUR);
+    h.cloud.dropUploads = true;
+    await h.call('save-playback-position', FOUR, 1, 12, {});
+    await h.timers.at(-1)();
+    assert.equal(h.playback()[FOUR].cloudSynced, undefined, 'not listed yet: still waiting');
+    const follow = h.timers.at(-1);
+    assert.equal(follow.ms, 2000, 'checks again shortly');
+    assert.equal((await h.call('get-watch-history')).results.find(item => item.series_id === FOUR).synced, false);
+    h.cloud.dropUploads = false;
+    h.cloud.rows.unshift(row(FOUR, { vid_index: 1, read_timestamp_ms: Date.now() }));
+    const sentBefore = h.sent.length;
+    await follow();
+    assert.equal(h.playback()[FOUR].cloudSynced, '1000000000000001');
+    assert.ok(h.sent.slice(sentBefore).some(([channel]) => channel === 'watch-history-updated'));
+    h.cloud.dropUploads = true;
+    addSeries(h, '7300000000000000005');
+    await h.call('save-playback-position', '7300000000000000005', 1, 3, {});
+    await h.timers.at(-1)();
+    const first = h.timers.at(-1); await first();
+    const second = h.timers.at(-1); assert.notEqual(second, first); assert.equal(second.ms, 5000);
+    const count = h.timers.length; await second();
+    assert.equal(h.timers.length, count, 'gives up after the short follow-ups; the regular sync takes over');
+    assert.ok(h.playback()['7300000000000000005'], 'an unlisted upload is kept here');
+  } finally { h.cleanup(); }
+});
+
+test('a failed upload is retried a bounded number of times instead of waiting for the next playback', async () => {
+  const h = load({ server: { postFail: () => true } });
+  try {
+    await h.call('get-watch-history');
+    addSeries(h, FOUR);
+    await h.call('save-playback-position', FOUR, 1, 12, {});
+    let timer = h.timers.at(-1);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await timer();
+      const next = h.timers.at(-1);
+      assert.notEqual(next, timer, `retry ${attempt} scheduled`);
+      assert.ok(next.ms >= 1500 && next.ms <= 20000);
+      timer = next;
+    }
+    await timer();
+    assert.equal(h.timers.at(-1), timer, 'stops after three retries');
+    h.cloud.postFail = null;
+    await h.call('save-playback-position', FOUR, 1, 20, {});
+    assert.notEqual(h.timers.at(-1), timer, 'a later save starts again');
+  } finally { h.cleanup(); }
+});
+
+test('Hema history stays on this computer: never uploaded, never marked as waiting for the phone', async () => {
+  const h = load();
+  try {
+    await h.call('get-watch-history');
+    const hema = 'hema:41000497974';
+    h.registry().push({ series_id: hema, series_title: '河马剧', total: 5, episodes: Array.from({ length: 5 }, (_, i) => ({ vid_index: i + 1, vid: `${hema}:${i + 1}` })) });
+    const timers = h.timers.length, before = posts(h).length;
+    assert.equal((await h.call('save-playback-position', hema, 2, 30, {})).success, true);
+    assert.equal(h.timers.length, timers, 'no upload is scheduled');
+    const view = await h.call('refresh-watch-history').then(() => h.call('get-watch-history'));
+    assert.equal(posts(h).filter(r => r.body.includes('41000497974')).length, 0);
+    assert.ok(posts(h).length >= before);
+    const entry = view.results.find(item => item.series_id === hema);
+    assert.ok(entry, 'still listed here');
+    assert.equal(entry.synced, undefined);
+    assert.equal(h.playback()[hema].cloudSynced, undefined);
   } finally { h.cleanup(); }
 });

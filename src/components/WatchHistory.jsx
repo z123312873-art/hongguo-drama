@@ -1,6 +1,7 @@
 import usePlaybackNotice from './usePlaybackNotice';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Play, RefreshCw, Clock, Trash2, Check, Shield } from './icons';
+import CoverImage from './CoverImage';
 import './WatchHistory.css';
 
 const HISTORY_SYNC_MS = 60 * 1000;
@@ -275,13 +276,14 @@ export default function WatchHistory({ active = true, onNavigate }) {
       <div className="history-main">
       {selecting && <input type="checkbox" className="history-check" checked={selectedIds.includes(row.series_id)} disabled={!!batch} aria-label={`选取 ${row.series_title}`} onChange={() => toggleSelected(row.series_id)} />}
       <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing || !!batch} aria-pressed={selecting ? selectedIds.includes(row.series_id) : undefined} aria-label={`继续观看 ${row.series_title} 第${row.vid_index}集${row.hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`}>
-        {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
+        {row.cover ? <CoverImage className="history-cover" src={row.cover} size={20} /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
         <span className="history-copy">
           <span className="history-name">{row.hasUpdates && <span className="history-dot" role="img" aria-label="有更新" />}{row.series_title}</span>
           <span className="history-progress">看到第 {row.vid_index} 集 / 共 {row.total} 集 · {Math.floor((row.currentTime || 0) / 60)}:{String(Math.floor((row.currentTime || 0) % 60)).padStart(2, '0')}</span>
           <span className="history-time">最近观看 {new Date(row.updatedAt).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
           {row.unreadEpisodes > 0 && <span className="history-update">新增 {row.unreadEpisodes} 集</span>}
-          {sync.mode === 'cloud' && row.synced === false && <span className="history-time">等待同步到手机…</span>}
+          {sync.mode === 'cloud' && row.synced === false && /^\d{6,30}$/.test(String(row.series_id)) && <span className="history-time">等待同步到手机…</span>}
+          {sync.mode === 'cloud' && !/^\d{6,30}$/.test(String(row.series_id)) && <span className="history-time">仅保存在这台电脑</span>}
         </span>
         <span className="history-action"><Play size={15} />{opening === row.series_id ? '打开中…' : '继续观看'}</span>
       </button>
