@@ -33,7 +33,7 @@ function load(sid, { partial = false } = {}) {
   return { queries, run: () => handlers['refresh-watch-history']({}), record: () => playback[sid], cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
-for (const [sourceName, sid] of [['hongguo', '1000002'], ['xifan', 'xifan:1:2'], ['hema', 'hema:2']]) test(`background ${sourceName} refresh fills next missing season with bounded same-source searches`, async () => {
+for (const [sourceName, sid] of [['hongguo', '1000002'], ['hema', 'hema:2']]) test(`background ${sourceName} refresh fills next missing season with bounded same-source searches`, async () => {
   const h = load(sid);
   try {
     const result = await h.run();
@@ -43,6 +43,12 @@ for (const [sourceName, sid] of [['hongguo', '1000002'], ['xifan', 'xifan:1:2'],
     assert.ok(h.queries.some(([, keyword]) => keyword === '春日来信第三季'));
     assert.deepEqual(h.record().sequels.map(row => row.series_title), ['春日来信第三季', '春日来信第四季']);
   } finally { h.cleanup(); }
+});
+
+test('background refresh leaves retired Xifan history untouched and asks nothing', async () => {
+  const h = load('xifan:1:2');
+  try { const result = await h.run(); assert.equal(result.checked, 0); assert.equal(result.failed, 0); assert.deepEqual(h.queries, []); assert.ok(h.record()); }
+  finally { h.cleanup(); }
 });
 
 for (const sid of ['custom:fixture:2', 'unknown:2']) test(`background refresh skips unsupported sequel sources: ${sid}`, async () => {

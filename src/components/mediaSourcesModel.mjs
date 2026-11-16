@@ -1,12 +1,14 @@
 export const BUILTIN_MEDIA_SOURCES = [
-  { id: 'hongguo', label: '红果短剧' }, { id: 'xifan', label: '西饭短剧' }, { id: 'hema', label: '河马短剧' },
+  { id: 'hongguo', label: '红果短剧' }, { id: 'hema', label: '河马短剧' },
 ];
 export const CUSTOM_SOURCE_ID = /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const RETIRED_MEDIA_SOURCES = Object.freeze({ xifan: '西饭短剧（已移除）' });
 
 export function normalizeMediaSources(sources) {
   const seen = new Set();
   return (Array.isArray(sources) ? sources : []).filter(source => {
     if (!source || source.enabled === false || typeof source.label !== 'string' || !source.label.trim() || seen.has(source.id)
+      || source.id === 'xifan'
       || (!CUSTOM_SOURCE_ID.test(source.id) && !BUILTIN_MEDIA_SOURCES.some(item => item.id === source.id))) return false;
     seen.add(source.id); return true;
   }).map(source => ({ id: source.id, label: source.label.trim(), ...(CUSTOM_SOURCE_ID.test(source.id) ? { custom: true } : {}) }));
@@ -16,6 +18,7 @@ export function mediaSourceLabel(seriesOrSource, sources = BUILTIN_MEDIA_SOURCES
   const id = String(seriesOrSource || '');
   const source = id.startsWith('custom:') ? id.split(':').slice(0, 2).join(':')
     : id.startsWith('xifan:') ? 'xifan' : id.startsWith('hema:') ? 'hema' : /^\d+$/.test(id) ? 'hongguo' : id;
+  if (source === 'xifan' || source in RETIRED_MEDIA_SOURCES) return RETIRED_MEDIA_SOURCES[source] || RETIRED_MEDIA_SOURCES.xifan;
   return sources.find(item => item.id === source)?.label || BUILTIN_MEDIA_SOURCES.find(item => item.id === source)?.label
     || (source.startsWith('custom:') ? '自定义源（未启用或已移除）' : '未知来源');
 }

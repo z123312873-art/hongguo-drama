@@ -33,7 +33,6 @@ function routeFixture(appError = false) {
       return { url: mediaUrl(`${options.quality}-${calls.length}`), quality: options.quality };
     } },
     './hema': { fetchPlayUrlSingle: async () => { calls.push('hema'); return { url: mediaUrl('hema') }; } },
-    './xifan': { fetchPlayUrlSingle: async () => { calls.push('xifan'); return { url: mediaUrl('xifan') }; } },
   });
   return { ...native, calls };
 }
@@ -133,8 +132,11 @@ const checks = [
   }],
   ['third-party source keeps its authorized URL for later local resolution check', async () => {
     const f = routeFixture();
-    for (const name of ['hema', 'xifan']) assert.equal((await f.fetchPlayUrlSingle(`${name}:11`, `${name}:1`, { quality: '1080p' })).url, mediaUrl(name));
-    assert.deepEqual(f.calls, ['hema', 'xifan']);
+    assert.equal((await f.fetchPlayUrlSingle('hema:11', 'hema:1', { quality: '1080p' })).url, mediaUrl('hema'));
+    const retired = await f.fetchPlayUrlSingle('xifan:a:11', 'xifan:a', { quality: '1080p' });
+    assert.equal(retired.url, null);
+    assert.match(retired.error, /已移除/);
+    assert.deepEqual(f.calls, ['hema']);
   }],
   ['shared quality validator handles landscape, portrait, missing and higher dimensions', () => {
     const file = path.join(nativeDir, 'download-quality.js');

@@ -3,7 +3,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { availableRelease, releaseSummary } = require('../src/native/app-update');
 
-const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1', '4.6.3', '4.7'];
+const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1', '4.6.3', '4.6.5', '4.7'];
 let checks = 0;
 for (let current = 0; current < ordered.length; current++) {
   for (let next = 0; next < ordered.length; next++) {
@@ -150,7 +150,7 @@ assert(officialHeredoc);
 assert.deepEqual(releaseSummary(officialHeredoc[1]).items, noteBullets);
 
 const pre463Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.6.3.md'), 'utf8'), '## 更新摘要');
-const pre463Job = workflow.slice(workflow.indexOf('  publish-release-4-6-3-pre:'));
+const pre463Job = workflow.slice(workflow.indexOf('  publish-release-4-6-3-pre:'), workflow.indexOf('  publish-release-4-6-5-pre:'));
 const pre463Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(pre463Job);
 assert(pre463Heredoc, 'The 4.6.3 pre-release job must build its notes from a heredoc');
 const pre463Body = pre463Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
@@ -173,7 +173,37 @@ assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.6\.3-
 for (const current of ['4.6.0', '4.6.1']) {
   assert.equal(availableRelease({ tag_name: 'installer-4.6.3-traditional-pre', prerelease: true }, current), null, 'the pre-release is never offered by the updater');
 }
-for (const current of ['4.6.1', '4.6.3']) assert.equal(availableRelease({ tag_name: 'v4.7' }, current).version, '4.7');
+for (const current of ['4.6.1', '4.6.3', '4.6.5']) assert.equal(availableRelease({ tag_name: 'v4.7' }, current).version, '4.7');
 assert.equal(availableRelease({ tag_name: 'v4.6.1' }, '4.6.3'), null, 'a 4.6.3 pre-release install is not offered the older 4.6.1');
-assert.equal(pkg.version, '4.6.3');
-assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.6.3-win-x64-setup'));
+
+const pre465Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.6.5.md'), 'utf8'), '## 更新摘要');
+const pre465Job = workflow.slice(workflow.indexOf('  publish-release-4-6-5-pre:'));
+const pre465Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(pre465Job);
+assert(pre465Heredoc, 'The 4.6.5 pre-release job must build its notes from a heredoc');
+const pre465Body = pre465Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+assert.deepEqual(releaseSummary(pre465Body).items, pre465Doc, 'The 4.6.5 pre-release must publish the documented summary');
+assert.deepEqual(pre465Doc, [
+  '修復紅果短劇無法播放，恢復線上取址',
+  '河馬短劇移除分集鎖定，可播集直接看、畫質最高 720P',
+  '移除西飯來源，只保留紅果與河馬',
+  '河馬海報載入更快，首屏更快出現',
+  '河馬題材標籤整理成複合分類，篩選更清爽',
+  '觀看紀錄與手機同步更快，並可批次移除紀錄',
+  '搜尋預設紅果並顯示全部結果，分「標題匹配」與「其他相關」',
+  '精簡提示文字，修正來源選單顯示',
+], 'The 4.6.5 summary is exactly these eight lines, in this order');
+assert.equal(pre465Doc.length, 8, 'The 4.6.5 summary integrates the 4.6.3 items into exactly eight points');
+assert(pre465Doc.every(item => Array.from(item).length <= 72), 'Each 4.6.5 summary line fits the update window limit');
+assert.match(pre465Job, /tag=installer-4\.6\.5-traditional-pre/);
+assert.match(pre465Job, /--prerelease --latest=false --title "4\.6\.5 預發佈"/);
+assert.match(pre465Job, /downloader-4\.6\.5-win-x64-setup\.exe/);
+assert.ok(pre465Job.includes("'^version: 4\\.6\\.5$'"));
+assert.match(pre465Job, /\)" != "\$tag"/, 'The pre-release must never become the latest release');
+assert.doesNotMatch(pre465Job, /--latest(?!=false)|prerelease=false|cleanup-tag|release delete /);
+assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.6\.5-pre-'\)/);
+for (const current of ['4.6.0', '4.6.1', '4.6.3']) {
+  assert.equal(availableRelease({ tag_name: 'installer-4.6.5-traditional-pre', prerelease: true }, current), null, 'the 4.6.5 pre-release is never offered by the updater');
+}
+assert.equal(availableRelease({ tag_name: 'v4.6.3' }, '4.6.5'), null, 'a 4.6.5 pre-release install is not offered the older 4.6.3');
+assert.equal(pkg.version, '4.6.5');
+assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.6.5-win-x64-setup'));

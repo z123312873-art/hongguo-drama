@@ -14,29 +14,9 @@ function load(name, axios) {
   } finally { Module._load = original; }
 }
 
-const xifanList = (offset) => ({ elements: [{ contents: [{ duanjuVo: { source: 'huabo', duanjuId: `d${offset}`, title: `西饭${offset}`, total: 30, coverImageUrl: 'https://img.example/a.jpg', categories: ['都市'] } }] }], hasMore: true });
-const categories = { elements: [{ contents: [{ categoryItemVo: { categoryId: 68, oppoCategory: '都市', version: 1 } }] }] };
-
-test('Xifan: a visited list and its genres are answered without the network, also when the source is down', async () => {
-  let requests = 0;
-  let down = false;
-  const axios = { get: async (_url, options) => {
-    requests += 1;
-    if (down) throw new Error('offline');
-    const data = options.params.reqType === 'duanjuCategory' ? categories : xifanList(options.params.offset);
-    return { data: { ret: 0, result: data } };
-  } };
-  const { source, cache } = load('xifan.js', axios);
-  const pages = await Promise.all([1, 2, 3].map((page) => source.browseList({ page })));
-  assert.deepEqual(pages.map((entry) => entry.success), [true, true, true]);
-  const used = requests;
-  assert.equal(used, 4, 'three pages and one shared genre request');
-  down = true;
-  const again = await Promise.all([1, 2, 3].map((page) => source.browseList({ page })));
-  assert.equal(requests, used, 'a second visit makes no request');
-  assert.deepEqual(again.map((entry) => entry.results[0].series_id), pages.map((entry) => entry.results[0].series_id));
-  assert.equal(cache.snapshot().entries >= 3, true);
-  assert.equal((await source.browseList({ page: 1, forceRefresh: true })).success, false, 'an explicit refresh against a dead source says so');
+test('the retired Xifan source has no adapter left to reach the network', () => {
+  const fs = require('node:fs');
+  assert.equal(fs.existsSync(path.join(__dirname, 'xifan.js')), false);
 });
 
 test('Hema: pages are cached per genre and page, and a refresh keeps the genre list', async () => {

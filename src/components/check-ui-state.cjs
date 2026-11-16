@@ -132,13 +132,13 @@ async function mount(file, api, props = {}) {
         if (request.source === 'hongguo') return delayHongguo
           ? lateList.promise : Promise.resolve({ success: false, error: '红果连接失败' });
         return Promise.resolve({ success: true, results: [
-          { series_id: request.source === 'xifan' ? 'xifan:drama:7' : `${custom}:8`, series_title: request.source === 'xifan' ? '西饭真实短剧' : '自定义真实短剧', rank: 1 },
+          { series_id: request.source === 'hema' ? 'hema:7' : `${custom}:8`, series_title: request.source === 'hema' ? '河马真实短剧' : '自定义真实短剧', rank: 1 },
           { series_id: '123456', series_title: '混入的红果剧集' },
         ] });
       },
       searchResolve: id => {
         resolved.push(id);
-        if (id === 'xifan:drama:7') return latePlay.promise;
+        if (id === 'hema:7') return latePlay.promise;
         const data = detail(id); data.episodes[0].locked = true;
         return Promise.resolve(ok(data));
       },
@@ -147,27 +147,28 @@ async function mount(file, api, props = {}) {
     await ui.flush();
     assert.equal(ui.button('取消加载'), undefined, 'source registry loading must not expose an ineffective list cancellation');
     registry.resolve({ success: true, sources: [
-      { id: 'hongguo', label: '红果短剧' }, { id: 'xifan', label: '西饭短剧' },
-      { id: 'hema', label: '河马短剧', enabled: false }, { id: custom, label: '测试片库' },
+      { id: 'hongguo', label: '红果短剧' }, { id: 'hema', label: '河马短剧' }, { id: 'xifan', label: '西饭短剧' },
+      { id: 'custom:650e8400-e29b-41d4-a716-446655440000', label: '停用片库', enabled: false }, { id: custom, label: '测试片库' },
     ] });
     await ui.flush();
     assert.ok(ui.text().includes('红果连接失败'));
     const source = () => ui.find(n => n.props['aria-label'] === '推荐来源');
     assert.ok(source(), 'failed feed must still expose source switching');
-    assert.equal(ui.find(n => n.type === 'option' && n.props.value === 'hema'), undefined, 'disabled sources stay hidden');
+    assert.equal(ui.find(n => n.type === 'option' && n.props.value === 'custom:650e8400-e29b-41d4-a716-446655440000'), undefined, 'disabled sources stay hidden');
+    assert.equal(ui.find(n => n.type === 'option' && n.props.value === 'xifan'), undefined, 'the retired source stays hidden even from an old registry');
     delayHongguo = true;
     ui.button('重新加载').props.onClick(); await ui.flush();
-    source().props.onChange({ target: { value: 'xifan' } }); await ui.flush();
-    assert.ok(ui.text().includes('西饭真实短剧'));
-    assert.ok(ui.text().includes('西饭短剧'));
+    source().props.onChange({ target: { value: 'hema' } }); await ui.flush();
+    assert.ok(ui.text().includes('河马真实短剧'));
+    assert.ok(ui.text().includes('河马短剧'));
     assert.ok(!ui.text().includes('榜单第 1 名'), 'directory order must not be presented as rankings');
     assert.ok(!ui.text().includes('混入的红果剧集'));
-    assert.equal(requests.at(-1).source, 'xifan'); assert.equal(requests.at(-1).category, 'real-drama');
+    assert.equal(requests.at(-1).source, 'hema'); assert.equal(requests.at(-1).category, 'real-drama');
     lateList.resolve({ success: true, results: [{ series_id: '654321', series_title: '过期的红果榜单', rank: 2 }] }); await ui.flush();
     assert.ok(!ui.text().includes('过期的红果榜单'));
     ui.button('在剧库播放').props.onClick(); await ui.flush();
     source().props.onChange({ target: { value: custom } }); await ui.flush();
-    latePlay.resolve(ok(detail('xifan:drama:7'))); await ui.flush();
+    latePlay.resolve(ok(detail('hema:7'))); await ui.flush();
     assert.equal(played.length, 0, 'switching sources must prevent a pending resolve opening the old player');
     assert.ok(ui.text().includes('自定义真实短剧'));
     assert.equal(ui.button('在剧库播放').props.disabled, false, 'switching source resets playback loading');
@@ -524,7 +525,7 @@ async function mount(file, api, props = {}) {
     assert.ok(ui.text().includes('《B》')); assert.ok(!ui.text().includes('《A》')); ui.unmount();
   });
   await test('download play opens the selected series in the library without downloading', async () => {
-    for (const id of ['123', 'xifan:test:123', 'hema:123']) {
+    for (const id of ['123', 'hema:123', 'custom:550e8400-e29b-41d4-a716-446655440000:123']) {
       let navigate, downloaded = false, played;
       const app = await mount('../App', { getAppInfo: async () => ({}), onNavigate: fn => { navigate = fn; return () => {}; } });
       const ui = await mount('HongguoDownload', { playSeries: async p => { played = p; navigate({ page: 'player', payload: p }); return { success: true }; }, hongguoDownloadBatch: async () => { downloaded = true; } });
@@ -784,36 +785,36 @@ async function mount(file, api, props = {}) {
     assert.ok(ui.text().includes('来源不可用')); assert.ok(ui.text().includes('已加载片单')); ui.unmount();
   });
 
-  await test('xifan browse source switch rejects late lists and opens the current source URL', async () => {
+  await test('hema browse source switch rejects late lists and opens the current source URL', async () => {
     const old = deferred(), opened = [], pages = []; let calls = 0;
-    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: p => p.source === 'xifan' ? (pages.push(p.page), Promise.resolve({ success: true, results: [{ series_id: 'X', series_title: '西饭片单' }], genres: [{ slug: '68', label: '都市' }], total: 0, totalPages: 0, hasMore: p.page === 1 })) : ++calls === 1 ? Promise.resolve({ success: true, results: [{ series_id: 'H', series_title: '红果片单' }], sourceUrl: 'https://www.hongguoduanju.com/category/real-drama' }) : old.promise, searchWindowShow: async (...args) => opened.push(args) });
+    const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: p => p.source === 'hema' ? (pages.push(p.page), Promise.resolve({ success: true, results: [{ series_id: 'hema:9', series_title: '河马片单' }], genres: [{ slug: '68', label: '都市' }], total: 0, totalPages: 0, hasMore: p.page === 1 })) : ++calls === 1 ? Promise.resolve({ success: true, results: [{ series_id: 'H', series_title: '红果片单' }], sourceUrl: 'https://www.hongguoduanju.com/category/real-drama' }) : old.promise, searchWindowShow: async (...args) => opened.push(args) });
     await ui.flush();
     assert.equal(ui.button('打开来源页面'), undefined, 'the discover page no longer opens the source site');
     ui.button('刷新片单').props.onClick(); ui.render();
     const source = ui.find(n => n.props['aria-label'] === '短剧来源'); assert.ok(source, 'source selector missing');
-    source.props.onChange({ target: { value: 'xifan' } }); await ui.flush();
+    source.props.onChange({ target: { value: 'hema' } }); await ui.flush();
     old.resolve({ success: true, results: [{ series_id: 'late', series_title: '旧红果片单' }] }); await ui.flush();
-    assert.ok(ui.text().includes('西饭片单')); assert.ok(!ui.text().includes('旧红果片单'));
+    assert.ok(ui.text().includes('河马片单')); assert.ok(!ui.text().includes('旧红果片单'));
     assert.equal(ui.button('打开来源页面'), undefined); assert.ok(ui.button('都市'));
     ui.button('下一页').props.onClick(); await ui.flush(); assert.equal(pages.at(-1), 2); assert.equal(ui.button('下一页').props.disabled, true); assert.ok(ui.text().includes('第 2 页'));
     ui.button('上一页').props.onClick(); await ui.flush(); assert.ok(ui.text().includes('第 1 页')); ui.unmount();
   });
   await test('all-source search merges both sources and resolves the original source ID', async () => {
     const first = deferred(), second = deferred(), calls = [], resolved = [], picked = [];
-    const ui = await mount('SearchPanel', { searchSeries: (kw, options) => { calls.push([kw, options.source]); return options.source === 'hongguo' ? first.promise : options.source === 'xifan' ? second.promise : Promise.resolve({ success: true, results: [] }); }, searchResolve: async id => { resolved.push(id); return ok(detail(id)); } }, { onSelectSeries: d => picked.push(d) });
+    const ui = await mount('SearchPanel', { searchSeries: (kw, options) => { calls.push([kw, options.source]); return options.source === 'hongguo' ? first.promise : options.source === 'hema' ? second.promise : Promise.resolve({ success: true, results: [] }); }, searchResolve: async id => { resolved.push(id); return ok(detail(id)); } }, { onSelectSeries: d => picked.push(d) });
     assert.equal(ui.find(n => n.props['aria-label'] === '短剧来源').props.value, 'hongguo', 'the source defaults to 红果');
     assert.ok(ui.find(n => n.type === 'option' && n.props.value === 'all'));
     ui.find(n => n.props['aria-label'] === '短剧来源').props.onChange({ target: { value: 'all' } }); ui.render();
     assert.equal(ui.find(n => n.props['aria-label'] === '短剧来源').props.value, 'all');
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '同名剧' } }); ui.render(); ui.button('搜索').props.onClick();
-    assert.deepEqual(calls, [['同名剧', 'hongguo'], ['同名剧', 'xifan'], ['同名剧', 'hema']], 'all searches start without waiting for each other');
-    second.resolve({ success: true, results: [{ series_id: 'xifan:test:123', series_title: '同名剧' }] });
+    assert.deepEqual(calls, [['同名剧', 'hongguo'], ['同名剧', 'hema']], 'all searches start without waiting for each other');
+    second.resolve({ success: true, results: [{ series_id: 'hema:123', series_title: '同名剧' }] });
     first.resolve({ success: true, results: [{ series_id: '123', series_title: '同名剧' }] }); await ui.flush();
     const cards = ui.nodes().filter(n => n.props.className?.startsWith('search-card '));
     assert.equal(cards.length, 2, 'same title across sources must remain separately selectable');
     assert.ok(ui.nodes().some(n => n.props.className === 'badge' && n.children.includes('红果短剧')));
-    assert.ok(ui.nodes().some(n => n.props.className === 'badge' && n.children.includes('西饭短剧')));
-    cards[1].props.onClick(); await ui.flush(); assert.equal(resolved[0], 'xifan:test:123'); assert.equal(picked[0].series_id, 'xifan:test:123'); ui.unmount();
+    assert.ok(ui.nodes().some(n => n.props.className === 'badge' && n.children.includes('河马短剧')));
+    cards[1].props.onClick(); await ui.flush(); assert.equal(resolved[0], 'hema:123'); assert.equal(picked[0].series_id, 'hema:123'); ui.unmount();
   });
   await test('season search ranks matching titles and exposes supplemental failures without hiding results', async () => {
     const exact = { series_id: '123', series_title: '双子房客' }, next = { series_id: '124', series_title: '双子房客第三季' };
@@ -882,12 +883,12 @@ async function mount(file, api, props = {}) {
     const ui = await mount('SearchPanel', { searchSeries: async (kw, options) => {
       const n = options.page || 1; pages.push(`${options.source}:${n}`);
       if (options.source === 'hongguo') return { success: true, hasMore: true, results: [{ series_id: '1', series_title: '同一部' }] };
-      if (options.source === 'xifan') return { success: true, hasMore: n < 2, nextPage: n + 1, results: [{ series_id: `xifan:t:${n}`, series_title: `同一部 ${n}` }] };
+      if (options.source === 'hema') return { success: true, hasMore: n < 2, nextPage: n + 1, results: [{ series_id: `hema:${n}`, series_title: `同一部 ${n}` }] };
       return { success: true, results: [] };
     } });
     ui.find(n => n.props['aria-label'] === '短剧来源').props.onChange({ target: { value: 'all' } }); ui.render();
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '同一部' } }); ui.render(); ui.button('搜索').props.onClick(); await ui.flush();
-    assert.deepEqual(pages, ['hongguo:1', 'xifan:1', 'hema:1', 'hongguo:2', 'xifan:2'], 'a page with nothing new ends that source; a source without more is not asked again');
+    assert.deepEqual(pages, ['hongguo:1', 'hema:1', 'hongguo:2', 'hema:2'], 'a page with nothing new ends that source; a source without more is not asked again');
     assert.equal(ui.nodes().filter(n => n.props.className?.startsWith('search-card ')).length, 3);
     assert.ok(ui.text().includes('已显示全部结果')); assert.equal(ui.button('载入更多'), undefined);
     ui.unmount();
@@ -931,20 +932,20 @@ async function mount(file, api, props = {}) {
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '剧名' } }); ui.render(); ui.button('搜索').props.onClick(); await ui.flush();
     assert.ok(ui.find(n => n.props.role === 'alert')); assert.ok(!ui.text().includes('没有找到相关短剧')); ui.unmount();
   });
-  await test('xifan search source change ignores late searches and detail picks', async () => {
+  await test('hema search source change ignores late searches and detail picks', async () => {
     const old = deferred(), pick = deferred(), picked = []; const calls = [];
-    const ui = await mount('SearchPanel', { searchSeries: (kw, options) => { calls.push(options); return options?.source === 'xifan' ? Promise.resolve({ success: true, results: [{ series_id: 'X', series_title: '西饭搜索' }] }) : old.promise; }, searchResolve: () => pick.promise }, { onSelectSeries: d => picked.push(d) });
+    const ui = await mount('SearchPanel', { searchSeries: (kw, options) => { calls.push(options); return options?.source === 'hema' ? Promise.resolve({ success: true, results: [{ series_id: 'hema:5', series_title: '河马搜索' }] }) : old.promise; }, searchResolve: () => pick.promise }, { onSelectSeries: d => picked.push(d) });
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '剧名' } }); ui.render(); ui.button('搜索').props.onClick(); ui.render();
     const source = ui.find(n => n.props['aria-label'] === '短剧来源'); assert.ok(source, 'source selector missing');
-    source.props.onChange({ target: { value: 'xifan' } }); ui.render(); ui.button('搜索').props.onClick(); await ui.flush();
+    source.props.onChange({ target: { value: 'hema' } }); ui.render(); ui.button('搜索').props.onClick(); await ui.flush();
     old.resolve({ success: true, results: [{ series_id: 'H', series_title: '旧搜索' }] }); await ui.flush();
-    assert.ok(ui.text().includes('西饭搜索')); assert.ok(!ui.text().includes('旧搜索'));
+    assert.ok(ui.text().includes('河马搜索')); assert.ok(!ui.text().includes('旧搜索'));
     ui.find(n => n.props.className?.startsWith('search-card ')).props.onClick(); ui.render();
     ui.find(n => n.props['aria-label'] === '短剧来源').props.onChange({ target: { value: 'hongguo' } }); ui.render();
-    pick.resolve(ok(detail('X'))); await ui.flush(); assert.equal(picked.length, 0); assert.equal(calls[0].source, 'hongguo'); ui.unmount();
+    pick.resolve(ok(detail('hema:5'))); await ui.flush(); assert.equal(picked.length, 0); assert.equal(calls[0].source, 'hongguo'); ui.unmount();
   });
-  await test('xifan locked episodes are excluded from every download selection', async () => {
-    const data = detail('xifan:test:A'); data.episodes[0].locked = true; let submitted;
+  await test('locked third-party episodes are excluded from every download selection', async () => {
+    const data = detail('custom:550e8400-e29b-41d4-a716-446655440000:41'); data.episodes[0].locked = true; let submitted;
     const ui = await mount('HongguoDownload', { hongguoDownloadBatch: async p => { submitted = p; return { success: true, count: p.episodes.length }; } });
     ui.find(n => n.props.onSelectSeries).props.onSelectSeries(data); ui.render();
     assert.ok(ui.button('下载选中集数 (0/2)'), 'default must not select episodes');
@@ -955,7 +956,7 @@ async function mount(file, api, props = {}) {
     assert.ok(ui.button('下载选中集数 (1/2)')); assert.ok(ui.find(n => n.props.className?.startsWith('episode-card') && n.props.disabled));
     await ui.button('下载选中集数').props.onClick(); assert.equal(submitted.episodes.length, 1); assert.equal(submitted.episodes[0].vid_index, 2); ui.unmount();
   });
-  await test('xifan browse locks selection and starts the first unlocked episode', async () => {
+  await test('third-party browse locks selection and starts the first unlocked episode', async () => {
     const data = detail('X'); data.episodes[0].locked = true; let played, submitted;
     const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: async () => ({ success: true, results: [{ series_id: 'X', series_title: 'X' }] }), searchResolve: async () => ok(data), getSeriesEpisodes: async () => ok(data), playSeries: async p => { played = p; return { success: false }; }, hongguoDownloadBatch: async p => { submitted = p; return { success: false }; } });
     await ui.flush(); ui.find(n => n.props.className === 'browse-card').props.onClick(); await ui.flush();
@@ -966,7 +967,7 @@ async function mount(file, api, props = {}) {
     await ui.button('立即播放').props.onClick(); assert.equal(played.vidIndex, 2);
     await ui.button('下载选中').props.onClick(); assert.equal(submitted.episodes.length, 1); assert.equal(submitted.episodes[0].vid_index, 2); ui.unmount();
   });
-  await test('xifan player skips locked episodes in auto next and download missing', async () => {
+  await test('third-party player skips locked episodes in auto next and download missing', async () => {
     const data = detail('X'); data.total = 3; data.episodes.push(episode(3)); data.episodes[1].locked = true;
     const requested = [], downloaded = [];
     const ui = await mount('Player', { getSeriesList: async () => [{ series_id: 'X' }], getSeriesEpisodes: async () => ok(data), getPlaybackPosition: async () => null, prepareOnlinePlay: async p => { requested.push(p); return { success: true, url: `hongguo-stream://${p.vidIndex}` }; }, downloadSingleEpisode: async (sid, n) => { downloaded.push(n); return { success: true, count: 1 }; } }, { target: { seriesId: 'X', vidIndex: 1, ts: 1 } });
@@ -977,7 +978,7 @@ async function mount(file, api, props = {}) {
     ui.find(n => n.type === 'video').props.onEnded(); await ui.flush(); assert.equal(requested.at(-1).vidIndex, 3);
     await ui.button('下载未完成集').props.onClick(); assert.deepEqual(downloaded, [1, 3]); ui.unmount();
   });
-  await test('xifan merge progress retains completed episode count', async () => {
+  await test('merge progress retains completed episode count', async () => {
     let update;
     const ui = await mount('DownloadManager', { getDownloadTasks: async () => [], getSeriesList: async () => [], getMergeTasks: async () => [{ id: 'm', seriesTitle: '合并', total: 72, done: 0, progress: 0, status: 'running' }], onMergeProgress: fn => { update = fn; return () => {}; } });
     await ui.flush(); update({ id: 'm', progress: 35, done: 24 }); ui.render(); assert.ok(ui.text().includes('24/72 集')); ui.unmount();
@@ -1072,7 +1073,7 @@ async function mount(file, api, props = {}) {
     input().props.onKeyDown({ key: 'Enter', preventDefault() {} });
     input().props.onKeyDown({ key: 'Enter', preventDefault() {} }); ui.render();
     input().props.onKeyDown({ key: 'Enter', preventDefault() {} });
-    assert.equal(calls, 3, 'same pending all-source search must call each source only once');
+    assert.equal(calls, 2, 'same pending all-source search must call each source only once');
     pending.resolve({ success: true, results: [] }); await ui.flush(); ui.unmount();
   });
   await test('resolve keyboard ignores IME confirmation and duplicate Enter', async () => {

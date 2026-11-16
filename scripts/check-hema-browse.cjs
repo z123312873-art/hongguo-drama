@@ -21,7 +21,7 @@ async function check() {
       if (failure) throw failure;
       const name = url.endsWith('/0/2') ? 'page2' : url.endsWith('/1129') ? 'genre' : 'browse';
       return { data: override ?? fixture(name) };
-    }, post: () => { throw Error('目录不得请求解锁或其他 POST 接口'); } } : require(name) };
+    }, post: () => { throw Error('目录不得请求解锁或其他 POST 接口'); } } : name === './hema-app' ? require(path.join(root, 'src/native/hema-app')) : require(name.startsWith('.') ? path.join(root, 'src/native', name) : name) };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'src/native/hema.js'), 'utf8'), context);
   const { browseList } = context.module.exports;
   const first = await browseList();
@@ -36,22 +36,24 @@ async function check() {
   assert.equal(first.totalPages, 0, '不发布无法核实的分类总页数');
   assert.equal(first.hasMore, true);
   assert.equal(first.nextPage, 2);
-  assert.ok(first.genres.some(item => item.slug === '417-464'));
+  assert.ok(first.genres.length > 0 && first.genres.length < 40, '题材应整理成较少复合标签');
+  assert.ok(first.genres.every(item => item.slug.split('-').length <= 16));
+  assert.ok(first.genres.some(item => /逆袭|都市|古装|甜宠|漫剧|奇幻|年代|萌宝/.test(item.label)));
   assert.ok(!first.genres.some(item => item.slug === '0'), '全部按钮由界面提供，不重复');
+  const sampleSlug = first.genres[0].slug;
 
   const second = await browseList({ page: 2 });
   assert.equal(second.success, true, second.error);
   assert.equal(second.page, 2);
   assert.notEqual(second.results[0].series_id, first.results[0].series_id);
   assert.equal(calls.at(-1), 'https://www.kuaikaw.cn/browse/0/2');
-  const genre = await browseList({ genre: '1129' });
+  const urban = first.genres.find(item => item.slug.split('-').includes('1129')) || first.genres[0];
+  override = fixture('genre').replace('"typeThreeId": "1129"', `"typeThreeId": "${urban.slug}"`)
+    .replace('href="/browse/1129/2"', `href="/browse/${urban.slug}/2"`);
+  const genre = await browseList({ genre: urban.slug });
   assert.equal(genre.success, true, genre.error);
-  assert.equal(genre.sourceUrl, 'https://www.kuaikaw.cn/browse/1129');
-
-  override = fixture('genre').replace('"typeThreeId": "1129"', '"typeThreeId": "417-464"')
-    .replace('href="/browse/1129/2"', 'href="/browse/417-464/2"');
-  assert.equal((await browseList({ genre: '417-464' })).success, true);
-  assert.equal(calls.at(-1), 'https://www.kuaikaw.cn/browse/417-464');
+  assert.equal(genre.sourceUrl, `https://www.kuaikaw.cn/browse/${urban.slug}`);
+  assert.equal(calls.at(-1), `https://www.kuaikaw.cn/browse/${urban.slug}`);
   const beforeInvalid = calls.length;
   for (const options of [{ genre: '../unlock' }, { genre: '999999' }, { page: 0 }, { page: 1.5 }, { page: Infinity }]) {
     assert.equal((await browseList(options)).success, false);
@@ -67,7 +69,7 @@ async function check() {
   assert.equal((await browseList()).hasMore, false);
   override = fixture('browse');
   assert.equal((await browseList({ page: 2 })).success, false, '分页不一致必须报错');
-  assert.equal((await browseList({ genre: '1129' })).success, false, '题材不一致必须报错');
+  assert.equal((await browseList({ genre: urban.slug })).success, false, '题材不一致必须报错');
   override = '<html><script>throw Error("must not execute")</script></html>';
   assert.match((await browseList()).error, /数据异常/);
   override = fixture('browse');
@@ -81,9 +83,10 @@ async function check() {
   assert.match(browse, /mediaSources\.map\(\(\{ id, label \}\) => <option key=\{id\} value=\{id\}>\{label\}<\/option>\)/);
   assert.match(fs.readFileSync(path.join(root, 'src/components/mediaSourcesModel.mjs'), 'utf8'), /id: 'hema', label: '河马短剧'/);
   assert.match(browse, /source !== 'hongguo' && !totalPages && \(page > 1 \|\| meta.hasMore\)/);
-  assert.match(browse, /西饭热播榜暂未接入/);
+  assert.equal(/西饭热播榜暂未接入/.test(browse), false);
+  assert.equal(/id: 'xifan'/.test(fs.readFileSync(path.join(root, 'src/components/mediaSourcesModel.mjs'), 'utf8')), false);
   const paging = browse.slice(browse.indexOf('  const gotoPage ='), browse.indexOf('  const openSeries ='));
-  for (const source of ['hema', 'xifan']) {
+  for (const source of ['hema']) {
     let selectedPage = 1;
     vm.runInNewContext(paging + '\ngotoPage(2);', { source, category: '', genre: '', page: 1, meta: {hasMore:true,totalPages:0},
       invalidateList() {}, setPage(value) { selectedPage = value; }, showSnapshot() {}, document: {querySelector:()=>null} });
@@ -100,12 +103,14 @@ async function check() {
     ipcMain: { handle: (_channel, callback) => { handler = callback; } },
     require: name => ({ browseList: options => ({ name, options }) }),
   });
-  for (const source of ['hema', 'xifan', 'hongguo']) {
+  for (const source of ['hema', 'hongguo']) {
     const options = { source, genre: '1129', page: 2 };
     const routed = await handler({}, options);
     assert.equal(routed.name, `./src/native/${source === 'hongguo' ? 'catalog' : source}`, '主控须补齐河马 IPC 分流');
     assert.equal(routed.options, options);
   }
+  const removed = await handler({}, { source: 'xifan', page: 1 });
+  assert.equal(removed.success, false);
   console.log('PASS 河马公开目录、题材白名单、组合题材、分页、刷新、异常与发现页入口；无榜单/热度伪造');
 }
 

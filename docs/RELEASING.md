@@ -19,6 +19,8 @@
 
 正式版 4.6.1 之後，下一輪先發 **4.6.3 預發佈**（說明見 [4.6.3](release-4.6.3.md)），標籤是 `installer-4.6.3-traditional-pre`，由 `windows/4.6.3-pre-*` 分支觸發打包。實測沒問題後再發 4.7 正式版。
 
+延續到 **4.6.5 預發佈**（說明見 [4.6.5](release-4.6.5.md)），標籤是 `installer-4.6.5-traditional-pre`，由 `windows/4.6.5-pre-*` 分支觸發打包；修正紅果播放、河馬來源與海報、移除西飯。實測沒問題後再發 4.7 正式版。
+
 | 平台 | 构建入口 | 发布门槛 |
 |---|---|---|
 | macOS arm64 | npm run build:mac | 对应 arm64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证 |

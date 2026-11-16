@@ -69,7 +69,6 @@ export function seasonTitle(title) {
 
 export function sourceOf(id) {
   if (/^\d{6,30}$/.test(id)) return 'hongguo';
-  if (/^xifan:[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$/.test(id)) return 'xifan';
   if (/^hema:\d+$/.test(id)) return 'hema';
   return null;
 }

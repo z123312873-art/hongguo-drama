@@ -15,3 +15,16 @@ test('other hosts and unusable values never get a guessed fallback', () => {
   assert.deepEqual(coverCandidates('https://evil.example/novel-pic/abc~x.jpg'), ['https://evil.example/novel-pic/abc~x.jpg']);
   for (const value of ['', '  ', 'javascript:alert(1)', '/relative.jpg', null, undefined, 7, {}]) assert.deepEqual(coverCandidates(value), []);
 });
+
+test('a resized object-storage poster falls back to its untouched original', () => {
+  assert.deepEqual(coverCandidates('https://seoali.zqkanshu.com/c/41.jpg?t=17&x-oss-process=image/resize,w_320/quality,q_80'), [
+    'https://seoali.zqkanshu.com/c/41.jpg?t=17&x-oss-process=image/resize,w_320/quality,q_80',
+    'https://seoali.zqkanshu.com/c/41.jpg?t=17',
+  ]);
+  assert.deepEqual(coverCandidates('https://seoali.zqkanshu.com/c/41.jpg?x-oss-process=image/resize,w_320'), [
+    'https://seoali.zqkanshu.com/c/41.jpg?x-oss-process=image/resize,w_320',
+    'https://seoali.zqkanshu.com/c/41.jpg',
+  ]);
+  assert.deepEqual(coverCandidates('https://seoali.zqkanshu.com/c/41.jpg?t=17'), ['https://seoali.zqkanshu.com/c/41.jpg?t=17']);
+  assert.deepEqual(coverCandidates('https://evil.example/c.jpg?x-oss-process=image/resize,w_320'), ['https://evil.example/c.jpg?x-oss-process=image/resize,w_320']);
+});
