@@ -49,10 +49,10 @@ async function check() {
     },
     async fetchPlay(bookId, chapterId) {
       if (appMode === 'down') throw new Error('app down');
-      if (appMode === 'deny' && String(chapterId) === '591821033') {
+      if (appMode === 'empty' || (appMode === 'deny' && String(chapterId) === '591821033')) {
         return { url: null, locked: true, error: '本集暂时无法取得播放地址，请稍后重试或改看其他集' };
       }
-      return { url: `https://media.example/app-${chapterId}.mp4`, locked: false, rate: '720P' };
+      return { url: `https://media.example/app-${chapterId}.mp4`, locked: false, rate: '720P', quality: '720p' };
     },
   };
   const context = { module: { exports: {} }, require: name => name === 'axios' ? {
@@ -90,9 +90,11 @@ async function check() {
   assert.equal(episodes.episodes[0].vid_index, 1);
   assert.equal(episodes.episodes[0].series_title, '出手');
   assert.equal((await hema.fetchPlayUrlSingle(vid, sid)).url, 'https://media.example/app-591821028.mp4');
-  assert.equal((await hema.fetchPlayUrlSingle(vid, sid)).quality, '720P');
+  assert.equal((await hema.fetchPlayUrlSingle(vid, sid)).quality, '720p');
   appMode = 'deny';
   assert.equal((await hema.fetchPlayUrlSingle(`${sid}:591821033`, sid)).locked, true);
+  appMode = 'empty';
+  assert.equal((await hema.fetchPlayUrlSingle(vid, sid)).url, 'https://media.example/720.mp4', 'app empty must still use web free-episode url');
   appMode = 'unlock';
 
   appMode = 'down';

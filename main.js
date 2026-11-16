@@ -2277,7 +2277,8 @@ ipcMain.handle('play-series', async (event, payload) => {
 
 function playbackQuality(value = 'auto', vid = '') {
   if (!['auto', '720p', '1080p'].includes(value)) throw new Error('在线播放清晰度无效，请选择自动、720p 或 1080p');
-  if (value !== 'auto' && /^(xifan|hema|custom):/.test(String(vid))) throw new Error('此来源暂不支持指定在线播放清晰度，请选择自动');
+  if (value !== 'auto' && /^(xifan|custom):/.test(String(vid))) throw new Error('此来源暂不支持指定在线播放清晰度，请选择自动');
+  if (value === '1080p' && /^hema:/.test(String(vid))) throw new Error('河马在线播放清晰度最高 720P，请选择自动或 720p');
   return value;
 }
 

@@ -243,28 +243,31 @@ async function fetchEpisodeList(seriesId) {
   return { series_id: seriesId, series_title, cover, total: episodes.length, episodes, source: 'hema' };
 }
 
-async function fetchPlayUrlSingle(vid, sid) {
+async function fetchPlayUrlSingle(vid, sid, options = {}) {
   try {
     const id = parseId(vid, true);
     if (sid != null && sid !== '' && parseId(sid).seriesId !== id.seriesId) throw new Error('河马分集不属于当前剧集');
+    let appError;
     try {
-      const play = await hemaApp.fetchPlay(id.bookId, id.chapterId);
-      if (play.url) return { url: play.url, spadeA: null, codec: '', source: 'hema', quality: hemaApp.MAX_RATE };
-      if (play.locked) return { url: null, spadeA: null, codec: null, source: 'hema', locked: true, error: play.error };
-    } catch (appError) {
-      try {
-        const detail = await hemaApp.fetchDetail(id.bookId, id.chapterId);
-        const video = detail.videoInfo && typeof detail.videoInfo === 'object' ? detail.videoInfo : {};
-        const fromDetail = hemaApp.pickPlayUrl(video) || hemaApp.pickPlayUrl(detail);
-        if (fromDetail) return { url: fromDetail, spadeA: null, codec: '', source: 'hema', quality: hemaApp.MAX_RATE };
-      } catch (_) {}
+      const play = await hemaApp.fetchPlay(id.bookId, id.chapterId, options);
+      if (play.url) return { url: play.url, spadeA: null, codec: '', source: 'hema', quality: play.quality || '720p' };
+    } catch (error) { appError = error; }
+    try {
+      const detail = await hemaApp.fetchDetail(id.bookId, id.chapterId);
+      const video = detail.videoInfo && typeof detail.videoInfo === 'object' ? detail.videoInfo : {};
+      const fromDetail = hemaApp.pickPlayUrl(video) || hemaApp.pickPlayUrl(detail);
+      if (fromDetail) return { url: fromDetail, spadeA: null, codec: '', source: 'hema', quality: '720p' };
+    } catch (_) {}
+    try {
       const result = await detailFromWeb(id.seriesId);
       const episode = result.chapterList.find(item => String(item.chapterId) === id.chapterId);
       if (!episode) throw new Error('河马未找到该分集');
       const playUrl = httpsUrl(episode.chapterVideoVo?.mp4720p) || httpsUrl(episode.chapterVideoVo?.mp4);
-      if (playUrl) return { url: playUrl, spadeA: null, codec: '', source: 'hema', quality: '720P' };
-      if (appError.code === 'ERR_TLS_CERT') return { url: null, spadeA: null, codec: null, source: 'hema', error: appError.message };
-      return { url: null, spadeA: null, codec: null, source: 'hema', locked: true, error: LOCKED_HINT };
+      if (playUrl) return { url: playUrl, spadeA: null, codec: '', source: 'hema', quality: '720p' };
+      if (appError?.code === 'ERR_TLS_CERT') return { url: null, spadeA: null, codec: null, source: 'hema', error: appError.message };
+    } catch (error) {
+      if (appError?.code === 'ERR_TLS_CERT') return { url: null, spadeA: null, codec: null, source: 'hema', error: appError.message };
+      if (!appError) return { url: null, spadeA: null, codec: null, source: 'hema', error: error.message };
     }
     return { url: null, spadeA: null, codec: null, source: 'hema', locked: true, error: LOCKED_HINT };
   } catch (error) { return { url: null, spadeA: null, codec: null, source: 'hema', error: error.message }; }

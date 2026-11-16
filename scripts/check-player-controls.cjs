@@ -103,7 +103,12 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   assert.equal(find('选集面板'), undefined);
   find('清晰度').props.onClick(); render();
   documentListeners.get('pointerdown')({ target: {} }); render(); assert.equal(find('清晰度面板'), undefined);
-  props.supportsOnlineQuality = false; props.onlineQuality = 'auto'; render();
+  props.supportsOnlineQuality = true; props.qualityOptions = ['auto', '720p']; props.onlineQuality = 'auto'; render();
+  find('清晰度').props.onClick(); render(); assert.equal(find('选择 1080P'), undefined);
+  assert(find('选择 720P'));
+  assert.match(nodeText(find('清晰度面板')), /最高 720P/);
+  find('清晰度').props.onClick(); render();
+  props.supportsOnlineQuality = false; props.qualityOptions = undefined; props.onlineQuality = 'auto'; render();
   find('清晰度').props.onClick(); render(); assert.equal(find('选择 1080P'), undefined);
   assert.match(nodeText(find('清晰度面板')), /由片源决定/);
   find('更多播放选项').props.onClick(); render(); assert.equal(find('清晰度面板'), undefined);

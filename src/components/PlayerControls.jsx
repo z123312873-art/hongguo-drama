@@ -11,7 +11,7 @@ const formatTime = seconds => {
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
 
-export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings, onSeek }) {
+export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, qualityOptions, onQualityChange, onOpenSettings, onSeek }) {
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
   const [fullscreen, setFullscreen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -34,6 +34,12 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   const pointerRef = useRef(null);
   const idleDeadlineRef = useRef(0);
   const expanded = fullscreen || windowFill;
+  const qualities = qualityOptions || (supportsOnlineQuality ? ['auto', '720p', '1080p'] : ['auto']);
+  const qualityHint = supportsOnlineQuality
+    ? (qualities.includes('1080p')
+      ? '所选清晰度会保留。某一集没有对应片源时，只临时播放该集的实际画面；自动播放或手动切到下一集，会重新按自动、720P 或 1080P 取源。切换后保留播放进度和弹幕。'
+      : '所选清晰度会保留。河马画质最高 720P。某一集没有对应片源时，只临时播放该集的实际画面；自动播放或手动切到下一集，会重新按所选清晰度取源。切换后保留播放进度和弹幕。')
+    : '此来源的清晰度由片源决定，暂不支持指定画质。当前画面分辨率不代表来源的最高画质。';
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -295,12 +301,12 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
             <div className="player-popover-heading"><strong>清晰度</strong></div>
             <p className="player-quality-current">当前画面：{media.width > 0 && media.height > 0 ? `${Math.min(media.width, media.height)}P（${media.width} × ${media.height}）` : '等待视频信息'}</p>
             <div role="group" aria-label="选择播放清晰度">
-              {(supportsOnlineQuality ? ['auto', '720p', '1080p'] : ['auto']).map(quality => <button type="button" key={quality} aria-label={`选择 ${quality === 'auto' ? '自动' : quality.toUpperCase()}`}
+              {qualities.map(quality => <button type="button" key={quality} aria-label={`选择 ${quality === 'auto' ? '自动' : quality.toUpperCase()}`}
                 aria-pressed={onlineQuality === quality} onClick={() => { setSelectionPanel(null); qualityButtonRef.current?.focus(); if (quality !== onlineQuality) onQualityChange(quality); }}>
                 <span>{quality === 'auto' ? (supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定') : quality.toUpperCase()}</span><span aria-hidden="true">{onlineQuality === quality ? '✓' : ''}</span>
               </button>)}
             </div>
-            <p className="player-quality-hint">{supportsOnlineQuality ? '所选清晰度会保留。某一集没有对应片源时，只临时播放该集的实际画面；自动播放或手动切到下一集，会重新按自动、720P 或 1080P 取源。切换后保留播放进度和弹幕。' : '此来源的清晰度由片源决定，暂不支持指定画质。当前画面分辨率不代表来源的最高画质。'}</p>
+            <p className="player-quality-hint">{qualityHint}</p>
           </div>}
         </div>
         <div className="player-controls-volume">

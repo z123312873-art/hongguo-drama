@@ -69,8 +69,9 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     try { const value = window.localStorage.getItem('hongguo:online-quality'); return ['720p', '1080p'].includes(value) ? value : 'auto'; }
     catch { return 'auto'; }
   });
-  const supportsOnlineQuality = !/^(xifan|hema|custom):/.test(activeSeriesId);
-  const onlineQuality = supportsOnlineQuality ? onlineQualityChoice : 'auto';
+  const supportsOnlineQuality = !/^(xifan|custom):/.test(activeSeriesId);
+  const onlineQualityOptions = /^hema:/.test(activeSeriesId) ? ['auto', '720p'] : ['auto', '720p', '1080p'];
+  const onlineQuality = supportsOnlineQuality && onlineQualityOptions.includes(onlineQualityChoice) ? onlineQualityChoice : 'auto';
   const [qualityLoading, setQualityLoading] = useState(true);
   const [waitingFor, setWaitingFor] = useState(null);
   const [toast, setToast] = useState(null);
@@ -884,7 +885,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
   };
 
   const changeOnlineQuality = (quality) => {
-    if (!['auto', '720p', '1080p'].includes(quality) || !supportsOnlineQuality) return;
+    if (!onlineQualityOptions.includes(quality) || !supportsOnlineQuality) return;
     const seekTo = currentPosition();
     const autoplay = loadedMediaRef.current ? !loadedMediaRef.current.element.paused : pendingAutoplayRef.current;
     setOnlineQualityChoice(quality);
@@ -1555,8 +1556,8 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
               disabled={!supportsOnlineQuality}
               onChange={event => changeOnlineQuality(event.target.value)}>
               <option value="auto">{supportsOnlineQuality ? '自动（兼容优先）' : '由片源决定'}</option>
-              <option value="720p">720P</option>
-              <option value="1080p">1080P</option>
+              {onlineQualityOptions.includes('720p') && <option value="720p">720P</option>}
+              {onlineQualityOptions.includes('1080p') && <option value="1080p">1080P</option>}
             </select>
           </label>
         </div>
@@ -1803,7 +1804,7 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
           <CommentDanmaku videoRef={videoRef} source={videoSrc} available={canPlay && active} danmaku={commentDanmaku} />}
         <PlayerControls onSeek={time => seekMediaRef.current(time, false)} onOpenSettings={onNavigate ? () => onNavigate('settings') : undefined} danmaku={showDanmakuControls ? danmaku : null} enhancement={enhancement} continuing={autoAdvancing && !playbackError && !decodeFailed} autoContinue={autoNext && !!findNext(currentIndex)} shortcuts={shortcuts} onToggleFullscreen={toggleFullscreen} portrait={portrait} windowFill={windowFill} onWindowFill={setWindowFill} videoRef={videoRef} stageRef={stageRef} source={videoSrc} available={canPlay}
           seriesTitle={detail?.series_title} episodes={episodes} currentIndex={currentIndex} onEpisodeChange={goToEpisode}
-          onlineQuality={onlineQuality} supportsOnlineQuality={supportsOnlineQuality} onQualityChange={changeOnlineQuality}
+          onlineQuality={onlineQuality} supportsOnlineQuality={supportsOnlineQuality} qualityOptions={onlineQualityOptions} onQualityChange={changeOnlineQuality}
           pictureMode={pictureMode} onPictureModeChange={changePictureMode} rate={playbackRate} onRateChange={changePlaybackRate} onError={showToast} />
         {!canPlay && (
           <div className="player-placeholder" style={{ position: 'absolute', inset: 0 }}>
