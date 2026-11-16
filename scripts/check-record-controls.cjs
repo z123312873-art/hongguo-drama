@@ -259,6 +259,7 @@ test('signed-in history: says it is the phone list, counts follow the account ro
     { series_id: '7300000000000000001', series_title: '手机看过', vid_index: 5, total: 80, completed: false, currentTime: 12, updatedAt: Date.now(), synced: true },
     { series_id: '7300000000000000002', series_title: '手机看完', vid_index: 80, total: 80, completed: true, currentTime: 88, updatedAt: Date.now() - 1, synced: true },
     { series_id: '7300000000000000003', series_title: '刚播放', vid_index: 1, total: 10, completed: false, currentTime: 3, updatedAt: Date.now() - 2, synced: false },
+    { series_id: 'hema:41000497974', series_title: '河马在看', vid_index: 2, total: 10, completed: false, currentTime: 3, updatedAt: Date.now() - 3, synced: false },
   ];
   h.window.electronAPI = {
     getWatchHistory: async () => ({ success: true, results: rows, sync }),
@@ -271,8 +272,10 @@ test('signed-in history: says it is the phone list, counts follow the account ro
   const text = () => ui.nodes().flatMap(n => n.children || []).filter(c => typeof c === 'string').join('|');
   const filter = label => ui.find(n => n.type === 'button' && n.children.join('') === label);
   assert.ok(text().includes('已登录：与手机「历史」双向同步。'));
-  assert.ok(filter('全部 3') && filter('未看完 2') && filter('已看完 1'));
+  assert.ok(filter('全部 4') && filter('未看完 3') && filter('已看完 1'));
   assert.ok(text().includes('等待同步到手机…'), 'a record not yet confirmed by the account is marked');
+  assert.equal(text().split('等待同步到手机…').length - 1, 1, 'a Hema record never waits for the phone');
+  assert.equal(text().split('仅保存在这台电脑').length - 1, 1, 'a Hema record says it stays on this computer');
   await ui.find(n => n.props.className === 'history-resume').props.onClick(); await ui.flush();
   assert.deepEqual(resolved, ['7300000000000000001'], 'a phone-only drama loads its episodes first');
   assert.equal(JSON.stringify(played.at(-1)), JSON.stringify({ seriesId: '7300000000000000001', vidIndex: 5, resume: true }));
@@ -280,7 +283,7 @@ test('signed-in history: says it is the phone list, counts follow the account ro
   const confirm = ui.find(n => n.props['aria-label'] === '确认从观看记录移除 手机看完');
   assert.ok(confirm.children.includes('确认移除（含手机）'));
   await confirm.props.onClick(); await ui.flush();
-  assert.ok(filter('全部 2') && filter('已看完 0'));
+  assert.ok(filter('全部 3') && filter('已看完 0'));
   assert.ok(text().includes('已從帳號歷史移除《手机看完》'));
 });
 

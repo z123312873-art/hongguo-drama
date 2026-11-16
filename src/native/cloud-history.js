@@ -95,6 +95,28 @@ async function fetchHistory(request, { maxPages = MAX_PAGES, onSummary } = {}) {
 }
 
 
+async function findRows(request, ids, { maxPages = 2 } = {}) {
+  const wanted = new Set((Array.isArray(ids) ? ids : []).map(String).filter(id => ID.test(id)));
+  const found = new Map();
+  let offset = 0;
+  for (let page = 0; page < maxPages && found.size < wanted.size; page += 1) {
+    const payload = await request('GET', LIST_PATH, {
+      limit: '0', offset: String(offset), book_type: '2', full_field: 'false', query_soft_deleted: 'false',
+      last_min_read_timestamp_ms: '0', is_first_load: offset === 0 ? 'true' : 'false',
+    });
+    const { rows: list, hasMore, nextOffset } = parsePage(payload);
+    for (const raw of list) {
+      const row = cloudRow(raw);
+      if (!row || !wanted.has(row.series_id)) continue;
+      const old = found.get(row.series_id);
+      if (!old || row.updatedAt > old.updatedAt) found.set(row.series_id, row);
+    }
+    if (!hasMore || !list.length) break;
+    offset = nextOffset > offset ? nextOffset : offset + PAGE_STRIDE;
+  }
+  return found;
+}
+
 function idJson(value) {
   return JSON.stringify(value).replace(/"\\u0000id:(\d+)"/g, '$1');
 }
@@ -222,4 +244,4 @@ function reconcileHistory({ playback, cloudRows, userId }) {
   };
 }
 
-module.exports = { cloudRow, parsePage, fetchHistory, uploadEntry, deleteEntry, deleteEntries, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH };
+module.exports = { cloudRow, parsePage, fetchHistory, findRows, uploadEntry, deleteEntry, deleteEntries, reconcileHistory, updateBody, finished, LIST_PATH, UPDATE_PATH };

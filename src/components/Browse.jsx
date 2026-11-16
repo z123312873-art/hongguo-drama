@@ -9,7 +9,8 @@ import { formatPublicScore } from '../catalogTags.mjs';
 import { applyPublicRatings } from '../publicRatings.mjs';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
-import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, pagesToFill, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
+import { MAX_OPEN_PAGES, MIN_SOURCE_POSTERS, OPEN_SOURCE_PAGES, SOURCE_PAGE_SIZE, itemPageWindow, matchedPageSize, pagesToFill, sameCatalogWindow, sourcePageWindow } from '../catalogFill.mjs';
+import { coverCandidates } from '../coverFallback.mjs';
 import { keepRicherSnapshot, pageWindow, reuseFreshSnapshot, shownBrowseTotal } from '../browseWindow.mjs';
 import { firstPagePosters } from '../comicLayout.mjs';
 import { joinPages, loadPage } from '../catalogPages.mjs';
@@ -30,7 +31,13 @@ const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
 
 
 const EAGER_POSTERS = 12;
-const HEMA_COVER_HEDGE_MS = 4000;
+const HEMA_COVER_HEDGE_MS = 1500;
+const MATCHED_PAGE_SOURCES = new Set(['hema']);
+const PREFETCH_DELAY_MS = 400;
+const warmedCovers = new Map();
+const WARM_COVER_LIMIT = 400;
+const OPEN_ITEM_PAGES = 100000;
+const OPEN_PAGER_AHEAD = 4;
 const LIST_TIMEOUT_MS = 30_000;
 
 function snapshotKey(source, category, genre, page) {
@@ -90,6 +97,87 @@ function readPosterCapacity(reservedRows = 0, minimum = 0) {
   } catch {
     return { slots: 0, columns: 0 };
   }
+}
+
+function matchedSizeFor(source) {
+  if (!MATCHED_PAGE_SOURCES.has(source)) return 0;
+  return matchedPageSize(readPosterCapacity(HERO_RESERVED_ROWS, 0).slots) || SOURCE_PAGE_SIZE;
+}
+
+function warmCovers(items) {
+  if (typeof Image === 'undefined') return 0;
+  let started = 0;
+  for (const item of Array.isArray(items) ? items : []) {
+    const url = coverCandidates(item?.cover)[0];
+    if (!url || warmedCovers.has(url)) continue;
+    const image = new Image();
+    image.decoding = 'async';
+    const settle = () => { image.onload = null; image.onerror = null; };
+    image.onload = settle;
+    image.onerror = () => { settle(); warmedCovers.delete(url); };
+    image.src = url;
+    warmedCovers.set(url, image);
+    started += 1;
+    while (warmedCovers.size > WARM_COVER_LIMIT) warmedCovers.delete(warmedCovers.keys().next().value);
+  }
+  return started;
+}
+
+async function matchedPage({ source, category, genre, page, size, forceRefresh = false, isCurrent = () => true, memo, onPartial }) {
+  const listKey = JSON.stringify([source, category || '', genre || '']);
+  const ask = (number) => loadPage(
+    () => window.electronAPI.browseList({ source, category, genre, page: number, forceRefresh }),
+    { isCurrent },
+  );
+  let first = null;
+  let known = memo.get(listKey);
+  if (!known || Number(page) === 1) {
+    first = await ask(1);
+    if (!isCurrent()) return null;
+    if (!first?.success) throw new Error(first?.error || '来源暂时不可用');
+    const count = Array.isArray(first.results) ? first.results.length : 0;
+    known = { perPage: count, totalPages: Number(first.totalPages) || 0, hasMore: first.hasMore === true, end: known?.end || 0 };
+    if (count > 0) memo.set(listKey, known);
+  }
+  const openEnded = known.totalPages < 2;
+  const plan = openEnded && !known.hasMore ? null : itemPageWindow(page, size, known.perPage, openEnded ? OPEN_ITEM_PAGES : known.totalPages);
+  if (!plan) {
+    const only = first || await ask(page);
+    if (!isCurrent()) return null;
+    if (!only?.success) throw new Error(only?.error || '来源暂时不可用');
+    const list = (Array.isArray(only.results) ? only.results : []).slice(0, size);
+    return { results: list, meta: { total: only.total || list.length, totalPages: 0, genres: only.genres || [], hasMore: only.hasMore === true },
+      sourceUrl: only.sourceUrl, savedAt: Date.now(), pageSpan: 1, perPage: list.length, sourcePages: known.totalPages, itemSize: size,
+      unsupported: only.unsupported === true, emptyMessage: only.emptyMessage };
+  }
+  const numbers = Array.from({ length: plan.count }, (_, index) => plan.start + index);
+  const replies = new Array(numbers.length).fill(null);
+  let shown = 0;
+  const arrived = () => {
+    if (!replies[0]?.success) return null;
+    return joinPages(replies[0].results, replies.slice(1), replies[0].hasMore === true).results.slice(plan.skip, plan.skip + plan.take);
+  };
+  await Promise.all(numbers.map(async (number, index) => {
+    replies[index] = number === 1 && first ? first : await ask(number);
+    if (!isCurrent() || typeof onPartial !== 'function') return;
+    const partial = arrived();
+    if (partial && partial.length > shown) { shown = partial.length; onPartial(partial); }
+  }));
+  if (!isCurrent()) return null;
+  const head = replies[0];
+  if (!head?.success) throw new Error(head?.error || '来源暂时不可用');
+  const joined = joinPages(head.results, replies.slice(1), head.hasMore === true);
+  const results = joined.results.slice(plan.skip, plan.skip + plan.take);
+  const more = openEnded ? joined.results.length > plan.skip + plan.take || joined.hasMore : plan.page < plan.uiPages;
+  if (openEnded && !results.length && plan.page > 1) known.end = known.end ? Math.min(known.end, plan.page) : plan.page;
+  if (openEnded && results.length && known.end && known.end <= plan.page) known.end = 0;
+  return {
+    results,
+    meta: { total: 0, totalPages: openEnded ? 0 : plan.uiPages, genres: head.genres || [], hasMore: more, ...(openEnded && known.end ? { endPage: known.end } : {}) },
+    sourceUrl: head.sourceUrl, savedAt: Date.now(), pageSpan: 1, perPage: known.perPage, sourcePages: known.totalPages, itemSize: size,
+    unsupported: head.unsupported === true,
+    emptyMessage: results.length ? '' : (plan.page > 1 ? '已经是最后一页了，请回到前一页。' : head.emptyMessage),
+  };
 }
 
 function minimumPosters(source) {
@@ -160,10 +248,18 @@ function Browse({ onNavigate, active = true }) {
   const spanWidth = useRef(0);
   const reserveRowsRef = useRef(0);
   const seenSourceIds = useRef(sourceIds);
+  const perPageMemo = useRef(new Map());
+  const prefetchToken = useRef(0);
+  const prefetchTimer = useRef(null);
 
   const invalidateList = useCallback(() => {
     listRequest.current++;
     clearTimeout(listTimer.current);
+  }, []);
+
+  const stopPrefetch = useCallback(() => {
+    prefetchToken.current++;
+    clearTimeout(prefetchTimer.current);
   }, []);
 
   const cancelList = () => {
@@ -181,8 +277,9 @@ function Browse({ onNavigate, active = true }) {
   useEffect(() => () => {
     detailRequest.current++;
     invalidateList();
+    stopPrefetch();
     clearTimeout(toastTimer.current);
-  }, [invalidateList]);
+  }, [invalidateList, stopPrefetch]);
 
 
   const [downloadedMap, setDownloadedMap] = useState({});
@@ -258,6 +355,86 @@ function Browse({ onNavigate, active = true }) {
         : 1;
       const stale = !haveCards || Date.now() - cached.savedAt >= PAGE_CACHE_TTL_MS;
       const visible = haveCards && !stale;
+      const matchedSize = matchedSizeFor(source);
+      if (matchedSize > 0) {
+        const sameSize = haveCards && cached.itemSize === matchedSize;
+        const prefetchNext = (shownMeta) => {
+          const nextPage = Number(pg) + 1;
+          stopPrefetch();
+          const more = Number(shownMeta?.totalPages) > 0 ? Number(shownMeta.totalPages) >= nextPage : shownMeta?.hasMore === true;
+          if (!more) return;
+          const token = prefetchToken.current;
+          prefetchTimer.current = setTimeout(async () => {
+            const ready = readSnapshot(source, cat, gen, nextPage);
+            if (ready && ready.itemSize === matchedSize && Date.now() - ready.savedAt < PAGE_CACHE_TTL_MS) { warmCovers(ready.results); return; }
+            try {
+              const built = await matchedPage({ source, category: cat, genre: gen, page: nextPage, size: matchedSize, isCurrent: () => token === prefetchToken.current, memo: perPageMemo.current });
+              if (!built?.results?.length || token !== prefetchToken.current) return;
+              writeSnapshot(source, cat, gen, nextPage, built);
+              warmCovers(built.results);
+            } catch (_) { return; }
+          }, PREFETCH_DELAY_MS);
+        };
+        if (sameSize && !stale && !forceRefresh) {
+          setResults(cached.results);
+          setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
+          setSourceUrl(cached.sourceUrl || fallbackUrl);
+          setLoading(false);
+          prefetchNext(cached.meta);
+          return;
+        }
+        if (sameSize && !stale) {
+          setResults(cached.results);
+          setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
+          setSourceUrl(cached.sourceUrl || fallbackUrl);
+        } else {
+          setResults([]);
+          setMeta({ total: 0, totalPages: 0, genres: [] });
+          setSourceUrl(fallbackUrl);
+        }
+        const shownCache = sameSize && !stale;
+        setLoading(true);
+        listTimer.current = setTimeout(() => {
+          if (request !== listRequest.current) return;
+          if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
+          invalidateList();
+          setLoading(false);
+          setError(shownCache ? '刷新超时，仍显示上次片单；可重试或切换分类。' : '加载超时，请重试或切换分类。');
+        }, LIST_TIMEOUT_MS);
+        try {
+          const next = await matchedPage({
+            source, category: cat, genre: gen, page: pg, size: matchedSize, forceRefresh,
+            isCurrent: () => request === listRequest.current, memo: perPageMemo.current,
+            onPartial: (list) => { if (!shownCache && request === listRequest.current) setResults(list); },
+          });
+          if (!next || request !== listRequest.current) return;
+          if (!next.results.length && shownCache && next.unsupported !== true) {
+            throw new Error(next.emptyMessage || '来源这次没有返回片单，请稍后重试。');
+          }
+          rememberCatalogTitles(next.results);
+          setResults(next.results);
+          setMeta(next.meta);
+          setSourceUrl(next.sourceUrl || fallbackUrl);
+          if (next.results.length) {
+            writeSnapshot(source, cat, gen, pg, next);
+            prefetchNext(next.meta);
+          } else {
+            pageCache.delete(key);
+            setUnsupported(next.unsupported === true);
+            setError(next.emptyMessage || '这一页没有取到内容，可重新加载或换分类。');
+          }
+        } catch (e) {
+          if (request !== listRequest.current) return;
+          if (haveCards) cached.holdUntil = Date.now() + PAGE_CACHE_TTL_MS;
+          setError(`${shownCache ? '刷新失败，仍显示上次片单' : '加载失败'}：${e.message || '请重试'}`);
+        } finally {
+          if (request === listRequest.current) {
+            clearTimeout(listTimer.current);
+            setLoading(false);
+          }
+        }
+        return;
+      }
       if (haveCards) pageSpan.current = cached.pageSpan || 1;
 
       if (reuseFreshSnapshot({ haveCards, stale, forceRefresh, neededSpan, pageSpan: cached?.pageSpan || 1 })) {
@@ -370,7 +547,7 @@ function Browse({ onNavigate, active = true }) {
         }
       }
     },
-    [invalidateList, source]
+    [invalidateList, stopPrefetch, source]
   );
 
   useEffect(() => {
@@ -383,6 +560,8 @@ function Browse({ onNavigate, active = true }) {
     if (seenSourceIds.current === sourceIds) return;
     seenSourceIds.current = sourceIds;
     invalidateList();
+    stopPrefetch();
+    perPageMemo.current.clear();
     closeDetail();
     pageCache.clear();
     heroRequest.current += 1;
@@ -397,7 +576,7 @@ function Browse({ onNavigate, active = true }) {
     setHeroItems([]);
     setHeroReady(false);
     if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory('real-drama'); }
-  }, [sourceIds, source, invalidateList, closeDetail]);
+  }, [sourceIds, source, invalidateList, stopPrefetch, closeDetail]);
 
   useEffect(() => {
     if (!active || source !== 'hongguo' || category === 'comic' || upcoming || typeof window.electronAPI?.browseGenres !== 'function') return undefined;
@@ -583,6 +762,12 @@ function Browse({ onNavigate, active = true }) {
     const onResize = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
+        const matched = matchedSizeFor(source);
+        if (matched > 0) {
+          const shown = readSnapshot(source, category, genre, 1);
+          if (shown && shown.itemSize !== matched) loadList(category, genre, 1, false);
+          return;
+        }
         const perPage = Math.max(1, Math.round(results.length / pageSpan.current));
         const sourcePages = meta.totalPages ? meta.totalPages * pageSpan.current : meta.hasMore ? OPEN_SOURCE_PAGES : 1;
         const next = pagesToFill(readPosterCapacity(reserveRows, minimumPosters(source)).slots, perPage, sourcePages, maxJoinedPages(source));
@@ -611,6 +796,7 @@ function Browse({ onNavigate, active = true }) {
   const switchSource = (next) => {
     if (next === source) return;
     invalidateList();
+    stopPrefetch();
     closeDetail();
     setSource(next);
     setCategory('real-drama');
@@ -623,6 +809,7 @@ function Browse({ onNavigate, active = true }) {
   const switchCategory = (slug) => {
     if (slug === category) return;
     invalidateList();
+    stopPrefetch();
     setCategory(slug);
     setGenre('');
     setTagLabels([]);
@@ -633,13 +820,14 @@ function Browse({ onNavigate, active = true }) {
   const switchGenre = (slug) => {
     if (slug === genre) return;
     invalidateList();
+    stopPrefetch();
     setGenre(slug);
     setPage(1);
     showSnapshot(source, category, slug, 1);
   };
 
   const gotoPage = (p) => {
-    const max = meta.totalPages || (source !== 'hongguo' ? page + (meta.hasMore ? 1 : 0) : 1);
+    const max = meta.totalPages || (MATCHED_PAGE_SOURCES.has(source) ? openPagerTotal : source !== 'hongguo' ? page + (meta.hasMore ? 1 : 0) : 1);
     const next = Math.min(Math.max(1, p), max);
     if (next === page) return;
     invalidateList();
@@ -786,7 +974,10 @@ function Browse({ onNavigate, active = true }) {
     if (saved.error) showToast(saved.error, 'error');
     else setLibrary(saved);
   };
-  const totalPages = meta.totalPages || 0;
+  const matchedSource = MATCHED_PAGE_SOURCES.has(source);
+  const openPagerEnd = Number(meta.endPage) > 1 ? Number(meta.endPage) - 1 : Infinity;
+  const openPagerTotal = matchedSource && !meta.totalPages ? Math.max(page, Math.min(meta.hasMore ? page + OPEN_PAGER_AHEAD : page, openPagerEnd)) : 0;
+  const totalPages = meta.totalPages || openPagerTotal || 0;
   const pageNumbers = useMemo(() => pageWindow(totalPages, page), [totalPages, page]);
   const shownTotal = shownBrowseTotal({ source, category, genre, total: meta.total });
 
@@ -983,7 +1174,7 @@ function Browse({ onNavigate, active = true }) {
         </div>
       )}
 
-      {source !== 'hongguo' && !totalPages && (page > 1 || meta.hasMore) && <div className="browse-pager"><button className="pager-item" disabled={page <= 1 || loading} onClick={() => gotoPage(page - 1)}>上一页</button><span>第 {page} 页</span><button className="pager-item" disabled={!meta.hasMore || loading} onClick={() => gotoPage(page + 1)}>下一页</button></div>}
+      {source !== 'hongguo' && !matchedSource && !totalPages && (page > 1 || meta.hasMore) && <div className="browse-pager"><button className="pager-item" disabled={page <= 1 || loading} onClick={() => gotoPage(page - 1)}>上一页</button><span>第 {page} 页</span><button className="pager-item" disabled={!meta.hasMore || loading} onClick={() => gotoPage(page + 1)}>下一页</button></div>}
 
       </>}
 
@@ -1012,7 +1203,7 @@ function Browse({ onNavigate, active = true }) {
               <>
                 <div className="browse-drawer-body">
                   <div className="browse-drawer-info">
-                    {detail.cover && <img src={detail.cover} alt="" className="browse-drawer-cover" />}
+                    {detail.cover && <CoverImage src={detail.cover} className="browse-drawer-cover" eager />}
                     <div className="browse-drawer-meta">
                       <div className="browse-drawer-count">
                         {mediaSourceLabel(detail.series_id, mediaSources)} · 共 {detail.total} 集 · 已下载 <b>{detail.completedCount}</b> 集
