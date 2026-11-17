@@ -21,6 +21,8 @@
 
 延續到 **4.6.5 預發佈**（說明見 [4.6.5](release-4.6.5.md)），標籤是 `installer-4.6.5-traditional-pre`，由 `windows/4.6.5-pre-*` 分支觸發打包；修正紅果播放、河馬來源與海報、移除西飯。實測沒問題後再發 4.7 正式版。
 
+目前正式版是 **4.7**（說明見 [4.7](release-4.7.md)），內部版本 `4.7.0`，標籤 `v4.7`，由 `windows/4.7-release-*` 分支觸發 `publish-release-4-7`：先建草稿、上傳安裝檔、blockmap、`latest.yml` 與便攜 ZIP 四檔，再標為 Latest。更新器只讀 Latest 正式版的 `latest.yml`，刪除非 Latest 的舊發行不影響已安裝版本更新；4.0 以下正式版與所有預發佈發行已於 4.7 發佈後移除。
+
 | 平台 | 构建入口 | 发布门槛 |
 |---|---|---|
 | macOS arm64 | npm run build:mac | 对应 arm64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证 |
