@@ -118,13 +118,11 @@ function bulletsAfter(text, marker) {
   return bullets;
 }
 const noteBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.6.md'), 'utf8'), '## 更新摘要');
-const readmeBullets = bulletsAfter(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), '4.6 正式版：');
 const preJob = workflow.slice(workflow.indexOf('publish-release-4-6-pre:'), workflow.indexOf('publish-release:'));
 const preHeredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(preJob);
 assert(preHeredoc, 'The 4.6 pre-release job must build its notes from a heredoc');
 const preBody = preHeredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
 const preBullets = releaseSummary(preBody).items;
-assert.deepEqual(readmeBullets, noteBullets, 'README must copy the 4.6 summary');
 assert.deepEqual(preBullets, noteBullets, 'The 4.6 pre-release must publish the same summary');
 assert.deepEqual(noteBullets, [
   '紅果帳號登入，同步紀錄與收藏',
@@ -177,7 +175,7 @@ for (const current of ['4.6.1', '4.6.3', '4.6.5']) assert.equal(availableRelease
 assert.equal(availableRelease({ tag_name: 'v4.6.1' }, '4.6.3'), null, 'a 4.6.3 pre-release install is not offered the older 4.6.1');
 
 const pre465Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.6.5.md'), 'utf8'), '## 更新摘要');
-const pre465Job = workflow.slice(workflow.indexOf('  publish-release-4-6-5-pre:'));
+const pre465Job = workflow.slice(workflow.indexOf('  publish-release-4-6-5-pre:'), workflow.indexOf('  publish-release-4-7:'));
 const pre465Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(pre465Job);
 assert(pre465Heredoc, 'The 4.6.5 pre-release job must build its notes from a heredoc');
 const pre465Body = pre465Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
@@ -205,5 +203,51 @@ for (const current of ['4.6.0', '4.6.1', '4.6.3']) {
   assert.equal(availableRelease({ tag_name: 'installer-4.6.5-traditional-pre', prerelease: true }, current), null, 'the 4.6.5 pre-release is never offered by the updater');
 }
 assert.equal(availableRelease({ tag_name: 'v4.6.3' }, '4.6.5'), null, 'a 4.6.5 pre-release install is not offered the older 4.6.3');
-assert.equal(pkg.version, '4.6.5');
-assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.6.5-win-x64-setup'));
+
+const formal47Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.7.md'), 'utf8'), '## 更新摘要');
+const readme47 = bulletsAfter(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), '4.7 正式版：');
+assert.deepEqual(formal47Doc, [
+  '修復紅果短劇無法播放',
+  '修復河馬短劇播放來源',
+  '河馬短劇海報載入加快',
+  '優化河馬短劇標籤篩選',
+  '觀看紀錄與手機同步更快，且可批次移除紀錄',
+  '搜尋預設紅果，並優化顯示清單',
+  '精簡提示文字，修正來源選單顯示',
+], 'The 4.7 summary is exactly these seven lines, in this order');
+assert.deepEqual(readme47, formal47Doc, 'README must copy the 4.7 summary');
+assert(formal47Doc.every(item => Array.from(item).length <= 24), 'Installed 4.0 clients show 4.7 summary lines without clipping');
+const formal47Job = workflow.slice(workflow.indexOf('  publish-release-4-7:'));
+assert(workflow.indexOf('  publish-release-4-7:') > workflow.indexOf('  publish-release-4-6-5-pre:'));
+assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7-release-'\)/);
+assert.match(formal47Job, /tag=v4\.7\n/);
+assert.match(formal47Job, /--draft --title "4\.7 正式版"/);
+assert.match(formal47Job, /--prerelease=false --draft=false --latest\n/);
+assert.match(formal47Job, /\.assets \| length'\)" = "4"/);
+assert.match(formal47Job, /\)" = "\$tag"/, 'The 4.7 formal release must become the latest release');
+assert.match(formal47Job, /downloader-4\.7-win-x64-setup\.exe/);
+assert.match(formal47Job, /downloader-4\.7-win-x64\.zip/);
+assert.ok(formal47Job.includes("'^version: 4\\.7\\.0$'"));
+assert.doesNotMatch(formal47Job, /release delete|delete-asset|cleanup-tag|--clobber|--latest=false|--prerelease /);
+const formal47Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(formal47Job);
+assert(formal47Heredoc, 'The 4.7 formal release job must build its notes from a heredoc');
+const formal47Body = formal47Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+assert.deepEqual(releaseSummary(formal47Body).items, formal47Doc, 'The 4.7 formal release must publish the documented summary');
+const formal47Release = availableRelease({ tag_name: 'v4.7', body: formal47Body.replace(/\$\w+/g, 'x') }, '4.0.0');
+assert.deepEqual(formal47Release.highlights, formal47Doc);
+assert(!formal47Release.moreCount);
+assert.match(workflow, /HONGGUO_SKIP_PLAYBACK: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7-release-'\)/);
+for (const current of ['4.0.0', '4.1.0', '4.3.0', '4.5.0', '4.6.0', '4.6.1', '4.6.3', '4.6.5']) {
+  assert.equal(availableRelease({ tag_name: 'v4.7' }, current).version, '4.7', `${current} is offered 4.7`);
+  assert.equal(availableRelease({ tag_name: '4.7.0' }, current).version, '4.7', `${current} accepts the 4.7.0 manifest`);
+}
+for (const tag of ['v4.7', 'v4.7.0', '4.7', '4.7.0']) assert.equal(availableRelease({ tag_name: tag }, '4.7.0'), null, `4.7 does not reinstall itself from ${tag}`);
+for (const tag of ['v4.6.5', 'v4.6.1', 'v4.0', 'v3.4']) assert.equal(availableRelease({ tag_name: tag }, '4.7.0'), null, `4.7 is never offered the older ${tag}`);
+for (const tag of ['installer-4.7-traditional-pre', 'v4.7-beta.1', 'v4.7.0-rc.1']) assert.equal(availableRelease({ tag_name: tag }, '4.6.5'), null);
+assert.equal(availableRelease({ tag_name: 'v4.7', prerelease: true }, '4.6.5'), null);
+assert.equal(availableRelease({ tag_name: 'v4.7', draft: true }, '4.6.5'), null);
+assert.equal(availableRelease({ tag_name: 'v4.6.5' }, '4.6.5'), null);
+assert.equal(pkg.version, '4.7.0');
+assert.equal(publicVersion, '4.7');
+for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) assert(!artifact.includes('4.6'));
+assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.7-win-x64-setup'));
