@@ -18,8 +18,8 @@ const FAILURE_COOLDOWN_MS = 5000;
 const REGISTER_ATTEMPT_MS = 3500;
 
 const HONGGUO_PROFILE = Object.freeze({
-    displayName: '红果免费短剧', version: 73932, versionName: '7.3.9.32', aid: 8662, packageName: 'com.phoenix.read',
-    userAgent: 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
+    displayName: '红果免费短剧', version: 74532, versionName: '7.4.5.32', aid: 8662, packageName: 'com.phoenix.read',
+    userAgent: 'com.phoenix.read/74532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
 });
 const READER_PROFILE = Object.freeze({
     displayName: '番茄免费小说', version: 74332, versionName: '7.4.3.32', aid: 1967, packageName: 'com.dragon.read',

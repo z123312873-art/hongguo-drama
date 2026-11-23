@@ -6,6 +6,7 @@ const https = require('node:https');
 let direct = false;
 const cache = new Map();
 const OFFICIAL = /(^|\.)((?:fqnovel|snssdk|hongguoduanju|qznovelvod|fqnovelvod|douyinvod)\.com)$/i;
+const REGISTER_HOST = /^log\d*-applog[\w.-]*\.fqnovel\.com$/i;
 
 function setDirectConnect(value) {
   direct = value !== false;
@@ -46,26 +47,48 @@ function resolveThroughPublicDns(hostname) {
   });
 }
 
+function deliver(settings, callback, list) {
+  if (settings.all) callback(null, list);
+  else callback(null, list[0].address, list[0].family || 4);
+}
+
 function lookupPastFilter(hostname, options, callback) {
   if (typeof options === 'function') { callback = options; options = {}; }
   const settings = typeof options === 'number' ? { family: options } : options || {};
   dns.lookup(hostname, { all: true, family: 4 }, (error, addresses) => {
     const hijacked = Boolean(error) || !addresses?.length || addresses.every(item => filteredAddress(item.address));
     if (direct && hijacked && OFFICIAL.test(hostname)) {
-      resolveThroughPublicDns(hostname).then(list => {
-        if (settings.all) callback(null, list);
-        else callback(null, list[0].address, 4);
-      }, () => callback(error || new Error('域名解析失败')));
+      resolveThroughPublicDns(hostname).then(list => deliver(settings, callback, list), () => callback(error || new Error('域名解析失败')));
       return;
     }
     if (error) return callback(error);
-    if (settings.all) callback(null, addresses);
-    else callback(null, addresses[0].address, addresses[0].family || 4);
+    deliver(settings, callback, addresses);
   });
 }
 
-function directAxiosOptions() {
-  return direct ? { proxy: false, lookup: lookupPastFilter } : {};
+function registerSinkhole(error, addresses) {
+  return (error && error.code === 'ENOENT')
+    || (Array.isArray(addresses) && addresses.length > 0 && addresses.every(item => item.address === '0.0.0.0'));
+}
+
+function lookupRegister(hostname, options, callback) {
+  if (typeof options === 'function') { callback = options; options = {}; }
+  const settings = typeof options === 'number' ? { family: options } : options || {};
+  dns.lookup(hostname, { ...settings, all: true }, (error, addresses) => {
+    if (registerSinkhole(error, addresses) && REGISTER_HOST.test(hostname)) {
+      resolveThroughPublicDns(hostname).then(list => deliver(settings, callback, list), () => callback(error || new Error('域名解析失败')));
+      return;
+    }
+    if (error) return callback(error);
+    deliver(settings, callback, addresses);
+  });
+}
+
+function directAxiosOptions(url) {
+  if (direct) return { proxy: false, lookup: lookupPastFilter };
+  let host = '';
+  try { host = new URL(String(url || '')).hostname; } catch { host = ''; }
+  return REGISTER_HOST.test(host) ? { lookup: lookupRegister } : {};
 }
 
 module.exports = { setDirectConnect, directAxiosOptions, lookupPastFilter, filteredAddress };
