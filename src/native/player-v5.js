@@ -24,12 +24,15 @@ const SBOX = Buffer.from(
   + '1335ae0e178f3409a7803db83892dde5b9b7f0c750e24aef077badd678a09b850b84ec1597e4963cb5e675df1c0d6fb618496ecd76c35c798325590c2fb27a5e',
   'hex');
 const PLAYER_PATH = '/novel/player/multi_video_model/player/v1';
+const VIDEO_TAB_PATH = '/reading/bookapi/video_tab/multi_video_model/v1/';
 const PLAYER_HOSTS = Object.freeze([
   'api5-normal-sinfonlinea.fqnovel.com',
   'api5-normal-lf.fqnovel.com',
   'api5-normal-hl.fqnovel.com',
   'api5-normal-sinfonlineb.fqnovel.com',
 ]);
+const PLAYER_UA = 'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)';
+const VIDEO_TAB_UA = 'com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 let processNonce = '';
 let processStarted = 0;
 function processIdentity() {
@@ -373,21 +376,41 @@ function gzipJson(payload) {
   return zlib.gzipSync(Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload)));
 }
 
-function signedPlayerRequest(vid, identity, host, options = {}) {
-  const id = String(vid || '');
-  if (!/^\d{1,30}$/.test(id)) throw new Error('分集编号无效');
-  if (!identity || ![identity.device_id, identity.iid, identity.cdid]
-    .every((value) => typeof value === 'string' && value && (value === identity.cdid || (/^\d{1,30}$/.test(value) && /[1-9]/.test(value))))) {
-    throw Object.assign(new Error('播放連線尚未準備好，請稍後重試。'), { code: 'DEVICE_REGISTRATION_FAILED' });
-  }
-  const now = options.now != null ? Number(options.now) : Date.now();
-  const khronos = Math.floor(now / 1000);
-  const device = {
+function registeredPlayer(identity) {
+  return Boolean(identity) && [identity.device_id, identity.iid, identity.cdid]
+    .every((value) => typeof value === 'string' && value && (value === identity.cdid || (/^\d{1,30}$/.test(value) && /[1-9]/.test(value))));
+}
+
+function playerDevice(identity) {
+  return {
     aid: '8662', app_name: 'novelread', version_code: '74332', version_name: '7.4.3.32',
     channel: 'vivo_8662_64', device_platform: 'android', device_type: 'PGT-AN10',
     os_version: '12', update_version_code: '74332',
     iid: identity.iid, cdid: identity.cdid, device_id: identity.device_id,
   };
+}
+
+function ticketedUrl(host, apiPath, values, body, now, khronos) {
+  let requestTicket = now; let query = ''; let url = '';
+  for (let offset = 0; offset < 1024; offset += 1) {
+    requestTicket = now + offset;
+    query = pythonUrlEncode({ ...values, _rticket: String(requestTicket) });
+    url = `https://${host || PLAYER_HOSTS[0]}${apiPath}?${query}`;
+    if (branchOf(query, body, khronos) === 0) break;
+    if (offset === 1023) throw new Error('无法生成播放请求签名');
+  }
+  return { url, query, requestTicket };
+}
+
+function signedPlayerRequest(vid, identity, host, options = {}) {
+  const id = String(vid || '');
+  if (!/^\d{1,30}$/.test(id)) throw new Error('分集编号无效');
+  if (!registeredPlayer(identity)) {
+    throw Object.assign(new Error('播放連線尚未準備好，請稍後重試。'), { code: 'DEVICE_REGISTRATION_FAILED' });
+  }
+  const now = options.now != null ? Number(options.now) : Date.now();
+  const khronos = Math.floor(now / 1000);
+  const device = playerDevice(identity);
   const payload = {
     biz_param: {
       detail_page_version: 0, device_level: 3, disable_digg_stat: false, disable_video_relate_book: false,
@@ -397,34 +420,54 @@ function signedPlayerRequest(vid, identity, host, options = {}) {
     dr_scene: 'player',
   };
   const body = gzipJson(payload);
-  let requestTicket = now; let query = ''; let url = '';
-  for (let offset = 0; offset < 1024; offset += 1) {
-    requestTicket = now + offset;
-    const values = { ...device, _rticket: String(requestTicket) };
-    query = pythonUrlEncode(values);
-    url = `https://${host || PLAYER_HOSTS[0]}${PLAYER_PATH}?${query}`;
-    if (branchOf(query, body, khronos) === 0) break;
-    if (offset === 1023) throw new Error('无法生成播放请求签名');
-  }
+  const signed = ticketedUrl(host, PLAYER_PATH, device, body, now, khronos);
   const stub = crypto.createHash('md5').update(body).digest('hex').toUpperCase();
   const headers = {
-    'User-Agent': 'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)',
+    'User-Agent': PLAYER_UA,
     Accept: 'application/json',
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Encoding': 'gzip',
     'x-ss-stub': stub,
     'x-khronos': String(khronos),
     'x-helios': helios(khronos),
-    'x-medusa': medusa(url, body, khronos, device, options),
+    'x-medusa': medusa(signed.url, body, khronos, device, options),
   };
-  return { url, body, headers, khronos, ticket: requestTicket };
+  return { url: signed.url, body, headers, khronos, ticket: signed.requestTicket };
+}
+
+function signedVideoTabRequest(vid, identity, host, options = {}) {
+  const id = String(vid || '');
+  if (!/^\d{1,30}$/.test(id)) throw new Error('分集编号无效');
+  if (!registeredPlayer(identity)) {
+    throw Object.assign(new Error('播放連線尚未準備好，請稍後重試。'), { code: 'DEVICE_REGISTRATION_FAILED' });
+  }
+  const now = options.now != null ? Number(options.now) : Date.now();
+  const khronos = Math.floor(now / 1000);
+  const device = playerDevice(identity);
+  const emptyBody = Buffer.alloc(0);
+  const values = {
+    ...device,
+    video_id: id, video_id_type: '0', device_level: '1', need_all_video_definition: '1',
+    need_mp4_align: '0', use_os_player: '0', video_platform: '1024', source: '0', from_video_id: '',
+  };
+  const signed = ticketedUrl(host, VIDEO_TAB_PATH, values, emptyBody, now, khronos);
+  const headers = {
+    'User-Agent': VIDEO_TAB_UA,
+    Accept: 'application/json; charset=utf-8',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    'x-khronos': String(khronos),
+    'x-helios': helios(khronos),
+    'x-medusa': medusa(signed.url, emptyBody, khronos, device, options),
+  };
+  return { url: signed.url, headers, khronos, ticket: signed.requestTicket };
 }
 
 function modelFromResponse(response, vid) {
   const data = response?.data;
   if (!data || typeof data !== 'object') return null;
-  const entries = data['1004'] && typeof data['1004'] === 'object' ? data['1004'] : data;
-  const entry = entries?.[vid];
+  const nested = data.video_model_data && typeof data.video_model_data === 'object' ? data.video_model_data : null;
+  const mapped = data['1004'] && typeof data['1004'] === 'object' ? data['1004'] : null;
+  const entry = nested?.[vid] ?? mapped?.[vid] ?? data[vid];
   if (!entry) return null;
   return typeof entry.video_model === 'string' || (entry.video_model && typeof entry.video_model === 'object')
     ? { code: 0, data: { [vid]: { video_model: entry.video_model } } }
@@ -433,6 +476,7 @@ function modelFromResponse(response, vid) {
 
 module.exports = {
   PLAYER_PATH,
+  VIDEO_TAB_PATH,
   PLAYER_HOSTS,
   hashF13,
   medusa,
@@ -440,6 +484,7 @@ module.exports = {
   branchOf,
   gzipJson,
   signedPlayerRequest,
+  signedVideoTabRequest,
   modelFromResponse,
   AesV5,
   MAGIC,

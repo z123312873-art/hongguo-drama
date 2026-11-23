@@ -650,7 +650,8 @@ test('a newly watched drama is shown as on the phone right after its upload is l
 });
 
 test('a full read that started before the upload is confirmed cannot drop the newly watched drama', async () => {
-  const h = load();
+  const now = Date.now();
+  const h = load({ clock: () => now });
   try {
     await h.call('get-watch-history');
     addSeries(h, FOUR);

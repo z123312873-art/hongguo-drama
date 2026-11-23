@@ -227,6 +227,10 @@ const metadataDevice = { ...DEVICE, version_code: '73532', version_name: '7.3.5.
 const HONGGUO_METADATA_PATHS = ['/reading/distribution/category/landpage/v/', '/reading/bookapi/bookmall/cell/change/v',
     '/reading/user/subscribe/list/v1/', '/reading/bookapi/video_tab/multi_video_model/v1/'];
 const METADATA_HOSTS = Object.freeze(['api5-normal-hl.fqnovel.com', 'api5-normal-lf.fqnovel.com', 'api5-normal-sinfonlineb.fqnovel.com']);
+const PLAYER_EDGES = Object.freeze(playerV5.PLAYER_HOSTS.length ? [...playerV5.PLAYER_HOSTS] : [
+    'api5-normal-sinfonlinea.fqnovel.com', 'api5-normal-lf.fqnovel.com',
+    'api5-normal-hl.fqnovel.com', 'api5-normal-sinfonlineb.fqnovel.com',
+]);
 const VIDEO_TAB_PATH = '/reading/bookapi/video_tab/multi_video_model/v1/';
 let bytevc2Ready = false;
 
@@ -404,17 +408,35 @@ async function readVideoTab(vid, deadline, signal, identity) {
         video_id: vid, video_id_type: '0', device_level: '1', need_all_video_definition: '1',
         need_mp4_align: '0', use_os_player: '0', video_platform: '1024', source: '0', from_video_id: '',
     };
-    for (const host of METADATA_HOSTS) {
-        try {
-            const signed = signedMetadataRequest(VIDEO_TAB_PATH, values, null, { host, identity });
-            const json = await requestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline, signal);
-            if (Number(json?.code ?? json?.Code ?? 0) !== 0) continue;
-            const raw = json?.data?.video_model_data?.[vid]?.video_model;
-            if (typeof raw !== 'string' && (!raw || typeof raw !== 'object')) continue;
-            return { code: 0, data: { [vid]: { video_model: typeof raw === 'string' ? raw : JSON.stringify(raw) } } };
-        } catch {                                                                   }
-    }
-    return null;
+    const hosts = PLAYER_EDGES;
+    const n = hosts.length;
+    const start = n ? ((preferredV5Host % n) + n) % n : 0;
+    const walk = async (make) => {
+        for (let step = 0; step < n; step++) {
+            if (signal.aborted) throw Object.assign(new Error('App 片源请求超时'), { code: 'ETIMEDOUT' });
+            if (Date.now() >= deadline) return null;
+            const index = (start + step) % n;
+            try {
+                const json = await make(hosts[index]);
+                if (Number(json?.code ?? json?.Code ?? 0) !== 0) continue;
+                const modeled = playerV5.modelFromResponse(json, vid);
+                if (!modeled) continue;
+                preferredV5Host = index;
+                return modeled;
+            } catch (error) {
+                if (signal.aborted) throw error;
+                if (error?.code === 'DEVICE_REGISTRATION_FAILED') return null;
+            }
+        }
+        return null;
+    };
+    return await walk(async host => {
+        const signed = playerV5.signedVideoTabRequest(vid, identity, host);
+        return requestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline, signal);
+    }) || await walk(async host => {
+        const signed = signedMetadataRequest(VIDEO_TAB_PATH, values, null, { host, identity });
+        return requestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline, signal);
+    });
 }
 
 async function fetchAppPlayUrl(vid, options = {}) {

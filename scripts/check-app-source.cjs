@@ -141,12 +141,15 @@ const checks = [
         assert.ok(/^100000000000000[123]$/.test(id));
         assert.equal(query.get('iid'), id.replace(/^1/, '2'));
         assert.equal(query.get('video_id'), '11');
-        assert.equal(query.get('version_code'), '73532');
+        assert.equal(query.get('from_video_id'), '');
+        assert.equal(query.get('version_code'), '74332');
         assert.equal(config.headers['Cookie'], undefined);
         assert.equal(config.headers['X-Tt-Token'], undefined);
         assert.equal(query.get('user_id'), null);
-        for (const name of ['x-gorgon', 'x-medusa', 'x-helios']) assert.equal(config.headers[name], undefined);
-        for (const name of ['x-argus', 'x-ladon', 'x-khronos']) assert.ok(config.headers[name]);
+        for (const name of ['x-gorgon', 'x-argus', 'x-ladon', 'x-ss-stub', 'Content-Type', 'Content-Encoding']) {
+          assert.equal(config.headers[name], undefined, name);
+        }
+        for (const name of ['x-medusa', 'x-helios', 'x-khronos']) assert.ok(config.headers[name], name);
         ids.push(id);
         return { status: 200, headers: {}, data: JSON.stringify({ code: 0, data: { video_model_data: { '11': { video_model: JSON.stringify({ video_list: [{ main_url: media, codec_type: 'h264', vwidth: 1080, vheight: 1920 }] }) } } } }) };
       }, { videoTab: true });
@@ -215,33 +218,6 @@ const checks = [
       { main_url: mediaUrl('high'), video_meta: { codec_type: 'h264', definition: '720p', vwidth: 1920, vheight: 1080 } },
     ] }));
     assert.equal(result[0], mediaUrl('high'));
-  }],
-  ['forced lookup bypasses settled play URL cache', async () => {
-    const f = nativeFixture();
-    const first = f.fetchPlayUrlSingle('11', '1'); await turn(); f.finish(0, 'old'); await first;
-    const forced = f.fetchPlayUrlSingle('11', '1', { force: true }); await turn();
-    assert.equal(f.pending.length, 2, 'force must fetch a new address');
-    f.finish(1, 'new'); await forced;
-    assert.equal((await f.fetchPlayUrlSingle('11', '1')).url, 'https://media.example/new.mp4');
-  }],
-  ['old in-flight lookup cannot overwrite forced cache or remove forced pending', async () => {
-    for (const oldFinishesFirst of [true, false]) {
-      const f = nativeFixture();
-      const old = f.fetchPlayUrlSingle('11', '1'); await turn();
-      const forced = f.fetchPlayUrlSingle('11', '1', { force: true }); await turn();
-      assert.equal(f.pending.length, 2, 'force must bypass old in-flight request');
-      if (oldFinishesFirst) {
-        f.finish(0, 'old'); await old;
-        const joined = f.fetchPlayUrlSingle('11', '1'); await turn();
-        assert.equal(f.pending.length, 2, 'old completion must preserve forced request');
-        f.finish(1, 'new'); await forced;
-        assert.equal((await joined).url, 'https://media.example/new.mp4');
-      } else {
-        f.finish(1, 'new'); await forced;
-        f.finish(0, 'old'); await old;
-      }
-      assert.equal((await f.fetchPlayUrlSingle('11', '1')).url, 'https://media.example/new.mp4');
-    }
   }],
   ['pure JS SM3 vectors', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'sm3.js')), 'pure JS SM3 missing');
@@ -673,6 +649,89 @@ const checks = [
       await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
     }
   }],
+  ['empty v5 video-tab GETs visit every player host then Argus, and never mix episodes', async () => {
+    const device = require(path.join(nativeDir, 'playback-device'));
+    device.resetPlaybackDevice();
+    const hosts = realPlayer.PLAYER_HOSTS;
+    const tabModel = (vid, name) => ({ code: 0, data: { video_model_data: { [vid]: { video_model: JSON.stringify({ video_list: [
+      { main_url: mediaUrl(name), codec_type: 'h264', vwidth: 720, vheight: 1280 },
+    ] }) } } } });
+    const run = (answer) => {
+      const calls = [];
+      let registered = 0;
+      const app = loadApp(async config => {
+        calls.push(config);
+        if (String(config.url).includes('device_register')) {
+          registered += 1;
+          return { status: 200, headers: {}, data: JSON.stringify({ device_id_str: String(7000000000000000 + registered), install_id_str: String(8000000000000000 + registered), code: 0 }) };
+        }
+        const url = new URL(config.url);
+        if (url.pathname === realPlayer.PLAYER_PATH) return answer('v5', url.hostname, config);
+        if (url.pathname.includes('video_tab')) {
+          assert.equal(config.method, 'GET');
+          assert.equal(config.data, undefined);
+          return answer(config.headers['x-medusa'] ? 'v5tab' : 'argus', url.hostname, config);
+        }
+        return answer('legacy', url.hostname, config);
+      }, { videoTab: true, player: realPlayer });
+      const of = kind => calls.filter(call => {
+        const url = new URL(call.url);
+        if (kind === 'v5') return url.pathname === realPlayer.PLAYER_PATH;
+        if (kind === 'v5tab') return url.pathname.includes('video_tab') && call.headers['x-medusa'];
+        if (kind === 'argus') return url.pathname.includes('video_tab') && call.headers['x-argus'];
+        return !String(call.url).includes('device_register') && url.pathname !== realPlayer.PLAYER_PATH && !url.pathname.includes('video_tab');
+      });
+      return { app, of, registered: () => registered };
+    };
+    const reply = data => ({ status: 200, headers: {}, data: typeof data === 'string' ? data : JSON.stringify(data) });
+    try {
+      const recovered = run(kind => kind === 'v5' ? reply('') : kind === 'v5tab' ? reply(tabModel('11', 'v5tab')) : reply(tabModel('11', 'argus')));
+      assert.equal((await recovered.app.fetchAppPlayUrl('11')).url, mediaUrl('v5tab'));
+      assert.equal(new Set(recovered.of('v5').map(call => new URL(call.url).hostname)).size, hosts.length);
+      assert.deepEqual(recovered.of('v5tab').map(call => new URL(call.url).hostname), [hosts[0]]);
+      assert.equal(recovered.of('argus').length, 0);
+      assert.equal(recovered.of('legacy').length, 0);
+
+      device.resetPlaybackDevice();
+      const argus = run((kind, host, config) => {
+        if (kind === 'v5tab') {
+          const url = new URL(config.url);
+          assert.equal(url.searchParams.get('version_code'), '74332');
+          assert.equal(url.searchParams.get('from_video_id'), '');
+          assert.equal(url.searchParams.get('video_id'), '11');
+          for (const name of ['x-ss-stub', 'Content-Type', 'Content-Encoding', 'Cookie', 'x-argus']) {
+            assert.equal(config.headers[name], undefined, name);
+          }
+          return reply('');
+        }
+        if (kind === 'argus') {
+          const url = new URL(config.url);
+          assert.equal(url.searchParams.get('version_code'), '73532');
+          assert.ok(config.headers['x-argus']);
+          assert.equal(config.headers['x-medusa'], undefined);
+          return host === hosts[hosts.length - 1] ? reply(tabModel('11', 'argus')) : reply('');
+        }
+        if (kind === 'v5') return reply('');
+        return reply(tabModel('11', 'legacy'));
+      });
+      assert.equal((await argus.app.fetchAppPlayUrl('11')).url, mediaUrl('argus'));
+      assert.deepEqual(argus.of('v5tab').map(call => new URL(call.url).hostname), hosts);
+      assert.deepEqual(argus.of('argus').map(call => new URL(call.url).hostname), hosts);
+      assert.equal(argus.of('legacy').length, 0);
+
+      device.resetPlaybackDevice();
+      const mixed = run(kind => {
+        if (kind === 'v5') return reply('');
+        if (kind === 'v5tab') return reply(tabModel('12', 'wrong'));
+        return reply(tabModel('11', 'kept'));
+      });
+      assert.equal((await mixed.app.fetchAppPlayUrl('11')).url, mediaUrl('kept'), 'a sibling episode is never played');
+      assert.ok(mixed.of('argus').length >= 1);
+    } finally {
+      device.resetPlaybackDevice();
+      await device.getPlaybackDevice(async () => ({ code: 1 })).catch(() => {});
+    }
+  }],
   ['newer player signing matches its reference vectors and request shape', async () => {
     const f13 = require(path.join(nativeDir, 'fixtures/signing-v5-f13.json'));
     for (const vector of f13) {
@@ -694,7 +753,25 @@ const checks = [
     assert.throws(() => realPlayer.signedPlayerRequest('11', { device_id: '0', iid: '0', cdid: 'x' }), error => error.code === 'DEVICE_REGISTRATION_FAILED');
     assert.equal(realPlayer.modelFromResponse({ data: { '1004': { '11': { video_model: '{}' } } } }, '11').data['11'].video_model, '{}');
     assert.equal(realPlayer.modelFromResponse({ data: { '1004': { '12': { video_model: '{}' } } } }, '11'), null);
+    assert.equal(realPlayer.modelFromResponse({ data: { video_model_data: { '11': { video_model: '{}' } } } }, '11').data['11'].video_model, '{}');
+    assert.equal(realPlayer.modelFromResponse({ data: { video_model_data: { '12': { video_model: '{}' } } } }, '11'), null);
+    assert.equal(realPlayer.modelFromResponse({ data: { '11': { video_model: '{"flat":1}' } } }, '11').data['11'].video_model, '{"flat":1}');
     assert.equal(realPlayer.modelFromResponse({ data: null }, '11'), null);
+    const tab = realPlayer.signedVideoTabRequest('7600000000000000001', identity, realPlayer.PLAYER_HOSTS[2], { now: 1800000000123 });
+    const tabUrl = new URL(tab.url);
+    assert.equal(tabUrl.hostname, realPlayer.PLAYER_HOSTS[2]);
+    assert.equal(tabUrl.pathname, realPlayer.VIDEO_TAB_PATH);
+    assert.equal(tabUrl.searchParams.get('video_id'), '7600000000000000001');
+    assert.equal(tabUrl.searchParams.get('from_video_id'), '');
+    assert.equal(tabUrl.searchParams.get('version_code'), '74332');
+    assert.equal(realPlayer.branchOf(tabUrl.search.slice(1), Buffer.alloc(0), tab.khronos), 0);
+    assert.notEqual(realPlayer.branchOf(tabUrl.search.slice(1), null, tab.khronos), 0);
+    for (const name of ['x-ss-stub', 'Content-Type', 'Content-Encoding', 'Cookie', 'x-argus', 'x-gorgon']) {
+      assert.equal(tab.headers[name], undefined, name);
+    }
+    for (const name of ['x-medusa', 'x-helios', 'x-khronos']) assert.ok(tab.headers[name], name);
+    assert.throws(() => realPlayer.signedVideoTabRequest('../1', identity));
+    assert.throws(() => realPlayer.signedVideoTabRequest('11', { device_id: '0', iid: '0', cdid: 'x' }), error => error.code === 'DEVICE_REGISTRATION_FAILED');
   }],
   ['invalid input and invalid key rejected', async () => {
     assert.ok(fs.existsSync(path.join(nativeDir, 'app-source.js')), 'app source missing');
@@ -702,6 +779,33 @@ const checks = [
     await assert.rejects(fetch('../11'));
     assert.equal(calls.length, 0);
     await assert.rejects(fixture({ malformedKey: true }).fetch('11'));
+  }],
+  ['forced lookup bypasses settled play URL cache', async () => {
+    const f = nativeFixture();
+    const first = f.fetchPlayUrlSingle('11', '1'); await turn(); f.finish(0, 'old'); await first;
+    const forced = f.fetchPlayUrlSingle('11', '1', { force: true }); await turn();
+    assert.equal(f.pending.length, 2, 'force must fetch a new address');
+    f.finish(1, 'new'); await forced;
+    assert.equal((await f.fetchPlayUrlSingle('11', '1')).url, 'https://media.example/new.mp4');
+  }],
+  ['old in-flight lookup cannot overwrite forced cache or remove forced pending', async () => {
+    for (const oldFinishesFirst of [true, false]) {
+      const f = nativeFixture();
+      const old = f.fetchPlayUrlSingle('11', '1'); await turn();
+      const forced = f.fetchPlayUrlSingle('11', '1', { force: true }); await turn();
+      assert.equal(f.pending.length, 2, 'force must bypass old in-flight request');
+      if (oldFinishesFirst) {
+        f.finish(0, 'old'); await old;
+        const joined = f.fetchPlayUrlSingle('11', '1'); await turn();
+        assert.equal(f.pending.length, 2, 'old completion must preserve forced request');
+        f.finish(1, 'new'); await forced;
+        assert.equal((await joined).url, 'https://media.example/new.mp4');
+      } else {
+        f.finish(1, 'new'); await forced;
+        f.finish(0, 'old'); await old;
+      }
+      assert.equal((await f.fetchPlayUrlSingle('11', '1')).url, 'https://media.example/new.mp4');
+    }
   }],
 ];
 (async () => {

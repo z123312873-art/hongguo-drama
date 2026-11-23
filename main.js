@@ -3599,14 +3599,15 @@ let cloudHistory = { userId: '', rows: null, fetchedAt: 0, error: '', pending: n
 const cloudUploads = new Map();
 const cloudConfirmed = new Map();
 const CLOUD_CONFIRMED_KEEP_MS = 10 * 60 * 1000;
+let cloudConfirmSeq = 0;
 
-function withConfirmedRows(rows, userId, startedAt) {
+function withConfirmedRows(rows, userId, seenSeq) {
   const now = Date.now();
   const listed = new Set(rows.map(row => row.series_id));
   const extra = [];
   for (const [sid, item] of cloudConfirmed) {
     if (now - item.at > CLOUD_CONFIRMED_KEEP_MS) { cloudConfirmed.delete(sid); continue; }
-    if (item.userId === userId && item.at >= startedAt && !listed.has(sid)) extra.push(item.row);
+    if (item.userId === userId && item.seq > seenSeq && !listed.has(sid)) extra.push(item.row);
   }
   return extra.length ? [...extra, ...rows] : rows;
 }
@@ -3624,10 +3625,10 @@ async function loadCloudHistory(force = false) {
   if (cloudHistory.pending) return cloudHistory.pending;
   const state = cloudHistory;
   let summary;
-  const startedAt = Date.now();
+  const seenSeq = cloudConfirmSeq;
   state.pending = cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }).then(fetched => {
     if (cloudHistory !== state) return cloudHistory;
-    const rows = withConfirmedRows(fetched, userId, startedAt);
+    const rows = withConfirmedRows(fetched, userId, seenSeq);
     Object.assign(state, { rows, reportedTotal: summary?.reportedTotal ?? null, fetchedAt: Date.now(), error: '' });
     persistAccountSession();
     return state;
@@ -3679,8 +3680,8 @@ async function syncCloudHistory(force = false) {
     if (sent.length) {
       try {
         let summary;
-        const startedAt = Date.now();
-        const rows = withConfirmedRows(await cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }), userId, startedAt);
+        const seenSeq = cloudConfirmSeq;
+        const rows = withConfirmedRows(await cloudHistoryApi.fetchHistory(cloudRequest(), { onSummary: value => { summary = value; } }), userId, seenSeq);
         state.reportedTotal = summary?.reportedTotal ?? null;
         if (cloudHistory === state) Object.assign(state, { rows, fetchedAt: Date.now() });
         const listed = new Set(rows.map(row => row.series_id));
@@ -3770,7 +3771,7 @@ async function confirmCloudUpload(sid, userId) {
     if (!row || syncedAccountId() !== userId) return false;
     const map = store.getPlayback();
     if (!map[sid]) return false;
-    cloudConfirmed.set(sid, { userId, row, at: Date.now() });
+    cloudConfirmed.set(sid, { userId, row, at: Date.now(), seq: ++cloudConfirmSeq });
     if (map[sid].cloudSynced !== userId) {
       map[sid] = { ...map[sid], cloudSynced: userId };
       store.savePlayback(map);
