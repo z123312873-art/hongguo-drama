@@ -31,8 +31,8 @@ const PLAYER_HOSTS = Object.freeze([
   'api5-normal-hl.fqnovel.com',
   'api5-normal-sinfonlineb.fqnovel.com',
 ]);
-const PLAYER_UA = 'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)';
-const VIDEO_TAB_UA = 'com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
+const PLAYER_UA = 'com.phoenix.read/74532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3;tt-ok/3.12.13.20)';
+const VIDEO_TAB_UA = 'com.phoenix.read/74532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 let processNonce = '';
 let processStarted = 0;
 function processIdentity() {
@@ -318,22 +318,22 @@ function helios(khronos) {
   return Buffer.concat([le32(random), ...output]).toString('base64');
 }
 
-function medusa(url, body, khronos, device, options = {}) {
+function medusaMaterial(url, body, khronos, device, options = {}) {
   const querySm3 = sm3(Buffer.from(url.split('?')[1] || ''));
   const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16);
   const f13 = hashF13(querySm3, bodyMd5, khronos);
   const flags = Buffer.alloc(8);
-  const version = device.version_name || '7.4.3.32';
-  const channel = device.channel || 'vivo_8662_64';
+  const version = device.version_name || '7.4.5.32';
+  const channel = device.channel || 'update_64';
   const nonce = options.processNonce || processIdentity().nonce;
   const started = options.processStarted || processIdentity().started;
   const rand = () => options.rand ? options.rand() : Math.floor(Math.random() * 0x100000000);
   const deviceInfo = proto([
     [1, 1, 'sint'], [2, 2, 'sint'], [3, '8662'], [4, device.device_id],
     [5, nonce], [6, '!noperm!'], [12, 'Asia/Shanghai,8'], [13, 'zh_CN'],
-    [22, device.os_version || '12'], [25, started, 'sint'],
-    [30, device.device_type || 'PGT-AN10'], [31, 'HONOR'],
-    [32, device.device_type || 'PGT-AN10'], [34, 'HONOR'],
+    [22, device.os_version || '16'], [25, started, 'sint'],
+    [30, device.device_type || '25053RT47C'], [31, 'HONOR'],
+    [32, device.device_type || '25053RT47C'], [34, 'HONOR'],
   ]);
   const env = proto([
     [6, 'v04.10.03.04-bugfix'], [8, channel], [12, deviceInfo, 'message'], [14, version],
@@ -344,9 +344,15 @@ function medusa(url, body, khronos, device, options = {}) {
     [7, version], [8, 'v04.10.03-ml-android'], [9, 0x040a0300, 'sint'],
     [10, flags, 'bytes'], [12, khronos, 'sint'], [13, f13, 'bytes'], [14, querySm3.subarray(0, 6), 'bytes'],
     [15, proto([[1, 1, 'sint'], [2, 1, 'sint'], [3, 1, 'sint'], [5, 1, 'sint']]), 'message'],
-    [17, khronos, 'sint'], [20, 'none'], [21, 377, 'sint'], [23, env, 'message'],
+    [17, khronos, 'sint'], [20, 'none'], [21, 312, 'sint'], [23, env, 'message'],
     [24, '{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}'],
   ]);
+  return { message, querySm3, f13, flags };
+}
+
+function medusa(url, body, khronos, device, options = {}) {
+  const { message, querySm3, f13, flags } = medusaMaterial(url, body, khronos, device, options);
+  const rand = () => options.rand ? options.rand() : Math.floor(Math.random() * 0x100000000);
   const messageRand = rand();
   const hash = sm3(Buffer.concat([SIGN_KEY, le32(messageRand), SIGN_KEY]));
   const high = (messageRand >>> 16) & 255;
@@ -383,9 +389,9 @@ function registeredPlayer(identity) {
 
 function playerDevice(identity) {
   return {
-    aid: '8662', app_name: 'novelread', version_code: '74332', version_name: '7.4.3.32',
-    channel: 'vivo_8662_64', device_platform: 'android', device_type: 'PGT-AN10',
-    os_version: '12', update_version_code: '74332',
+    aid: '8662', app_name: 'novelread', version_code: '74532', version_name: '7.4.5.32',
+    manifest_version_code: '74532', channel: 'update_64', device_platform: 'android',
+    device_type: '25053RT47C', os_version: '16', update_version_code: '74532',
     iid: identity.iid, cdid: identity.cdid, device_id: identity.device_id,
   };
 }
@@ -480,6 +486,7 @@ module.exports = {
   PLAYER_HOSTS,
   hashF13,
   medusa,
+  medusaMaterial,
   helios,
   branchOf,
   gzipJson,

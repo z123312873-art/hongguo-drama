@@ -14,6 +14,16 @@ const vectors = [
 const keyHex = '0123456789abcdef0123456789abcdef';
 const realPlayer = require(path.join(nativeDir, 'player-v5'));
 const legacyOnlyPlayer = { ...realPlayer, PLAYER_HOSTS: [] };
+function assertPlaybackWire(url) {
+  const query = (url instanceof URL ? url : new URL(url)).searchParams;
+  assert.equal(query.get('version_code'), '74532');
+  assert.equal(query.get('version_name'), '7.4.5.32');
+  assert.equal(query.get('update_version_code'), '74532');
+  assert.equal(query.get('manifest_version_code'), '74532');
+  assert.equal(query.get('channel'), 'update_64');
+  assert.equal(query.get('device_type'), '25053RT47C');
+  assert.equal(query.get('os_version'), '16');
+}
 function encodedKey() {
   const plain = Buffer.from(`0${keyHex}`);
   const raw = Buffer.alloc(34);
@@ -142,7 +152,7 @@ const checks = [
         assert.equal(query.get('iid'), id.replace(/^1/, '2'));
         assert.equal(query.get('video_id'), '11');
         assert.equal(query.get('from_video_id'), '');
-        assert.equal(query.get('version_code'), '74332');
+        assertPlaybackWire(config.url);
         assert.equal(config.headers['Cookie'], undefined);
         assert.equal(config.headers['X-Tt-Token'], undefined);
         assert.equal(query.get('user_id'), null);
@@ -585,6 +595,7 @@ const checks = [
           assert.deepEqual(body.mixed_video_id_map, { '1004': ['11'] });
           assert.equal(String(Number(url.searchParams.get('_rticket'))).length, 13);
           assert.equal(config.headers['x-khronos'], String(Math.floor(Number(url.searchParams.get('_rticket')) / 1000) ));
+          assertPlaybackWire(url);
           return answer('v5', url.hostname);
         }
         return answer(url.pathname.includes('video_tab') ? 'tab' : 'legacy', url.hostname);
@@ -696,7 +707,7 @@ const checks = [
       const argus = run((kind, host, config) => {
         if (kind === 'v5tab') {
           const url = new URL(config.url);
-          assert.equal(url.searchParams.get('version_code'), '74332');
+          assertPlaybackWire(url);
           assert.equal(url.searchParams.get('from_video_id'), '');
           assert.equal(url.searchParams.get('video_id'), '11');
           for (const name of ['x-ss-stub', 'Content-Type', 'Content-Encoding', 'Cookie', 'x-argus']) {
@@ -763,7 +774,8 @@ const checks = [
     assert.equal(tabUrl.pathname, realPlayer.VIDEO_TAB_PATH);
     assert.equal(tabUrl.searchParams.get('video_id'), '7600000000000000001');
     assert.equal(tabUrl.searchParams.get('from_video_id'), '');
-    assert.equal(tabUrl.searchParams.get('version_code'), '74332');
+    assertPlaybackWire(url);
+    assertPlaybackWire(tabUrl);
     assert.equal(realPlayer.branchOf(tabUrl.search.slice(1), Buffer.alloc(0), tab.khronos), 0);
     assert.notEqual(realPlayer.branchOf(tabUrl.search.slice(1), null, tab.khronos), 0);
     for (const name of ['x-ss-stub', 'Content-Type', 'Content-Encoding', 'Cookie', 'x-argus', 'x-gorgon']) {

@@ -77,7 +77,7 @@ test('binary request decrypts to authenticated gzip JSON with the fixed anonymou
     assert.equal(options.headers['x-ss-dp'], '8662');
     assert.equal(options.headers['x-neptune'], '-8|50:51:59:30:40:47:49:39');
     assert.equal(options.headers['x-ss-stub'], crypto.createHash('md5').update(options.data).digest('hex').toUpperCase());
-    assert.equal(options.headers['User-Agent'], 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)');
+    assert.equal(options.headers['User-Agent'], 'com.phoenix.read/74532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)');
     for (const name of Object.keys(options.headers)) {
         assert.doesNotMatch(name, /^(?:cookie|authorization|x-gorgon|x-khronos|x-ladon|x-argus|x-helios|x-medusa)$/i);
     }
@@ -109,9 +109,12 @@ test('binary request decrypts to authenticated gzip JSON with the fixed anonymou
     assert.equal(header.rom, 'eng.root.20231116.160340');
     assert.equal(header.rom_version, 'W528JS release-keys');
     assert.equal(header.resolution, '1280x2772');
-    assert.equal(header.version_code, 73932);
-    assert.equal(header.manifest_version_code, 73932);
-    assert.equal(header.update_version_code, 73932);
+    assert.equal(header.version_code, 74532);
+    assert.equal(header.manifest_version_code, 74532);
+    assert.equal(header.update_version_code, 74532);
+    assert.equal(header.app_version, '7.4.5.32');
+    assert.equal(header.app_version_minor, '7.4.5.32');
+    assert.equal(header.channel, 'update_64');
     assert.equal(header.cdid, identity.cdid);
     assert.deepEqual(header.custom, { account_region_src: 'fallback', account_region: 'cn', host_bit: 64, dragon_device_type: 'phone' });
     assert.equal(header.apk_first_install_time, payload._gen_time);
