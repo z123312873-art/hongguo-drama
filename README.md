@@ -7,7 +7,7 @@
 <p align="center">在電腦上找劇、接著看、下載與合併。介面預設繁體，Windows 安裝檔由這個倉庫自己發行。</p>
 
 <p align="center">
-  <img alt="目前正式版 4.7" src="https://img.shields.io/badge/正式版-4.7-8b3a3a?style=flat-square">
+  <img alt="目前正式版 4.8" src="https://img.shields.io/badge/正式版-4.8-8b3a3a?style=flat-square">
   <img alt="說明與介面使用繁體中文" src="https://img.shields.io/badge/文案-繁體中文-555555?style=flat-square">
   <img alt="Windows x64 安裝版" src="https://img.shields.io/badge/Windows-x64-55746b?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0 授權" src="https://img.shields.io/badge/license-GPL--3.0-555555?style=flat-square"></a>
@@ -26,22 +26,27 @@
 
 只發行 **Windows x64** 安裝檔。媒體工具已內建，不必另外安裝 Node.js 或 FFmpeg。
 
-**[下載 4.7 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.7/hongguo-downloader-4.7-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.7) 附 SHA256 與大小。
+**[下載 4.8 正式版（Windows x64）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.8/hongguo-downloader-4.8-win-x64-setup.exe)** — [發行頁](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.8) 附 SHA256 與大小。
 
-也可使用 [4.7 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.7/hongguo-downloader-4.7-win-x64.zip)。
+也可使用 [4.8 便攜版 ZIP（解壓即用）](https://github.com/z123312873-art/hongguo-drama/releases/download/v4.8/hongguo-downloader-4.8-win-x64.zip)。
 
 - 依畫面安裝。預設目錄是 `C:\hongguo`，安裝時可以改。
-- 安裝檔未簽章。請從 [4.7 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.7) 下載，並對照該頁的 SHA256。
+- 安裝檔未簽章。請從 [4.8 正式版](https://github.com/z123312873-art/hongguo-drama/releases/tag/v4.8) 下載，並對照該頁的 SHA256。
 - 先退出正在執行的舊程式再安裝。設定、觀看紀錄與已下載的影片會留在原來的資料目錄。
 - 桌面與開始功能表的捷徑名稱是「紅果短劇」。
-- 已安裝的 4.0 以上正式版與 4.6.3、4.6.5 預發佈會在程式裡看到更新摘要。下載與安裝都要自己確認。
-- 紅果在線若出現「暫時無法取得本集片源」，可改裝 [4.7.5 預發佈](https://github.com/z123312873-art/hongguo-drama/releases/tag/installer-4.7.5-traditional-pre)。它不會取代 4.7 正式版，應用內更新也不會自動安裝。
+- 已安裝的 4.7、4.7.5 與 4.0 以上正式版會在程式裡看到更新摘要。下載與安裝都要自己確認。
 
-自動更新只檢查本倉庫的正式版，不檢查預發布，也不檢查原作者倉庫。
+自動更新先讀 [公開指向](https://raw.githubusercontent.com/z123312873-art/hongguo-drama/main/update-feed.json)，再檢查指向倉庫的正式版。指向讀不到時，改查這個倉庫的正式版。不檢查預發布。
 
 ## 這個版本
 
-目前為 4.7 正式版，內部版本為 4.7.0，詳見 [4.7 更新說明](docs/release-4.7.md)。4.0 以上正式版與 4.6.3、4.6.5 預發佈可更新至此版；舊版說明留在 [4.6 更新說明](docs/release-4.6.md) 與 [4.5 更新說明](docs/release-4.5.md)。
+目前為 4.8 正式版，內部版本為 4.8.0，詳見 [4.8 更新說明](docs/release-4.8.md)。4.7、4.7.5 與 4.0 以上正式版可更新至此版。
+
+4.8 正式版：
+
+- 修復紅果在線播放
+- 優化在線播放取源
+- 河馬短劇在線優化並加快拉取
 
 4.7 正式版：
 

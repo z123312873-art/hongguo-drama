@@ -1,5 +1,9 @@
 const remembered = new Map();
-const LIMIT = 4;
+const LIMIT = 6;
+const MIRROR_ORIGIN = {
+  'https://seoali.zqkanshu.com': 'https://kyyresali.kkyd.cn',
+  'https://kyyresali.kkyd.cn': 'https://seoali.zqkanshu.com',
+};
 
 function originOf(value) {
   try {
@@ -34,6 +38,11 @@ function remember(listed, sessionLike) {
     if (!remembered.has(origin)) fresh.push(origin);
     remembered.delete(origin);
     remembered.set(origin, Date.now());
+    const mirror = MIRROR_ORIGIN[origin];
+    if (mirror && !remembered.has(mirror)) {
+      fresh.push(mirror);
+      remembered.set(mirror, Date.now());
+    }
   }
   while (remembered.size > LIMIT) remembered.delete(remembered.keys().next().value);
   return preconnect(fresh, sessionLike);

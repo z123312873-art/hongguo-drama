@@ -9,6 +9,14 @@ const COVER_PROCESS = 'image/resize,w_320/quality,q_80';
 const LOCKED_HINT = '本集为河马付费章节，免费试看集以外需在河马官方 App 内解锁后才能播放';
 let genreCache;
 let directoryPending;
+const episodeMemo = new Map();
+const episodeInflight = new Map();
+const EPISODE_MEMO_MS = 120000;
+
+function clearEpisodeCache() {
+  episodeMemo.clear();
+  episodeInflight.clear();
+}
 
 const GENRE_GROUPS = [
   { label: '古装权谋', match: /女帝|宫女|古装|权谋|王妃|皇后|庶女|公主|毒士|嫡女|古代言情|修仙|玄幻仙侠|古穿今|今古连通/ },
@@ -208,7 +216,7 @@ async function detailFromWeb(seriesId) {
   return result;
 }
 
-async function fetchEpisodeList(seriesId) {
+async function loadEpisodeList(seriesId) {
   const { bookId } = parseId(seriesId);
   let appData;
   try { appData = await hemaApp.fetchDetail(bookId); } catch (_) { appData = null; }
@@ -273,6 +281,21 @@ async function fetchPlayUrlSingle(vid, sid, options = {}) {
   } catch (error) { return { url: null, spadeA: null, codec: null, source: 'hema', error: error.message }; }
 }
 
+async function fetchEpisodeList(seriesId) {
+  const key = String(seriesId || '');
+  const saved = episodeMemo.get(key);
+  if (saved && saved.expires > Date.now()) return saved.value;
+  const pending = episodeInflight.get(key);
+  if (pending) return pending;
+  const job = loadEpisodeList(seriesId).finally(() => {
+    if (episodeInflight.get(key) === job) episodeInflight.delete(key);
+  });
+  episodeInflight.set(key, job);
+  const value = await job;
+  episodeMemo.set(key, { value, expires: Date.now() + EPISODE_MEMO_MS });
+  return value;
+}
+
 const browseList = listCache.wrap('hema', fetchList);
 
-module.exports = { browseList, search, fetchEpisodeList, fetchPlayUrlSingle, composeGenres, optimizeCover };
+module.exports = { browseList, search, fetchEpisodeList, fetchPlayUrlSingle, composeGenres, optimizeCover, clearEpisodeCache };

@@ -1,12 +1,39 @@
 
 const UPDATE_OWNER = 'z123312873-art';
 const UPDATE_REPO = 'hongguo-drama';
+const FALLBACK_SOURCE = Object.freeze({ owner: UPDATE_OWNER, repo: UPDATE_REPO });
+const FEED_URLS = Object.freeze([
+  'https://raw.githubusercontent.com/z123312873-art/hongguo-drama/main/update-feed.json',
+]);
 const RELEASES_URL = `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases`;
 const LATEST_API = `https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`;
 const LATEST_PAGE = `${RELEASES_URL}/latest`;
 
-function updateRedirectTag(location) {
-  const match = new RegExp(`^https://github\\.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/tag/(v?\\d+\\.\\d+(?:\\.\\d+)?)$`).exec(String(location || ''));
+function parseUpdateFeed(data) {
+  let value = data;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch (_) { return null; }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (value.owner !== UPDATE_OWNER || typeof value.repo !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(value.repo)) return null;
+  return { owner: value.owner, repo: value.repo };
+}
+
+function releaseUrls(source = FALLBACK_SOURCE) {
+  const owner = source?.owner || UPDATE_OWNER;
+  const repo = source?.repo || UPDATE_REPO;
+  const releases = `https://github.com/${owner}/${repo}/releases`;
+  return {
+    api: `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
+    page: `${releases}/latest`,
+    releases,
+  };
+}
+
+function updateRedirectTag(location, source = FALLBACK_SOURCE) {
+  const owner = String(source?.owner || UPDATE_OWNER).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const repo = String(source?.repo || UPDATE_REPO).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`^https://github\\.com/${owner}/${repo}/releases/tag/(v?\\d+\\.\\d+(?:\\.\\d+)?)$`).exec(String(location || ''));
   return match ? match[1] : null;
 }
 
@@ -82,7 +109,7 @@ function releaseHighlights(body) {
   return releaseSummary(body).items;
 }
 
-function availableRelease(data, currentVersion) {
+function availableRelease(data, currentVersion, source) {
   if (!data || data.draft || data.prerelease) return null;
   const next = versionParts(data.tag_name), current = versionParts(currentVersion);
   if (!next || !current) return null;
@@ -92,10 +119,10 @@ function availableRelease(data, currentVersion) {
   return {
     version: data.tag_name.replace(/^v/, '').replace(/^(\d+\.\d+)\.0$/, '$1'),
 
-    url: `${RELEASES_URL}/tag/${encodeURIComponent(data.tag_name)}`,
+    url: `${releaseUrls(source).releases}/tag/${encodeURIComponent(data.tag_name)}`,
     ...(highlights.length ? { highlights } : {}),
     ...(highlights.length && more ? { moreCount: more } : {}),
   };
 }
 
-module.exports = { availableRelease, releaseHighlights, releaseSummary, HIGHLIGHT_LIMIT, UPDATE_OWNER, UPDATE_REPO, RELEASES_URL, LATEST_API, LATEST_PAGE, updateRedirectTag };
+module.exports = { availableRelease, releaseHighlights, releaseSummary, HIGHLIGHT_LIMIT, UPDATE_OWNER, UPDATE_REPO, RELEASES_URL, LATEST_API, LATEST_PAGE, updateRedirectTag, parseUpdateFeed, releaseUrls, FEED_URLS, FALLBACK_SOURCE };

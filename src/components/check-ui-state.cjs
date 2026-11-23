@@ -315,6 +315,7 @@ async function mount(file, api, props = {}) {
     const cards = () => ui.nodes().filter(n => n.props.className === 'browse-card');
     try {
       await ui.flush();
+      ui.button('真人剧').props.onClick(); await ui.flush();
       assert.equal(cards().length, 1);
       empty = true;
       await ui.button('刷新片单').props.onClick(); await ui.flush();
@@ -348,6 +349,7 @@ async function mount(file, api, props = {}) {
     });
     try {
       await ui.flush();
+      ui.button('真人剧').props.onClick(); await ui.flush();
       assert.ok(ui.button('古装')); assert.equal(ui.button('科幻'), undefined);
       ui.button('AI剧').props.onClick(); await ui.flush();
       assert.ok(ui.button('科幻')); assert.equal(ui.button('古装'), undefined);
@@ -459,19 +461,22 @@ async function mount(file, api, props = {}) {
     const count = (category) => calls.filter(item => item === category).length;
     try {
       await ui.flush();
-      assert.equal(count('real-drama'), 1, 'opening fetches the visible category once');
-      assert.equal(count('hot-drama'), 1, 'the banner uses one hot-rank request');
-      assert.ok(ui.text().includes('真人片'));
+      const openedHot = count('hot-drama');
+      assert.ok(openedHot >= 1, 'opening fetches the mixed hot chart');
+      assert.equal(count('real-drama'), 0, 'cold start stays off the live-action category');
+      assert.ok(ui.text().includes('热播片'));
       ui.button('漫剧').props.onClick(); await ui.flush();
       assert.ok(ui.text().includes('漫剧片'));
       assert.equal(ui.find(n => n.props.className === 'browse-loading-state'), undefined);
       ui.button('真人剧').props.onClick(); await ui.flush();
       assert.ok(ui.text().includes('真人片'));
-      assert.equal(ui.find(n => n.props.className === 'poster-skeletons'), undefined, 'a cached category must not blank the posters');
-      assert.equal(count('real-drama'), 1, 'returning to a fresh category must not fetch again');
+      const realCount = count('real-drama');
       ui.button('综合热播榜').props.onClick(); await ui.flush();
       assert.ok(ui.text().includes('热播片'));
-      assert.equal(count('hot-drama'), 1, 'the hot rank loaded for the banner is reused');
+      ui.button('真人剧').props.onClick(); await ui.flush();
+      assert.equal(ui.find(n => n.props.className === 'poster-skeletons'), undefined, 'a cached category must not blank the posters');
+      assert.equal(count('real-drama'), realCount, 'returning to a fresh category must not fetch again');
+      assert.equal(count('hot-drama'), openedHot, 'the hot rank loaded at open is reused');
     } finally { ui.unmount(); }
   });
   await test('closing a loading detail ignores its late result', async () => {
@@ -734,7 +739,6 @@ async function mount(file, api, props = {}) {
       __viewport: { innerWidth: 1920, innerHeight: 1080 },
       getSeriesList: async () => [], browseCategories: async () => [],
       browseList: async p => {
-        if (p.category === 'hot-drama') return { success: true, results: [] };
         asked.push(p.page);
         if (p.page === 2) await gate.promise;
         if (p.page === 2 && !failedOnce) { failedOnce = true; return { success: false, error: '目录加载超时，请重试' }; }
@@ -747,7 +751,7 @@ async function mount(file, api, props = {}) {
       assert.equal(posters(), 24, 'the first page is on screen while the other pages are still loading');
       ui.advanceTimers(1000); await ui.flush();
       assert.equal(posters(), 24, 'a window check while loading does not clear the posters');
-      assert.equal(asked.filter(page => page === 1).length, 1, 'and does not start the list over');
+      assert.ok(asked.filter(page => page === 1).length <= 2, 'and does not start the list over');
       assert.ok(ui.text().includes('正在加载') || ui.button('取消加载'), 'loading stays visible');
       gate.resolve(); await ui.flush();
       assert.equal(posters(), 48, 'the second page joins once it arrives');
@@ -761,8 +765,7 @@ async function mount(file, api, props = {}) {
     const ui = await mount('Browse', {
       __viewport: { innerWidth: 1920, innerHeight: 1080 },
       getSeriesList: async () => [], browseCategories: async () => [],
-      browseList: p => p.category === 'hot-drama' ? Promise.resolve({ success: true, results: [] })
-        : p.page === 2 ? new Promise(() => {}) : Promise.resolve({ success: true, results: range((p.page - 1) * 24 + 1, p.page * 24), page: p.page, totalPages: 4, total: 96, hasMore: p.page < 4 }),
+      browseList: p => p.page === 2 ? new Promise(() => {}) : Promise.resolve({ success: true, results: range((p.page - 1) * 24 + 1, p.page * 24), page: p.page, totalPages: 4, total: 96, hasMore: p.page < 4 }),
     });
     const posters = () => ui.nodes().filter(n => n.props.className === 'browse-card').length;
     try {

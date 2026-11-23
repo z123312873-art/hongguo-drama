@@ -99,6 +99,7 @@ async function check() {
   assert.equal((await hema.fetchPlayUrlSingle(vid, sid)).url, 'https://media.example/720.mp4', 'app empty must still use web free-episode url');
   appMode = 'unlock';
 
+  hema.clearEpisodeCache();
   appMode = 'down';
   const webEpisodes = await hema.fetchEpisodeList(sid);
   assert.equal(webEpisodes.total, 74);
@@ -124,9 +125,11 @@ async function check() {
   assert.equal(requests.length, beforeInvalid, 'invalid identity must fail before network access');
   assert.equal((await hema.fetchPlayUrlSingle(`${sid}:999`, sid)).url, null);
   detail.bookInfoVo.bookId = '999';
+  hema.clearEpisodeCache();
   await assert.rejects(hema.fetchEpisodeList(sid));
   detail.bookInfoVo.bookId = '41000115014';
   malformedHtml = true;
+  hema.clearEpisodeCache();
   await assert.rejects(hema.fetchEpisodeList(sid));
   malformedHtml = false;
   for (const code of ['ECONNABORTED', 'ERR_BAD_RESPONSE']) {
