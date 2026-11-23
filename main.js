@@ -27,7 +27,7 @@ const watchHistory = require('./src/native/watch-history');
 const seriesSearch = require('./src/native/series-search');
 const { fitWindowBounds, getWindowScale, saveWindowZoom, initialWindowSize, revealMaximized } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
-const { availableRelease, LATEST_API, LATEST_PAGE, RELEASES_URL, updateRedirectTag } = require('./src/native/app-update');
+const { availableRelease, LATEST_PAGE, updateRedirectTag, parseUpdateFeed, releaseUrls, FEED_URLS, FALLBACK_SOURCE } = require('./src/native/app-update');
 const { fetchPublicDetails, fetchPublicRatings } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
@@ -1305,6 +1305,10 @@ ipcMain.handle('browse-list', async (_event, options) => {
   if (source === 'xifan') return { success: false, error: '西饭来源已移除，请改用红果或河马' };
   const covers = source === 'hema' ? require('./src/native/cover-preconnect') : null;
   covers?.warm?.();
+  if (source === 'hema') {
+    const openSession = require('./src/native/hema-app').ensureSession;
+    if (typeof openSession === 'function') openSession().catch(() => {});
+  }
   const listed = await require(source.startsWith('custom:') ? './src/native/custom-source' : source === 'hema' ? './src/native/hema'
     : './src/native/catalog').browseList(options, (authInfo, callback) => {
       if (matchesProxyAuth(authInfo)) callback(activeProxyAuth.username, activeProxyAuth.password);
@@ -2578,7 +2582,7 @@ function registerStreamProtocol() {
           cleanup();
           return bufferedMediaResponse(request, buffer);
         }
-        const upstream = await requestMedia(playInfo, { method: request.method, signal: controller.signal,
+        const upstream = await require('./src/native/hema-media').hedgeMedia(requestMedia, playInfo, { method: request.method, signal: controller.signal,
           headers: range ? { Range: range } : {}, validateStatus: status => [200, 206, 416].includes(status) });
         try { checkIdentity(); } catch (error) { upstream.data.destroy(); throw error; }
         entry.playInfo = playInfo;
@@ -4808,6 +4812,7 @@ function appUpdatesAllowed() {
 
 let updateRequest = null;
 let latestAppRelease = null;
+let updateSource = { ...FALLBACK_SOURCE };
 function appUpdateSupport() {
   let reason = '';
   if (IS_PREVIEW || !app.isPackaged) reason = '开发或预览版本不支持应用内安装，请使用正式安装版。';
@@ -4829,6 +4834,7 @@ function getAppUpdateInstaller() {
     appUpdateInstaller = require('./src/native/app-update-installer').createUpdateInstaller({
       updater: appUpdater,
       currentVersion: APP_VERSION,
+      getFeed: () => updateSource,
       isEnabled: () => appUpdatesAllowed(),
       installBlocker: () => {
         if (pendingUpdateOperations) return '正在处理任务或保存设置，请稍后再安装更新。';
@@ -4868,6 +4874,44 @@ ipcMain.handle('install-app-update', () => {
   if (!appUpdateInstaller) return { success: false, error: '请先完成更新下载。' };
   return appUpdateInstaller.install();
 });
+async function readUpdateSources() {
+  const found = [];
+  for (const url of FEED_URLS) {
+    try {
+      const response = await axios.get(url, {
+        timeout: 4000, maxRedirects: 0, maxContentLength: 4096,
+        headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
+        validateStatus: status => status === 200,
+      });
+      const parsed = parseUpdateFeed(response.data);
+      if (parsed && !found.some(item => item.owner === parsed.owner && item.repo === parsed.repo)) found.push(parsed);
+    } catch (_) {}
+  }
+  if (!found.some(item => item.owner === FALLBACK_SOURCE.owner && item.repo === FALLBACK_SOURCE.repo)) found.push({ ...FALLBACK_SOURCE });
+  return found;
+}
+
+async function fetchLatestPayload(source) {
+  const urls = releaseUrls(source);
+  try {
+    const response = await axios.get(urls.api, {
+      timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
+    });
+    return response.data;
+  } catch (_) {
+    const response = await axios.get(urls.page, {
+      timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
+      headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
+      validateStatus: status => status === 200 || status === 302,
+    });
+    if (response.status !== 302) return response.data;
+    const tag = updateRedirectTag(response.headers.location, source);
+    if (!tag) throw new Error('Unexpected update redirect');
+    return { tag_name: tag };
+  }
+}
+
 ipcMain.handle('check-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
   if (!appUpdatesAllowed()) {
@@ -4875,22 +4919,17 @@ ipcMain.handle('check-app-update', async event => {
     return { enabled: false, release: null };
   }
   if (!updateRequest) {
-    updateRequest = axios.get(LATEST_API, {
-      timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-    }).catch(() => axios.get(LATEST_PAGE, {
-
-      timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
-      headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-      validateStatus: status => status === 200 || status === 302,
-    }).then(response => {
-      if (response.status !== 302) return response;
-      const tag = updateRedirectTag(response.headers.location);
-      if (!tag) throw new Error('Unexpected update redirect');
-      return { data: { tag_name: tag } };
-    })).then(response => ({ release: availableRelease(response.data, APP_VERSION), error: '' }))
-      .catch(() => ({ release: null, error: '暂时无法检查更新，请检查网络后重试。' }))
-      .finally(() => { updateRequest = null; });
+    updateRequest = (async () => {
+      const targets = await readUpdateSources();
+      for (const source of targets) {
+        try {
+          const data = await fetchLatestPayload(source);
+          updateSource = source;
+          return { release: availableRelease(data, APP_VERSION, source), error: '' };
+        } catch (_) {}
+      }
+      return { release: null, error: '暂时无法检查更新，请检查网络后重试。' };
+    })().finally(() => { updateRequest = null; });
   }
   const result = await updateRequest;
   const enabled = appUpdatesAllowed();
@@ -4901,7 +4940,7 @@ ipcMain.handle('open-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || !appUpdatesAllowed()) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
-  try { await shell.openExternal(latestAppRelease?.url || LATEST_PAGE); return { success: true }; }
+  try { await shell.openExternal(latestAppRelease?.url || releaseUrls(updateSource).page || LATEST_PAGE); return { success: true }; }
   catch { return { success: false, error: '无法打开浏览器，请稍后重试' }; }
 });
 

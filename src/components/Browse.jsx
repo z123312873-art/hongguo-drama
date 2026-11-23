@@ -31,7 +31,7 @@ const CATALOG_REFRESH_CHECK_MS = 60 * 1000;
 
 
 const EAGER_POSTERS = 12;
-const HEMA_COVER_HEDGE_MS = 1500;
+const HEMA_COVER_HEDGE_MS = 400;
 const MATCHED_PAGE_SOURCES = new Set(['hema']);
 const PREFETCH_DELAY_MS = 400;
 const warmedCovers = new Map();
@@ -77,8 +77,7 @@ function writeSnapshot(source, category, genre, page, entry) {
   }
   try {
     if (source === 'hongguo' && !genre && Number(page) === 1 && globalThis.localStorage) {
-      if (category === 'hot-drama') writeDiscoverShelf(localStorage, { hero: entry.results });
-      if (category === 'real-drama' && stored === entry) writeDiscoverShelf(localStorage, { posters: entry.results });
+      if (category === 'hot-drama') writeDiscoverShelf(localStorage, { hero: entry.results, posters: entry.results });
     }
   } catch {                                             }
 }
@@ -202,7 +201,8 @@ function Browse({ onNavigate, active = true }) {
   const { sources: mediaSources, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const sourceIds = mediaSources.map(item => item.id).join('|');
   const [categories, setCategories] = useState(DEFAULT_BROWSE_CATEGORIES);
-  const [category, setCategory] = useState('real-drama');
+  const [category, setCategory] = useState('hot-drama');
+  const hongguoCategory = useRef('hot-drama');
   const [genre, setGenre] = useState('');
   const [tagLabels, setTagLabels] = useState([]);
   const [genreCatalog, setGenreCatalog] = useState({});
@@ -225,7 +225,10 @@ function Browse({ onNavigate, active = true }) {
   const [page, setPage] = useState(1);
   const [completion, setCompletion] = useState('all');
 
-  const [results, setResults] = useState(() => savedShelf().posters);
+  const [results, setResults] = useState(() => {
+    const posters = savedShelf().posters;
+    return posters.some(item => Number(item.rank) > 0) ? posters : [];
+  });
   const [meta, setMeta] = useState({ total: 0, totalPages: 0, genres: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -450,7 +453,7 @@ function Browse({ onNavigate, active = true }) {
         setMeta(cached.meta || { total: 0, totalPages: 0, genres: [] });
         setSourceUrl(cached.sourceUrl || fallbackUrl);
         keepGenres(cached.meta?.genres);
-      } else if (!(source === 'hongguo' && cat === 'real-drama' && !gen && Number(pg) === 1)) {
+      } else if (!(source === 'hongguo' && cat === 'hot-drama' && !gen && Number(pg) === 1)) {
         setResults([]);
         setMeta({ total: 0, totalPages: 0, genres: [] });
         setSourceUrl(fallbackUrl);
@@ -575,7 +578,7 @@ function Browse({ onNavigate, active = true }) {
     setError('');
     setHeroItems([]);
     setHeroReady(false);
-    if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory('real-drama'); }
+    if (!sourceIds.split('|').includes(source)) { setSource('hongguo'); setCategory(hongguoCategory.current || 'hot-drama'); }
   }, [sourceIds, source, invalidateList, stopPrefetch, closeDetail]);
 
   useEffect(() => {
@@ -798,18 +801,21 @@ function Browse({ onNavigate, active = true }) {
     invalidateList();
     stopPrefetch();
     closeDetail();
+    if (source === 'hongguo') hongguoCategory.current = category;
+    const firstCategory = next === 'hongguo' ? (hongguoCategory.current || 'hot-drama') : 'real-drama';
     setSource(next);
-    setCategory('real-drama');
+    setCategory(firstCategory);
     setGenre('');
     setTagLabels([]);
     setPage(1);
-    showSnapshot(next, 'real-drama', '', 1);
+    showSnapshot(next, firstCategory, '', 1);
   };
 
   const switchCategory = (slug) => {
     if (slug === category) return;
     invalidateList();
     stopPrefetch();
+    if (source === 'hongguo') hongguoCategory.current = slug;
     setCategory(slug);
     setGenre('');
     setTagLabels([]);
@@ -1106,7 +1112,7 @@ function Browse({ onNavigate, active = true }) {
                     {formatPublicScore(item.rating ?? ratings[String(item.series_id)]) && <span className="browse-score"><span aria-hidden="true">★</span>{formatPublicScore(item.rating ?? ratings[String(item.series_id)])}</span>}
                   </div>}
                   {source === 'hema' ? (
-                    <CoverImage src={item.cover} alt={item.series_title} eager={position < EAGER_POSTERS} hedgeMs={HEMA_COVER_HEDGE_MS} />
+                    <CoverImage src={item.cover} alt={item.series_title} eager={position < EAGER_POSTERS} hedgeMs={HEMA_COVER_HEDGE_MS} stallMs={2500} />
                   ) : item.cover ? (
                     <img src={item.cover} alt={item.series_title} loading={position < EAGER_POSTERS ? 'eager' : 'lazy'} decoding="async" fetchpriority={position < EAGER_POSTERS ? 'high' : 'auto'} />
                   ) : (

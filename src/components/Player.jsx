@@ -630,6 +630,17 @@ function Player({ target, onNavigate, onSeriesSelected, active = true, portrait 
     v.playbackRate = playbackRateRef.current;
   }, [loading, canPlay, videoSrc, playbackVersion]);
 
+  useEffect(() => {
+    if (!canPlay || sawPicture || !String(activeSeriesId).startsWith('hema:')) return undefined;
+    const version = playbackVersion;
+    const timer = setTimeout(() => {
+      const video = videoRef.current;
+      if (version !== mediaVersion.current || !video || video.readyState >= 2) return;
+      video.load();
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [canPlay, sawPicture, playbackVersion, activeSeriesId, videoSrc]);
+
   const playableCount = episodes.filter((e) => e.status === 'completed').length;
 
 

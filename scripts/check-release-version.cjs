@@ -3,7 +3,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { availableRelease, releaseSummary } = require('../src/native/app-update');
 
-const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1', '4.6.3', '4.6.5', '4.7', '4.7.5'];
+const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1', '4.6.3', '4.6.5', '4.7', '4.7.5', '4.8'];
 let checks = 0;
 for (let current = 0; current < ordered.length; current++) {
   for (let next = 0; next < ordered.length; next++) {
@@ -248,17 +248,17 @@ for (const tag of ['installer-4.7-traditional-pre', 'v4.7-beta.1', 'v4.7.0-rc.1'
 assert.equal(availableRelease({ tag_name: 'v4.7', prerelease: true }, '4.6.5'), null);
 assert.equal(availableRelease({ tag_name: 'v4.7', draft: true }, '4.6.5'), null);
 assert.equal(availableRelease({ tag_name: 'v4.6.5' }, '4.6.5'), null);
-assert.equal(pkg.version, '4.7.5');
-assert.equal(publicVersion, '4.7.5');
-for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) assert(!artifact.includes('4.6'));
-assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.7.5-win-x64-setup'));
+assert.equal(pkg.version, '4.8.0');
+assert.equal(publicVersion, '4.8');
+for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) assert(!artifact.includes('4.7'));
+assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.8-win-x64-setup'));
 assert.equal(availableRelease({ tag_name: 'v4.7' }, '4.7.5'), null, 'a 4.7.5 install is not offered the older 4.7 formal release');
 for (const current of ['4.7', '4.7.0']) {
   assert.equal(availableRelease({ tag_name: 'v4.7.5' }, current).version, '4.7.5', `${current} can be offered 4.7.5`);
   assert.equal(availableRelease({ tag_name: 'installer-4.7.5-traditional-pre', prerelease: true }, current), null, 'the 4.7.5 pre-release tag is not the latest formal update');
 }
 const pre475Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.7.5.md'), 'utf8'), '## 更新摘要');
-const pre475Job = workflow.slice(workflow.indexOf('  publish-release-4-7-5-pre:'));
+const pre475Job = workflow.slice(workflow.indexOf('  publish-release-4-7-5-pre:'), workflow.indexOf('  publish-release-4-8:'));
 const pre475Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(pre475Job);
 assert(pre475Heredoc, 'The 4.7.5 pre-release job must build its notes from a heredoc');
 const pre475Body = pre475Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
@@ -282,3 +282,31 @@ const prompted = availableRelease({ tag_name: 'v4.7.5', body: pre475Body }, '4.7
 assert.equal(prompted.version, '4.7.5');
 assert.deepEqual(prompted.highlights, pre475Doc, 'Installed 4.7 can be shown this pre-release summary');
 assert(!prompted.moreCount);
+const formal48Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.8.md'), 'utf8'), '## 更新摘要');
+const readme48 = bulletsAfter(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), '4.8 正式版：');
+assert.deepEqual(formal48Doc, [
+  '修復紅果在線播放',
+  '優化在線播放取源',
+  '河馬短劇在線優化並加快拉取',
+], 'The 4.8 summary is exactly these three lines, in this order');
+assert.deepEqual(readme48, formal48Doc, 'README must copy the 4.8 summary');
+assert(formal48Doc.every(item => Array.from(item).length <= 24));
+const formal48Job = workflow.slice(workflow.indexOf('  publish-release-4-8:'));
+assert(workflow.indexOf('  publish-release-4-8:') > workflow.indexOf('  publish-release-4-7-5-pre:'));
+assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.8-release-'\)/);
+assert.match(formal48Job, /tag=v4\.8\n/);
+assert.match(formal48Job, /--draft --title "4\.8 正式版"/);
+assert.match(formal48Job, /--prerelease=false --draft=false --latest\n/);
+assert.match(formal48Job, /\.assets \| length'\)" = "4"/);
+assert.match(formal48Job, /\)" = "\$tag"/);
+assert.match(formal48Job, /downloader-4\.8-win-x64-setup\.exe/);
+assert.ok(formal48Job.includes("'^version: 4\\.8\\.0$'"));
+assert.doesNotMatch(formal48Job, /release delete|delete-asset|cleanup-tag|--clobber|--latest=false|--prerelease /);
+const formal48Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(formal48Job);
+assert(formal48Heredoc, 'The 4.8 formal release job must build its notes from a heredoc');
+const formal48Body = formal48Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+assert.deepEqual(releaseSummary(formal48Body).items, formal48Doc);
+for (const current of ['4.7.0', '4.7.5']) assert.equal(availableRelease({ tag_name: 'v4.8' }, current).version, '4.8');
+assert.equal(availableRelease({ tag_name: 'v4.7' }, '4.7.5'), null);
+assert.equal(availableRelease({ tag_name: 'installer-4.7.5-traditional-pre', prerelease: true }, '4.7.5'), null);
+assert.equal(availableRelease({ tag_name: 'v4.8', prerelease: true }, '4.7.5'), null);
