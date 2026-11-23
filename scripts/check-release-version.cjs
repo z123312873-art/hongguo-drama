@@ -3,7 +3,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { availableRelease, releaseSummary } = require('../src/native/app-update');
 
-const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1', '4.6.3', '4.6.5', '4.7'];
+const ordered = ['1.7', '1.8', '1.9', '1.71', '1.74', '1.75', '1.75.1', '1.76', '1.99', '1.100', '2.0', '2.9', '3.0', '3.1', '3.2', '3.3', '3.4', '4.0', '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.6.1', '4.6.3', '4.6.5', '4.7', '4.7.5'];
 let checks = 0;
 for (let current = 0; current < ordered.length; current++) {
   for (let next = 0; next < ordered.length; next++) {
@@ -217,7 +217,7 @@ assert.deepEqual(formal47Doc, [
 ], 'The 4.7 summary is exactly these seven lines, in this order');
 assert.deepEqual(readme47, formal47Doc, 'README must copy the 4.7 summary');
 assert(formal47Doc.every(item => Array.from(item).length <= 24), 'Installed 4.0 clients show 4.7 summary lines without clipping');
-const formal47Job = workflow.slice(workflow.indexOf('  publish-release-4-7:'));
+const formal47Job = workflow.slice(workflow.indexOf('  publish-release-4-7:'), workflow.indexOf('  publish-release-4-7-5-pre:'));
 assert(workflow.indexOf('  publish-release-4-7:') > workflow.indexOf('  publish-release-4-6-5-pre:'));
 assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7-release-'\)/);
 assert.match(formal47Job, /tag=v4\.7\n/);
@@ -236,7 +236,8 @@ assert.deepEqual(releaseSummary(formal47Body).items, formal47Doc, 'The 4.7 forma
 const formal47Release = availableRelease({ tag_name: 'v4.7', body: formal47Body.replace(/\$\w+/g, 'x') }, '4.0.0');
 assert.deepEqual(formal47Release.highlights, formal47Doc);
 assert(!formal47Release.moreCount);
-assert.match(workflow, /HONGGUO_SKIP_PLAYBACK: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7-release-'\)/);
+assert.match(workflow, /HONGGUO_SKIP_PLAYBACK: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7\.5-pre-'\)/);
+assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7-release-'\)/);
 for (const current of ['4.0.0', '4.1.0', '4.3.0', '4.5.0', '4.6.0', '4.6.1', '4.6.3', '4.6.5']) {
   assert.equal(availableRelease({ tag_name: 'v4.7' }, current).version, '4.7', `${current} is offered 4.7`);
   assert.equal(availableRelease({ tag_name: '4.7.0' }, current).version, '4.7', `${current} accepts the 4.7.0 manifest`);
@@ -247,7 +248,40 @@ for (const tag of ['installer-4.7-traditional-pre', 'v4.7-beta.1', 'v4.7.0-rc.1'
 assert.equal(availableRelease({ tag_name: 'v4.7', prerelease: true }, '4.6.5'), null);
 assert.equal(availableRelease({ tag_name: 'v4.7', draft: true }, '4.6.5'), null);
 assert.equal(availableRelease({ tag_name: 'v4.6.5' }, '4.6.5'), null);
-assert.equal(pkg.version, '4.7.0');
-assert.equal(publicVersion, '4.7');
+assert.equal(pkg.version, '4.7.5');
+assert.equal(publicVersion, '4.7.5');
 for (const artifact of [pkg.build.artifactName, pkg.build.portable.artifactName, pkg.build.nsis.artifactName]) assert(!artifact.includes('4.6'));
-assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.7-win-x64-setup'));
+assert.ok(JSON.stringify(pkg.build).includes('hongguo-downloader-4.7.5-win-x64-setup'));
+assert.equal(availableRelease({ tag_name: 'v4.7' }, '4.7.5'), null, 'a 4.7.5 install is not offered the older 4.7 formal release');
+for (const current of ['4.7', '4.7.0']) {
+  assert.equal(availableRelease({ tag_name: 'v4.7.5' }, current).version, '4.7.5', `${current} can be offered 4.7.5`);
+  assert.equal(availableRelease({ tag_name: 'installer-4.7.5-traditional-pre', prerelease: true }, current), null, 'the 4.7.5 pre-release tag is not the latest formal update');
+}
+const pre475Doc = bulletsAfter(fs.readFileSync(path.join(__dirname, '../docs/release-4.7.5.md'), 'utf8'), '## 更新摘要');
+const pre475Job = workflow.slice(workflow.indexOf('  publish-release-4-7-5-pre:'));
+const pre475Heredoc = /notes=\$\(cat <<EOF\n([\s\S]*?)\n\s*EOF\n/.exec(pre475Job);
+assert(pre475Heredoc, 'The 4.7.5 pre-release job must build its notes from a heredoc');
+const pre475Body = pre475Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+assert.deepEqual(releaseSummary(pre475Body).items, pre475Doc, 'The 4.7.5 pre-release must publish the documented summary');
+assert.deepEqual(pre475Doc, [
+  '修復紅果在線播放出現「暫時無法取得本集片源」',
+  '本集片源改由新的播放連線取得，取到即可接著看',
+  '一條連線沒有片源時，會再試其他播放連線',
+  '多條連線都沒有片源時，仍會改走原本的備用取址',
+  '畫質順序、目錄與搜尋維持不變',
+], 'The 4.7.5 summary is exactly these five lines, in this order');
+assert.equal(pre475Doc.length, 5, 'The 4.7.5 summary is exactly five points');
+assert(pre475Doc.every(item => Array.from(item).length <= 72), 'Each 4.7.5 summary line fits the update window limit');
+assert.match(pre475Job, /tag=installer-4\.7\.5-traditional-pre/);
+assert.match(pre475Job, /--prerelease --latest=false --title "4\.7\.5 預發佈"/);
+assert.match(pre475Job, /downloader-4\.7\.5-win-x64-setup\.exe/);
+assert.match(pre475Job, /downloader-4\.7\.5-win-x64\.zip/);
+assert.ok(pre475Job.includes("'^version: 4\\.7\\.5$'"));
+assert.match(pre475Job, /\)" != "\$tag"/, 'The 4.7.5 pre-release must never become the latest release');
+assert.doesNotMatch(pre475Job, /--latest(?!=false)|prerelease=false|cleanup-tag|release delete /);
+assert.match(workflow, /startsWith\(github\.ref, 'refs\/heads\/windows\/4\.7\.5-pre-'\)/);
+assert(workflow.indexOf('  publish-release-4-7-5-pre:') > workflow.indexOf('  publish-release-4-7:'));
+const prompted = availableRelease({ tag_name: 'v4.7.5', body: pre475Body }, '4.7.0');
+assert.equal(prompted.version, '4.7.5');
+assert.deepEqual(prompted.highlights, pre475Doc, 'Installed 4.7 can be shown this pre-release summary');
+assert(!prompted.moreCount);
