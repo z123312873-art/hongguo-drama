@@ -264,13 +264,9 @@ assert(pre475Heredoc, 'The 4.7.5 pre-release job must build its notes from a her
 const pre475Body = pre475Heredoc[1].split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
 assert.deepEqual(releaseSummary(pre475Body).items, pre475Doc, 'The 4.7.5 pre-release must publish the documented summary');
 assert.deepEqual(pre475Doc, [
-  '修復紅果在線播放出現「暫時無法取得本集片源」',
-  '本集片源改由新的播放連線取得，取到即可接著看',
-  '一條連線沒有片源時，會再試其他播放連線',
-  '多條連線都沒有片源時，仍會改走原本的備用取址',
-  '畫質順序、目錄與搜尋維持不變',
-], 'The 4.7.5 summary is exactly these five lines, in this order');
-assert.equal(pre475Doc.length, 5, 'The 4.7.5 summary is exactly five points');
+  '修復紅果在線播放',
+], 'The 4.7.5 summary is exactly this one line');
+assert.equal(pre475Doc.length, 1, 'The 4.7.5 summary is exactly one point');
 assert(pre475Doc.every(item => Array.from(item).length <= 72), 'Each 4.7.5 summary line fits the update window limit');
 assert.match(pre475Job, /tag=installer-4\.7\.5-traditional-pre/);
 assert.match(pre475Job, /--prerelease --latest=false --title "4\.7\.5 預發佈"/);
